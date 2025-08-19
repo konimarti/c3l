@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+
+# Copyright (C) 2025 Koni Marti <koni.marti@gmail.com>. All Rights Reserved.
+# This file is licensed under the MIT.
+
+set -o posix
+set -o pipefail
+
+[[ ! -z "$DEBUGC3L" ]] && set -x
+
+C3C="c3c"
+SED="${SED:-sed --posix}"
+PROJECT="project.json"
+RECORDS=".c3l.deps"
+GITARGS=( "--depth 1" "--recurse-submodules" )
+#
+# Utility functions
+#
+git_clone() {
+	local root_dir="$1"
+	local repo_url="$2"
+	local output_dir="$3"
+	local tag_name
+	[[ ! -z "$tag_name" ]] && tag_name="--branch $4"
+	if [[ -z "$LOCALREPO" ]]; then
+		git -C "$root_dir" clone ${GITARGS[@]} $tag_name "$repo_url" "$output_dir"
+		info "git repo created from ${repo_url}"
+	else
+		cp -r "$LOCALREPO" "$root_dir/$output_dir"
+		info "Use local repo $LOCALREPO"
+	fi
+}
+pack_library() {
+	local archive="$1";
+	local directory="$C3LTMPDIR/$2"
+	(cd "$directory" && zip -r0 $archive "." >/dev/null) ||
+		die "failed to pack library"
+	info "library packed as $repo_name"
+}
+add_dependency() {
+	check_project_or_die
+	load_dependencies
+	local dep="$(basename $1 .c3l)";
+	[[ "${#DEPENDENCIES[@]}" == 0 ]] && comma="" || comma=","
+	[[ " ${DEPENDENCIES[@]} " =~ " ${dep} " ]] ||
+		$SED -i "/\"dependencies\"/{s/\[/\[ \"$dep\"$comma /}" "$PROJECT"
+	info "add $dep as a dependency in $PROJECT"
+}
+load_dependencies() {
+	check_project_or_die
+	IFS="," read -ra DEPENDENCIES <<< "$($C3C project view | grep "dependencies" | cut -d':' -f2)"
+}
+load_searchpaths() {
+	check_project_or_die
+	IFS="," read -ra SEARCHPATHS <<< "$($C3C project view | grep "search paths" | cut -d':' -f2)"
+}
+get_searchpath() {
+	load_searchpaths
+	$SED 's/^ *//;s/ *$//;' <<< "${SEARCHPATHS[0]}"
+}
+make_target_dir() {
+	local target_dir="$1"
+	[[ -n "$target_dir" ]] || die "no directory found in dependency-search-paths"
+	[[ -d "$target_dir" ]] || (mkdir "$target_dir" && info "directory $target_dir created")
+}
+hash_directory() {
+	local root_dir="$1"
+	local ouput_dir="$2"
+	HASH=$(tar -C $root_dir -cf - --sort=name $output_dir | sha256sum)
+}
+check_project_or_die() {
+	[[ -f "$PROJECT" ]] || die "'$PROJECT' not found. Did you create a c3c project?"
+}
+yesno() {
+	[[ -t 0 ]] || return 0
+	local response
+	read -r -p "$1 [y/N] " response
+	[[ $response == [yY] ]] || exit 1
+}
+get_record() {
+	echo $([[ -f "$RECORDS" ]] && grep "^${repo_name}" "$RECORDS" 2>/dev/null)
+}
+valid_sem_var() {
+	[[ "$1" =~ ^[v0-9]+\.[0-9]+\.[0-9]+ ]]
+}
+info() {
+	printf "\e[32m%s\e[0m %s\n" "[INFO]" "$@"
+}
+warn() {
+	printf "\e[33m%s\e[0m %s\n" "[WARN]" "$@"
+}
+die() {
+	printf "\e[31m%s\e[0m %s\n" "[ERROR]" "$@" >&2
+	exit 1
+}
+tmpdir() {
+	[[ -n $C3LTMPDIR ]] && return
+	local template="$PROGRAM.XXXXXXXXXXXXX"
+	C3LTMPDIR="$(mktemp -d "$template")"
+	remove_tmpfile() {
+		rm -rf "$C3LTMPDIR"
+	}
+	trap remove_tmpfile EXIT
+}
+
+#
+# Subcommand functions
+#
+
+cmd_version() {
+	cat <<-_EOF
+	******************************************
+	*       c3l: the C3 library manager      *
+	*                                        *
+	*                v0.0.0                  *
+	*                                        *
+	*              Koni Marti                *
+	*          koni.marti@gmail.com          *
+	*                                        *
+	******************************************
+	_EOF
+}
+
+cmd_usage() {
+	cmd_version
+	echo
+	cat <<-_EOF
+	Usage:
+	    $PROGRAM fetch repo_url [tag_version]
+		Fetch a C3 library from repo_url and add it to the C3 project.
+		An optional tag version can be specified (i.e. v1.0.0).
+	    $PROGRAM remove libname
+		Remove the C3 library from the C3 project.
+	    $PROGRAM update libname [tag_version]
+		Update the C3 library to a new tagged release. If no tag
+		version was saved during fetching, the library is updated to
+		the newest commit.
+	    $PROGRAM list
+	        List the installed libraries.
+	    $PROGRAM help
+	        Show this text.
+	    $PROGRAM version
+	        Show version information.
+
+	More information may be found in the c3l(1) man page.
+	_EOF
+}
+
+cmd_fetch() {
+	[[ $# -eq 0 ]] && die "Usage: $PROGRAM $COMMAND repo_url [tag_version]"
+	local repo_url="$1"
+	local repo_name="$(basename $1 .git)"
+	local tag_name="$2"
+	local archive_name="${repo_name}.zip"
+	local target_dir=$(get_searchpath)
+
+	[[ -n "$(get_record $repo_name)" ]] && die "$repo_name is already installed. If you want to remove it, run 'c3l remove $repo_name'"
+
+	tmpdir # defines $C3LTMPDIR
+	make_target_dir $target_dir
+	git_clone "$C3LTMPDIR" "$repo_url" "$repo_name" "$tag_name"
+	pack_library "$archive_name" "$repo_name"
+
+	mv "$C3LTMPDIR/$repo_name/$archive_name" "$target_dir/$repo_name"
+	info "library installed at $target_dir/$repo_name"
+
+	add_dependency "$repo_name"
+	echo "$repo_name $target_dir/$repo_name $repo_url $tag_name" >> "$RECORDS"
+}
+
+cmd_remove() {
+	[[ $# -eq 0 ]] && die "Usage: $PROGRAM $COMMAND libname [tag_version]"
+	local repo_name="$1"
+	local dep="$(basename $repo_name .c3l)"
+	local record=( )
+	read -ra record <<< "$(get_record $repo_name)"
+
+	if [[ -z "$record" ]]; then
+		local target_dir=$(get_searchpath)
+		[[ -n "$target_dir" ]] || die "no directory found in dependency-search-paths"
+		[[ -d "$target_dir" ]] || die "directory $target_dir does not exist"
+		[[ -f "$target_dir/$repo_name" ]] || die "$target_dir/$repo_name does not exist"
+		rm "$target_dir/$repo_name" 2>/dev/null && info "$target_dir/$repo_name removed"
+	else
+		[[ -f "${record[1]}" ]] || die "${record[1]} does not exist"
+		rm "${record[1]}" 2>/dev/null && info "${record[1]} removed"
+	fi
+
+	$SED -i "/\"dependencies\"/s/\"${dep}\"[, ]*//" "$PROJECT" && info "$PROJECT updated" || warn "failed to update $PROJECT"
+	$SED -i "/^$repo_name/d" "$RECORDS" && info "records updated" || warn "failed to update $RECORDS"
+}
+
+cmd_update() {
+	die "update: not implemented yet"
+}
+
+cmd_list() {
+	local rem
+	while read -ra line; do
+		rem="${line[@]:1}"
+		printf "\e[92m%s\e[0m %s\n" "${line[0]}" "$rem"
+	done < "$RECORDS"
+}
+
+#
+# END subcommand functions
+#
+
+PROGRAM="${0##*/}"
+COMMAND="$1"
+
+case "$1" in
+	help|--help) shift;		cmd_usage "$@" ;;
+	version|--version) shift;	cmd_version "$@" ;;
+	fetch|f|get|g) shift;		cmd_fetch "$@" ;;
+	update|u) shift;		cmd_update "$@" ;;
+	list|ls) shift;		        cmd_list "$@" ;;
+	delete|rm|remove) shift;	cmd_remove "$@" ;;
+	*)				cmd_usage "$@" ;;
+esac
+exit 0
