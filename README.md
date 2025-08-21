@@ -104,12 +104,12 @@ fn void main() => (void)hex::dump_bytes("C3 is great");
 EOF
 
 # Add the required library
-c3l fetch https://github.com/konimarti/hex.c3l
+c3l fetch https://github.com/konimarti/hex.c3l v0.1.1
 
 # Now run the app
 c3l run
 
-# Update a library to a specific tag
+# Update a library to the newest release
 c3l update hex
 
 # List installed libraries

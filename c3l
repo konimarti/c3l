@@ -3,7 +3,6 @@
 # Copyright (C) 2025 Koni Marti <koni.marti@gmail.com>. All Rights Reserved.
 # This file is licensed under the MIT.
 
-set -o posix
 set -o pipefail
 
 [[ ! -z "$DEBUGC3L" ]] && set -x
@@ -12,7 +11,7 @@ C3C="c3c"
 SED="${SED:-sed --posix}"
 PROJECT="project.json"
 RECORDS=".c3l.deps"
-GITARGS=( "--depth 1" "--recurse-submodules" )
+GITARGS=( "--depth 1" "--quiet" "--recurse-submodules" )
 #
 # Utility functions
 #
@@ -22,8 +21,9 @@ git_clone() {
 	local output_dir="$3"
 	[[ -n "$4" ]] && GITARGS+=( "--branch $4" )
 	if [[ -z "$LOCALREPO" ]]; then
-		git -C "$root_dir" clone ${GITARGS[@]} "$repo_url" "$output_dir"
-		info "git repo created from ${repo_url}"
+		git -C "$root_dir" clone ${GITARGS[@]} "$repo_url" "$output_dir" 2>/dev/null \
+		&& info "git repo created from $repo_url" \
+		|| die "failed to create $repo_url"
 	else
 		cp -r "$LOCALREPO" "$root_dir/$output_dir"
 		info "Use local repo $LOCALREPO"
@@ -47,11 +47,11 @@ add_dependency() {
 }
 load_dependencies() {
 	check_project_or_die
-	IFS="," read -ra DEPENDENCIES <<< "$($C3C project view | grep "dependencies" | cut -d':' -f2)"
+	IFS=, read -ra DEPENDENCIES <<< "$($C3C project view | grep "dependencies" | cut -d':' -f2)"
 }
 load_searchpaths() {
 	check_project_or_die
-	IFS="," read -ra SEARCHPATHS <<< "$($C3C project view | grep "search paths" | cut -d':' -f2)"
+	IFS=, read -ra SEARCHPATHS <<< "$($C3C project view | grep "search paths" | cut -d':' -f2)"
 }
 get_searchpath() {
 	load_searchpaths
@@ -79,42 +79,59 @@ yesno() {
 get_record() {
 	echo $([[ -f "$RECORDS" ]] && grep "^${repo_name} " "$RECORDS" 2>/dev/null)
 }
-valid_sem_var() {
-	[[ "$1" =~ ^[v0-9]+\.[0-9]+\.[0-9]+ ]]
+valid_semver() {
+	[[ "$1" =~ ^v?[0-9]+(\.[0-9]+){1,2}(-[0-9A-Za-z.-]+)?$ ]]
 }
-split_sem_var() {
-	echo "$(tr 'v.' ' ' <<< "$1")"
+cmp_semver() {
+	[[ $# != 2 ]] && die "cmp_semver: expects two arguments"
+	local v1="$1"
+	local v2="$2"
+
+	# Strip leading 'v' if present
+	v1="${v1#v}"
+	v2="${v2#v}"
+
+	# Split into arrays
+	IFS=. read -r v1_major v1_minor v1_patch <<<"$v1"
+	IFS=. read -r v2_major v2_minor v2_patch <<<"$v2"
+
+	# Default missing parts to 0
+	v1_minor=${v1_minor:-0}
+	v1_patch=${v1_patch:-0}
+	v2_minor=${v2_minor:-0}
+	v2_patch=${v2_patch:-0}
+
+	# Compare major
+	if (( 10#$v1_major > 10#$v2_major )); then
+	    echo 1; return
+	elif (( 10#$v1_major < 10#$v2_major )); then
+	    echo -1; return
+	fi
+
+	# Compare minor
+	if (( 10#$v1_minor > 10#$v2_minor )); then
+	    echo 1; return
+	elif (( 10#$v1_minor < 10#$v2_minor )); then
+	    echo -1; return
+	fi
+
+	# Compare patch
+	if (( 10#$v1_patch > 10#$v2_patch )); then
+	    echo 1; return
+	elif (( 10#$v1_patch < 10#$v2_patch )); then
+	    echo -1; return
+	fi
+
+	# Equal
+	echo 0
 }
-cmp_sem_var() {
-	# Returns 1 if left > right, 0 if left == right, -1 if left < right
-	[[ $# != 2 ]] && die "cmp_sem_var: expects two arguments"
-	local l=( )
-	local r=( )
-	read -ra l <<< $(split_sem_var "$1")
-	read -ra r <<< $(split_sem_var "$2")
-
-	# Compare major version
-	if [[ ${l[0]} > ${r[0]} ]]; then
-		return 1;
-	elif [[ ${l[0]} < ${r[0]} ]]; then
-		return -1;
-	fi
-
-	# Compare minor version
-	if [[ ${l[1]} > ${r[1]} ]]; then
-		return 1;
-	elif [[ ${l[1]} < ${r[1]} ]]; then
-		return -1;
-	fi
-
-	# Compare patch number
-	if [[ ${l[2]} > ${r[2]} ]]; then
-		return 1;
-	elif [[ ${l[2]} < ${r[2]} ]]; then
-		return -1;
-	fi
-
-	return 0;
+get_highest_semver() {
+	local repo_url="$1"
+	git ls-remote --tags --sort="v:refname" "$repo_url" \
+		| awk -F/ '{print $3}' \
+		| grep -v '\^{}' \
+		| grep -E '^v?[0-9]+(\.[0-9]+){1,2}(-[0-9A-Za-z.-]+)?$' \
+		| tail -n 1
 }
 info() {
 	printf "\e[32m%s\e[0m %s\n" "[INFO]" "$@"
@@ -180,7 +197,7 @@ cmd_usage() {
 }
 
 cmd_fetch() {
-	[[ $# -eq 0 ]] && die "Usage: $PROGRAM $COMMAND repo_url [tag]"
+	(( $# == 0 )) && die "Usage: $PROGRAM $COMMAND repo_url [tag]"
 	local repo_url="$1"
 	local repo_name="$(basename $1 .git)"
 	local tag_name="$2"
@@ -202,7 +219,7 @@ cmd_fetch() {
 }
 
 cmd_remove() {
-	[[ $# -eq 0 ]] && die "Usage: $PROGRAM $COMMAND libname"
+	(( $# == 0 )) && die "Usage: $PROGRAM $COMMAND libname"
 	local repo_name="$1"
 	local dep="$(basename $repo_name .c3l)"
 	local record=( )
@@ -224,55 +241,37 @@ cmd_remove() {
 }
 
 cmd_update() {
-	[[ $# != 1 ]] && die "Usage: $PROGRAM $COMMAND libname"
+	(( $# == 0 )) && die "Usage: $PROGRAM $COMMAND libname"
 	local repo_name="$1"
 	local dep="$(basename $repo_name .c3l)"
 	local record=( )
 	read -ra record <<< "$(get_record $repo_name)"
-	local repo_url, tag, len
+	local repo_url tag len
 	len="${#record[@]}"
 
-	[[ $len -eq 0 ]] && die "no record found for $repo_name"
-	[[ $len -ge 2 ]] && repo_url="${record[2]}"
-	[[ $len -ge 3 ]] && tag="${record[3]}"
+	(( $len == 0 )) && die "no record found for $repo_name"
+	(( $len >= 2 )) && repo_url="${record[2]}"
+	(( $len >= 3 )) && tag="${record[3]}"
 
-	valid_sem_var $tag || die "$tag appears not to be a valid semantic version"
+	valid_semver $tag || die "$tag appears not to be a valid semantic version"
 
 	if [[ -n "$tag" && -n "$repo_url" ]]; then
-		echo "tag found"
-		local newest_tag="$(get_newest_remote_tag)"
-		valid_sem_var $newest_tag || die "$newest_tag appears not to be a valid semantic version"
-		if [[ $(cmp_sem_var "$newest_tag" "$tag") > 0 ]]; then
+		local newest_tag="$(get_highest_semver $repo_url)"
+		valid_semver $newest_tag || die "$newest_tag appears not to be a valid semantic version"
+		if (( $(cmp_semver "$newest_tag" "$tag") > 0 )); then
 			cmd_remove $repo_name
-			cmd_fetch $repo_url $repo_name $newest_tag
+			cmd_fetch $repo_url $newest_tag
 			info "$repo_name updated: $tag ==> $newest_tag"
 		else
 			info "nothing to do here"
 		fi
 	elif [[ -n "$repo_url" ]]; then
 		cmd_remove $repo_name
-		cmd_fetch $repo_url $repo_name
+		cmd_fetch $repo_url
 		info "$repo_name updated"
 	else
 		die "neither a 'repo_url' nor a 'tag' was found in $RECORDS"
 	fi
-
-	# Logic
-	#   - lookup record for libname -> get repo_url and tag
-	#   	- IF tag defined:
-	#   		* get list of tags from repo (git ls-remote)
-	#   		* IF newest tag > tag
-	#   			* rm    libname
-	#   			* fetch libname new_tag
-	#   		* ELSE
-	#   			* nothing to no new tag found (if you want to
-	#   			change tags, rm and fetch again)
-	#
-	#   	- ELSE tag NOT defined:
-	#   	  	* rm    libname
-	#   	  	* fetch libname
-	#
-	#
 }
 
 cmd_list() {
@@ -295,8 +294,8 @@ case "$1" in
 	version|--version) shift;	cmd_version "$@" ;;
 	fetch|f|get|g) shift;		cmd_fetch "$@" ;;
 	update|u) shift;		cmd_update "$@" ;;
-	list|ls) shift;		        cmd_list "$@" ;;
-	delete|rm|remove) shift;	cmd_remove "$@" ;;
+	list|ls|l) shift;		cmd_list "$@" ;;
+	delete|remove|rm|r) shift;	cmd_remove "$@" ;;
 	*)				cmd_usage "$@" ;;
 esac
 exit 0

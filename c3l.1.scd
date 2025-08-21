@@ -22,8 +22,7 @@ the libraries.
 
 # COMANDS
 
-*fetch* _repo_url_ [ _tag_ ]++
-
+*fetch* _repo_url_ [ _tag_ ]
 	Fetch a C3 library from a git repository at _repo_url_. An optional
 	_tag_name_ can used to fetch a specific version. Note that this allows
 	the *update* command to work properly.
@@ -34,8 +33,11 @@ the libraries.
 	See also _LOCALREPO_ for using a
 	locally stored repository.
 
-*remove* _repo_name_++
+*update* _repo_name_
+	Update the library to the newest tagged release, updating the metadata in
+	_.c3l.deps_ and _project.json_.
 
+*remove* _repo_name_
 	Remove the library _repo_name_ and also update _project.json_ and
 	_.c3l.deps_.
 
