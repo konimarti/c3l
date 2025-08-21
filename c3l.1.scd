@@ -22,7 +22,7 @@ the libraries.
 
 # COMANDS
 
-*fetch* _repo_url_ [ _tag_name_ ]++
+*fetch* _repo_url_ [ _tag_ ]++
 
 	Fetch a C3 library from a git repository at _repo_url_. An optional
 	_tag_name_ can used to fetch a specific version. Note that this allows

@@ -20,10 +20,9 @@ git_clone() {
 	local root_dir="$1"
 	local repo_url="$2"
 	local output_dir="$3"
-	local tag_name
-	[[ ! -z "$tag_name" ]] && tag_name="--branch $4"
+	[[ -n "$4" ]] && GITARGS+=( "--branch $4" )
 	if [[ -z "$LOCALREPO" ]]; then
-		git -C "$root_dir" clone ${GITARGS[@]} $tag_name "$repo_url" "$output_dir"
+		git -C "$root_dir" clone ${GITARGS[@]} "$repo_url" "$output_dir"
 		info "git repo created from ${repo_url}"
 	else
 		cp -r "$LOCALREPO" "$root_dir/$output_dir"
@@ -78,10 +77,44 @@ yesno() {
 	[[ $response == [yY] ]] || exit 1
 }
 get_record() {
-	echo $([[ -f "$RECORDS" ]] && grep "^${repo_name}" "$RECORDS" 2>/dev/null)
+	echo $([[ -f "$RECORDS" ]] && grep "^${repo_name} " "$RECORDS" 2>/dev/null)
 }
 valid_sem_var() {
 	[[ "$1" =~ ^[v0-9]+\.[0-9]+\.[0-9]+ ]]
+}
+split_sem_var() {
+	echo "$(tr 'v.' ' ' <<< "$1")"
+}
+cmp_sem_var() {
+	# Returns 1 if left > right, 0 if left == right, -1 if left < right
+	[[ $# != 2 ]] && die "cmp_sem_var: expects two arguments"
+	local l=( )
+	local r=( )
+	read -ra l <<< $(split_sem_var "$1")
+	read -ra r <<< $(split_sem_var "$2")
+
+	# Compare major version
+	if [[ ${l[0]} > ${r[0]} ]]; then
+		return 1;
+	elif [[ ${l[0]} < ${r[0]} ]]; then
+		return -1;
+	fi
+
+	# Compare minor version
+	if [[ ${l[1]} > ${r[1]} ]]; then
+		return 1;
+	elif [[ ${l[1]} < ${r[1]} ]]; then
+		return -1;
+	fi
+
+	# Compare patch number
+	if [[ ${l[2]} > ${r[2]} ]]; then
+		return 1;
+	elif [[ ${l[2]} < ${r[2]} ]]; then
+		return -1;
+	fi
+
+	return 0;
 }
 info() {
 	printf "\e[32m%s\e[0m %s\n" "[INFO]" "$@"
@@ -126,13 +159,13 @@ cmd_usage() {
 	echo
 	cat <<-_EOF
 	Usage:
-	    $PROGRAM fetch repo_url [tag_version]
+	    $PROGRAM fetch repo_url [tag]
 		Fetch a C3 library from repo_url and add it to the C3 project.
 		An optional tag version can be specified (i.e. v1.0.0).
 	    $PROGRAM remove libname
 		Remove the C3 library from the C3 project.
-	    $PROGRAM update libname [tag_version]
-		Update the C3 library to a new tagged release. If no tag
+	    $PROGRAM update libname
+		Update the C3 library to the newest tagged release. If no tag
 		version was saved during fetching, the library is updated to
 		the newest commit.
 	    $PROGRAM list
@@ -147,7 +180,7 @@ cmd_usage() {
 }
 
 cmd_fetch() {
-	[[ $# -eq 0 ]] && die "Usage: $PROGRAM $COMMAND repo_url [tag_version]"
+	[[ $# -eq 0 ]] && die "Usage: $PROGRAM $COMMAND repo_url [tag]"
 	local repo_url="$1"
 	local repo_name="$(basename $1 .git)"
 	local tag_name="$2"
@@ -169,7 +202,7 @@ cmd_fetch() {
 }
 
 cmd_remove() {
-	[[ $# -eq 0 ]] && die "Usage: $PROGRAM $COMMAND libname [tag_version]"
+	[[ $# -eq 0 ]] && die "Usage: $PROGRAM $COMMAND libname"
 	local repo_name="$1"
 	local dep="$(basename $repo_name .c3l)"
 	local record=( )
@@ -191,7 +224,55 @@ cmd_remove() {
 }
 
 cmd_update() {
-	die "update: not implemented yet"
+	[[ $# != 1 ]] && die "Usage: $PROGRAM $COMMAND libname"
+	local repo_name="$1"
+	local dep="$(basename $repo_name .c3l)"
+	local record=( )
+	read -ra record <<< "$(get_record $repo_name)"
+	local repo_url, tag, len
+	len="${#record[@]}"
+
+	[[ $len -eq 0 ]] && die "no record found for $repo_name"
+	[[ $len -ge 2 ]] && repo_url="${record[2]}"
+	[[ $len -ge 3 ]] && tag="${record[3]}"
+
+	valid_sem_var $tag || die "$tag appears not to be a valid semantic version"
+
+	if [[ -n "$tag" && -n "$repo_url" ]]; then
+		echo "tag found"
+		local newest_tag="$(get_newest_remote_tag)"
+		valid_sem_var $newest_tag || die "$newest_tag appears not to be a valid semantic version"
+		if [[ $(cmp_sem_var "$newest_tag" "$tag") > 0 ]]; then
+			cmd_remove $repo_name
+			cmd_fetch $repo_url $repo_name $newest_tag
+			info "$repo_name updated: $tag ==> $newest_tag"
+		else
+			info "nothing to do here"
+		fi
+	elif [[ -n "$repo_url" ]]; then
+		cmd_remove $repo_name
+		cmd_fetch $repo_url $repo_name
+		info "$repo_name updated"
+	else
+		die "neither a 'repo_url' nor a 'tag' was found in $RECORDS"
+	fi
+
+	# Logic
+	#   - lookup record for libname -> get repo_url and tag
+	#   	- IF tag defined:
+	#   		* get list of tags from repo (git ls-remote)
+	#   		* IF newest tag > tag
+	#   			* rm    libname
+	#   			* fetch libname new_tag
+	#   		* ELSE
+	#   			* nothing to no new tag found (if you want to
+	#   			change tags, rm and fetch again)
+	#
+	#   	- ELSE tag NOT defined:
+	#   	  	* rm    libname
+	#   	  	* fetch libname
+	#
+	#
 }
 
 cmd_list() {

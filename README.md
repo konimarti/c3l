@@ -60,10 +60,10 @@ c3l fetch https://github.com/username/libname v1.0.0
 ### 3. Updating a Library
 
 ```bash
-c3l update libname v1.2.3
+c3l update libname
 ```
 
-- Updates the library to the specified tag, updating the metadata in
+- Updates the library to the newest tagged release, updating the metadata in
   `.c3l.deps`.
 
 
@@ -110,7 +110,7 @@ c3l fetch https://github.com/konimarti/hex.c3l
 c3l run
 
 # Update a library to a specific tag
-c3l update hex v2.0.0
+c3l update hex
 
 # List installed libraries
 c3l list
