@@ -24,8 +24,8 @@ c3c build 2>/dev/null
 c3c build
 build/app
 echo "\n -- show -- "
-../../c3l show
+../../c3l list
 echo "\n -- remove -- "
-../../c3l rm hex.c3l
+../../c3l remove hex.c3l
 cd $cwd
 
