@@ -22,6 +22,7 @@ making maintenance and versioning of your project dependencies effortless.
     - Fetches the library from the specified remote repository.
     - Updates your project files to include the new dependency.
     - Writes an entry to `.c3l.deps` with version, source, and other meta information.
+    - Pulls in all dependencies from `.c3l.deps` (if the libraries are not check in the repo)
 - Updates and removals use the data in `.c3l.deps` to ensure reliability.
 - Updating a dependency (to a new tagged release) is as easy as running a
   single c3l command.
@@ -75,6 +76,16 @@ c3l remove libname
 
 - Uninstalls the library and removes its entry from `.c3l.deps` and
   `project.json`.
+
+
+### %. Pulling all Libraries
+
+```bash
+c3l pull
+```
+
+- Fetches all the libraries from  `.c3l.deps`. Usually done when the project is
+  cloned and only `.c3l.deps` is version controlled but no the libraries.
 
 ***
 

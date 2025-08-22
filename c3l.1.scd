@@ -41,6 +41,12 @@ the libraries.
 	Remove the library _repo_name_ and also update _project.json_ and
 	_.c3l.deps_.
 
+*pull*
+	Pull all the fetched libraries from the .c3l.deps file. Use
+	this command when only the .c3l.deps file is in the repo but
+	not the libraries and you want to pull all the dependencies.
+
+
 *list*
 	List all installed libraries that are stored in _.c3l.deps_.
 

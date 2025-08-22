@@ -42,6 +42,9 @@ c3c build 2>/dev/null
 c3c build
 build/app
 
+echo " -- pull -- "
+rm lib/hex.c3l && $C3L p
+
 echo " -- remove -- "
 $C3L r hex.c3l
 cd $CWD

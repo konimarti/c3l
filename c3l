@@ -185,6 +185,10 @@ cmd_usage() {
 		Update the C3 library to the newest tagged release. If no tag
 		version was saved during fetching, the library is updated to
 		the newest commit.
+	    $PROGRAM pull
+		Pull all the fetched libraries from the .c3l.deps file. Use
+		this command when only the .c3l.deps file is in the repo but
+		not the libraries and you want to pull all the dependencies.
 	    $PROGRAM list
 	        List the installed libraries.
 	    $PROGRAM help
@@ -204,7 +208,8 @@ cmd_fetch() {
 	local archive_name="${repo_name}.zip"
 	local target_dir=$(get_searchpath)
 
-	[[ -n "$(get_record $repo_name)" ]] && die "$repo_name is already installed. If you want to remove it, run 'c3l remove $repo_name'"
+	[[ -n "$(get_record $repo_name)" ]] && [[ ! -v PULLONLY ]] && die "$repo_name is already installed. If you want to remove it, run 'c3l remove $repo_name'"
+	[[ "$repo_url" =~ ^https?:// ]] || warn "repo_url does not start with http[s]://"
 
 	tmpdir # defines $C3LTMPDIR
 	make_target_dir $target_dir
@@ -214,8 +219,10 @@ cmd_fetch() {
 	mv "$C3LTMPDIR/$repo_name/$archive_name" "$target_dir/$repo_name"
 	info "library installed at $target_dir/$repo_name"
 
-	add_dependency "$repo_name"
-	echo "$repo_name $target_dir/$repo_name $repo_url $tag_name" >> "$RECORDS"
+	if [[ ! -v PULLONLY ]]; then
+		add_dependency "$repo_name"
+		echo "$repo_name $target_dir/$repo_name $repo_url $tag_name" >> "$RECORDS"
+	fi
 }
 
 cmd_remove() {
@@ -250,10 +257,10 @@ cmd_update() {
 	len="${#record[@]}"
 
 	(( $len == 0 )) && die "no record found for $repo_name"
-	(( $len >= 2 )) && repo_url="${record[2]}"
-	(( $len >= 3 )) && tag="${record[3]}"
+	(( $len >= 3 )) && repo_url="${record[2]}"
+	(( $len >= 4 )) && tag="${record[3]}"
 
-	if [[ -n "$tag" && -n "$repo_url" ]]; then
+	if [[ -n "$tag" ]] && [[ -n "$repo_url" ]]; then
 		local newest_tag="$(get_highest_semver $repo_url)"
 		valid_semver $tag || die "$tag appears not to be a valid semantic version"
 		valid_semver $newest_tag || die "$newest_tag appears not to be a valid semantic version"
@@ -271,6 +278,32 @@ cmd_update() {
 	else
 		die "neither a 'repo_url' nor a 'tag' was found in $RECORDS"
 	fi
+}
+
+cmd_pull() {
+	(( $# != 0 )) && die "Usage: $PROGRAM $COMMAND"
+	while read -ra record
+	do
+		local repo_url tag len
+		len="${#record[@]}"
+		(( $len == 0 )) && continue
+		(( $len >= 1 )) && repo_name="${record[0]}"
+		(( $len >= 3 )) && repo_url="${record[2]}"
+		(( $len >= 4 )) && tag="${record[3]}"
+
+		[[ -f "${record[1]}" ]] && warn "${record[1]} already exists; do nothing" && continue
+
+		PULLONLY=1
+		if [[ -n "$tag" ]] && [[ -n "$repo_url" ]]; then
+			cmd_fetch $repo_url $tag
+		elif [[ -n "$repo_url" ]]; then
+			cmd_fetch $repo_url
+		else
+			warn "failed to pull $repo_name"
+		fi
+		unset PULLONLY
+		info "$repo_name pulled"
+	done < "$RECORDS"
 }
 
 cmd_list() {
@@ -294,6 +327,7 @@ case "$1" in
 	fetch|f|get|g) shift;		cmd_fetch "$@" ;;
 	update|u) shift;		cmd_update "$@" ;;
 	list|ls|l) shift;		cmd_list "$@" ;;
+	pull|p) shift;		        cmd_pull "$@" ;;
 	delete|remove|rm|r) shift;	cmd_remove "$@" ;;
 	*)				cmd_usage "$@" ;;
 esac
