@@ -1,4 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+# Copyright (C) 2025 Koni Marti <koni.marti@gmail.com>. All Rights Reserved.
+# This file is licensed under the MIT.
 
 tmpdir() {
 	local template="c3l.test.XXXXXXXXXXXXX"

@@ -253,17 +253,16 @@ cmd_update() {
 	(( $len >= 2 )) && repo_url="${record[2]}"
 	(( $len >= 3 )) && tag="${record[3]}"
 
-	valid_semver $tag || die "$tag appears not to be a valid semantic version"
-
 	if [[ -n "$tag" && -n "$repo_url" ]]; then
 		local newest_tag="$(get_highest_semver $repo_url)"
+		valid_semver $tag || die "$tag appears not to be a valid semantic version"
 		valid_semver $newest_tag || die "$newest_tag appears not to be a valid semantic version"
 		if (( $(cmp_semver "$newest_tag" "$tag") > 0 )); then
 			cmd_remove $repo_name
 			cmd_fetch $repo_url $newest_tag
 			info "$repo_name updated: $tag ==> $newest_tag"
 		else
-			info "nothing to do here"
+			info "nothing to do here ($newest_tag <= $tag)"
 		fi
 	elif [[ -n "$repo_url" ]]; then
 		cmd_remove $repo_name
