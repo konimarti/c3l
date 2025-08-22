@@ -162,7 +162,7 @@ cmd_version() {
 	******************************************
 	*       c3l: the C3 library manager      *
 	*                                        *
-	*                v0.0.0                  *
+	*                v0.2.0                  *
 	*                                        *
 	*              Koni Marti                *
 	*          koni.marti@gmail.com          *
