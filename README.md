@@ -11,7 +11,7 @@ making maintenance and versioning of your project dependencies effortless.
 
 - **Fetch libraries**: Download and integrate remote C3 libraries into your project with a single command.
 - **Simple updates**: Easily update libraries to newer versions, using tagged releases.
-- **Safe removal**: Uninstall libraries cleanly without touching `project.json`.
+- **Safe removal**: Uninstall libraries cleanly without manually touching `project.json`.
 - **Seamless workflow**: Keeps your project files organized and in sync with your dependencies.
 
 ***
@@ -32,7 +32,7 @@ making maintenance and versioning of your project dependencies effortless.
 
 ### 1. Installation
 
-Download or install c3l:
+Download and install c3l:
 ```bash
 git clone https://github.com/konimarti/c3l
 sudo make install
@@ -41,7 +41,7 @@ sudo make install
 `c3l` will be installed in `/usr/local/bin` by default and the man page in
 `/usr/local/man/`.
 
-If you want to install it in at a different location, set the `PREFIX`
+If you want to install it to a different location, set the `PREFIX`
 variable when running `make install`:
 ```bash
 make PREFIX=~/.local/ install
@@ -90,8 +90,8 @@ tag—is stored in a `.c3l.deps` file at your project root. This enables:
 
 ## Example Workflow for a New C3 Project
 
-Note that you need to have the [C3 compiler](https://github.com/c3-lang/c3c)
-`c3c` installed in order to run this example.
+Note that you need the [C3 compiler](https://github.com/c3-lang/c3c)
+`c3c` to run this example.
 
 ```bash
 # Create a new C3 project
