@@ -282,6 +282,7 @@ cmd_update() {
 
 cmd_pull() {
 	(( $# != 0 )) && die "Usage: $PROGRAM $COMMAND"
+	[[ ! -f "$RECORDS" ]] && info "Nothing to pull. Are you in the correct directory?" && exit 1
 	while read -ra record
 	do
 		local repo_url tag len
@@ -307,6 +308,7 @@ cmd_pull() {
 }
 
 cmd_list() {
+	[[ ! -f "$RECORDS" ]] && info "Nothing to list. Did you fetch a library?" && exit 1
 	local rem
 	while read -ra line; do
 		rem="${line[@]:1}"
