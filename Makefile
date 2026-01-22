@@ -4,13 +4,18 @@ MANDIR?=$(PREFIX)/share/man
 SCDOC=scdoc
 .DEFAULT_GOAL=all
 
+all: c3l
+
 c3l.1: c3l.1.scd
 	$(SCDOC) < $< > $@
 
-all: c3l c3l.1
+doc: c3l.1
 
 test: test.sh
 	./test.sh
+
+gitconfig:
+	ln -s contrib/pre-commit .git/hooks/pre-commit
 
 clean:
 	rm c3l.1
@@ -24,4 +29,4 @@ uninstall:
 	rm -f $(BINDIR)/c3l
 	rm -f $(MANDIR)/man1/c3l.1
 
-.PHONY: all clean install uninstall test
+.PHONY: all clean doc gitconfig install uninstall test
