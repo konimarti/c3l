@@ -180,26 +180,32 @@ cmd_usage() {
 	cat <<-_EOF
 	Usage:
 	    $PROGRAM fetch repo_url [tag]
-		Fetch a C3 library from repo_url and add it to the C3 project.
-		An optional tag version can be specified (i.e. v1.0.0).
+	 	Fetch a C3 library from repo_url and add it to the C3 project.
+	 	An optional tag version can be specified (i.e. v1.0.0).
+
 	    $PROGRAM remove libname
-		Remove the C3 library from the C3 project.
+	 	Remove the C3 library from the C3 project.
+
 	    $PROGRAM update libname
-		Update the C3 library to the newest tagged release. If no tag
-		version was saved during fetching, the library is updated to
-		the newest commit.
+	 	Update the C3 library to the newest tagged release. If no tag
+	 	version was saved during fetching, the library is updated to
+	 	the newest commit.
+
 	    $PROGRAM pull
-		Pull all the fetched libraries from the .c3l.deps file. Use
-		this command when only the .c3l.deps file is in the repo but
-		not the libraries and you want to pull all the dependencies.
+	 	Pull all the fetched libraries from the .c3l.deps file. Use
+	 	this command when only the .c3l.deps file is in the repo but
+	 	not the libraries and you want to pull all the dependencies.
+
 	    $PROGRAM list
 	        List the installed libraries.
+
 	    $PROGRAM help
 	        Show this text.
+
 	    $PROGRAM version
 	        Show version information.
 
-	More information may be found in the c3l(1) man page.
+	More information can be found in the c3l(1) man page.
 	_EOF
 }
 
