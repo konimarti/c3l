@@ -38,7 +38,6 @@ echo " -- list -- "
 $C3L l
 
 echo " -- run app -- "
-c3c build 2>/dev/null
 c3c build
 build/app
 
