@@ -9,6 +9,7 @@ set -o pipefail
 
 C3C="c3c"
 SED="${SED:-sed --posix}"
+ZIP="${ZIP:-zip}"
 PROJECT="project.json"
 RECORDS=".c3l.deps"
 GITARGS=( "--depth 1" "--quiet" "--recurse-submodules" )
@@ -32,6 +33,8 @@ git_clone() {
 pack_library() {
 	local archive="$1";
 	local directory="$C3LTMPDIR/$2"
+	command -v "$ZIP" >/dev/null 2>&1 ||
+		die "zip is required to pack libraries but it's not installed."
 	(cd "$directory" && zip -r0 $archive "." >/dev/null) ||
 		die "failed to pack library"
 	info "library packed as $repo_name"
