@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-
-# Copyright (C) 2025 Koni Marti <koni.marti@gmail.com>. All Rights Reserved.
+# Copyright (C) 2025-2026 Koni Marti <koni.marti@gmail.com>. All Rights Reserved.
 # This file is licensed under the MIT.
 
 set -o pipefail
@@ -9,7 +8,8 @@ set -o pipefail
 
 C3C="c3c"
 SED="${SED:-sed --posix}"
-ZIP="${ZIP:-zip -r9}"
+ZIP="${ZIP:-zip}"
+ZIPOPT="${ZIPOPT:--r6}"
 PROJECT="project.json"
 RECORDS=".c3l.deps"
 GITARGS=( "--depth 1" "--quiet" "--recurse-submodules" )
@@ -35,7 +35,7 @@ pack_library() {
 	local directory="$C3LTMPDIR/$2"
 	command -v "${ZIP%% *}" >/dev/null 2>&1 ||
 		die "zip is required to pack libraries but it's not installed."
-	(cd "$directory" && $ZIP $archive "." >/dev/null) ||
+	(cd "$directory" && ${ZIP} "$ZIPOPT" "$archive" "." >/dev/null) ||
 		die "failed to pack library"
 	info "library packed as $repo_name"
 }
@@ -175,9 +175,10 @@ cmd_version() {
 }
 
 cmd_usage() {
-	cmd_version
 	echo
 	cat <<-_EOF
+	c3l - C3 library manager
+
 	Usage:
 	    $PROGRAM fetch repo_url [tag]
 	 	Fetch a C3 library from repo_url and add it to the C3 project.
@@ -225,7 +226,8 @@ cmd_fetch() {
 	git_clone "$C3LTMPDIR" "$repo_url" "$repo_name" "$tag_name"
 	pack_library "$archive_name" "$repo_name"
 
-	mv "$C3LTMPDIR/$repo_name/$archive_name" "$target_dir/$repo_name"
+	mv "$C3LTMPDIR/$repo_name/$archive_name" "$target_dir/$repo_name" ||
+		die "Move $archive_name to $target_dir/$repo_name failed."
 	info "library installed at $target_dir/$repo_name"
 
 	if [[ ! -v PULLONLY ]]; then
