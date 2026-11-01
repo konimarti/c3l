@@ -246,6 +246,30 @@ check "restored" test -f lib/gitlib.c3l
 c3l update >/dev/null 2>&1; eq "git update rc" $? 0
 has "updated to v0.2.0" "v0.2.0" "$(grep '^gitlib' c3l.lock)"
 check_not "no such tag fails" c3l add "file://$GR" v9.9.9
+check "archive is stored (deterministic)" python3 -c "import zipfile;z=zipfile.ZipFile('lib/gitlib.c3l');assert all(i.compress_type==0 for i in z.infolist())"
+h0="$(sha256sum lib/gitlib.c3l | cut -d' ' -f1)"; rm lib/gitlib.c3l; c3l sync >/dev/null 2>&1
+eq "rebuilt archive is byte-identical" "$(sha256sum lib/gitlib.c3l | cut -d' ' -f1)" "$h0"
+rm lib/gitlib.c3l; TZ=Asia/Tokyo c3l sync >/dev/null 2>&1
+eq "identical under another TZ" "$(sha256sum lib/gitlib.c3l | cut -d' ' -f1)" "$h0"
+cp c3l.lock "$WORK/lock.bak"; sed -i '/^gitlib/s/tree:[0-9a-f]*/tree:0000/' c3l.lock; rm lib/gitlib.c3l
+out="$(c3l sync 2>&1)"; eq "hash mismatch on restore fails" $? 1
+has "mismatch explains" "re-lock with" "$out"
+check_not "no file left behind" test -f lib/gitlib.c3l
+cp "$WORK/lock.bak" c3l.lock; c3l sync >/dev/null 2>&1
+check "lock holds a content hash" grep -q '^gitlib.*tree:' c3l.lock
+# any other zip of the same contents verifies (different compression and timezone)
+c3l_commit="$(sed -n 's/^gitlib.*commit:\([0-9a-f]*\).*/\1/p' c3l.lock)"
+rm lib/gitlib.c3l; TZ=America/Los_Angeles git -C "$GR" archive --format=zip -6 -o "$PWD/lib/gitlib.c3l" "$c3l_commit"
+check "verify accepts a differently written zip" c3l verify
+# but changed contents are detected
+python3 -c "
+import zipfile,shutil
+src,dst='lib/gitlib.c3l','$WORK/mod.zip'
+zi=zipfile.ZipFile(src); zo=zipfile.ZipFile(dst,'w')
+for i in zi.infolist(): zo.writestr(i, zi.read(i.filename)+(b'x' if i.filename=='src/gitlib.c3' else b''))
+zo.close(); shutil.copy(dst,src)"
+check_not "verify detects changed contents" c3l verify
+c3l sync >/dev/null 2>&1; check "sync restores modified lib" c3l verify
 git -C "$GR" branch -q dev "$C1"
 c3l remove gitlib >/dev/null 2>&1
 c3l add "file://$GR@HEAD" >/dev/null 2>&1; eq "add @HEAD rc" $? 0

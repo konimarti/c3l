@@ -45,8 +45,11 @@ a \fIref\fR the highest semantic version tag is used, or HEAD if there are none.
 The ref is resolved to a commit, which is what the lockfile pins.\& \fBoutdated\fR
 and \fBupdate\fR follow the tip of \fBHEAD\fR and of branches; tags and commits stay
 put.\& In scp-style URLs (\fIgit@host:path\fR) the \fB@\fR only starts a ref after the
-last \fB/\fR.\& The library is built with \fBgit archive\fR, so no \fI.\&git\fR is included.\&
-The repository needs a \fImanifest.\&json\fR at its root.\&
+last \fB/\fR.\& The library is built with \fBgit archive\fR, so no \fI.\&git\fR is included.\& The lockfile
+records a hash of the library'\&s \fBcontents\fR (a git tree id), not of the zip bytes,
+so it does not depend on the compression, timestamps or git version of the
+machine that wrote the archive.\& \fBverify\fR and \fBsync\fR compare contents the same
+way.\& This needs \fBgit\fR and \fBunzip\fR.\& The repository needs a \fImanifest.\&json\fR at its root.\&
 .P
 .RE
 \fBremove\fR \fIname\fR
@@ -111,12 +114,12 @@ Tab separated, one library per line, sorted by name:
 # c3l\&.lock v1
 @registry	https://www\&.c3pkg\&.eu
 box2d	registry	jecokef902/box2d	1\&.0\&.0	sha256:4945\&.\&.\&.	sha256:4945\&.\&.\&.
-hex	git	https://github\&.com/konimarti/hex\&.c3l	v0\&.1\&.1	commit:3fa9\&.\&.\&.	sha256:77ce\&.\&.\&.
+hex	git	https://github\&.com/konimarti/hex\&.c3l	v0\&.1\&.1	commit:3fa9\&.\&.\&.	tree:9c1e\&.\&.\&.
 .fi
 .RE
 .P
 Columns: name, kind (\fIregistry\fR or \fIgit\fR), source, version, pin (checksum or
-commit), SHA-256 of the installed file.\&
+commit), SHA-256 of the installed file (registry) or git tree id of its contents (git).\&
 .P
 .SH ENVIRONMENT VARIABLES
 .P
