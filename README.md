@@ -1,144 +1,67 @@
 # c3l
 
-**c3l** is a **library manager for C3 projects**. It streamlines the process of
-fetching, updating, and managing C3 libraries from remote repositories. With
-c3l, all metadata about your libraries is tracked in a simple `.c3l.deps` file,
-making maintenance and versioning of your project dependencies effortless.
+Reproducible dependencies for C3 projects, on top of `c3c fetch`.
 
-*No more manual cloning with c3l!*
+`c3c fetch` installs a library. It does not remember which version, does not
+check the checksum, and cannot update or remove. **c3l adds exactly that**:
 
-## Features
-
-- **Fetch libraries**: Download and integrate remote C3 libraries into your project with a single command.
-- **Simple updates**: Easily update libraries to newer versions, using tagged releases.
-- **Safe removal**: Uninstall libraries cleanly without manually touching `project.json`.
-- **Seamless workflow**: Keeps your project files organized and in sync with your dependencies.
-
-***
-
-## How It Works
-
-- When you use c3l to add a library to your project, it:
-    - Fetches the library from the specified remote repository.
-    - Updates your project files to include the new dependency.
-    - Writes an entry to `.c3l.deps` with some meta information.
-- Updates and removals use the data in `.c3l.deps` to ensure reliability.
-- Updating a dependency (to a new tagged release) is as easy as running a
-  single c3l command.
-
-***
-
-## Getting Started
-
-### 1. Installation
-
-Download and install c3l:
-```bash
-git clone https://github.com/konimarti/c3l
-cd c3l
-sudo make install
+```sh
+c3l init app && cd app              # c3c init + c3l.lock
+c3l add tonis2/vk                   # c3c fetch, checksum verified, locked
+c3l add https://github.com/you/lib  # or straight from git, commit pinned
+c3l outdated                        # what is newer?
+c3l update                          # update, rolled back on any failure
+c3l sync --frozen                   # CI: restore exactly what c3l.lock says
 ```
 
-`c3l` will be installed in `/usr/local/bin` by default and the man page in
-`/usr/local/man/`.
+- **Lockfile** `c3l.lock`: one line per library (version, SHA-256 or commit). Diff-friendly, commit it.
+- **Verified**: the registry's checksum is compared with the downloaded file. A mismatch means rollback, not a warning.
+- **Safe**: every install is transactional (library file and `project.json` are restored on failure).
+- **Registry**: default [www.c3pkg.eu](https://www.c3pkg.eu); any `c3c fetch` registry works (`--registry`, `$C3L_REGISTRY`, or `@registry` in the lockfile).
+- **One file**: a single bash script. Needs `c3c` with `fetch` (0.8.6 or a nightly), `awk`, `sha256sum` or `shasum`; `git` for git sources.
 
-If you want to install to a different location, set the `PREFIX`
-variable:
-```bash
-make PREFIX=~/.local/ install
+## Install
+
+```sh
+git clone https://github.com/konimarti/c3l && cd c3l
+make PREFIX=~/.local install        # or just copy ./c3l into your PATH
 ```
 
-### 2. Adding a Library
+## Commands
 
-```bash
-c3l fetch https://github.com/username/libname v1.0.0
-```
+| | |
+|---|---|
+| `init [name]` | create `c3l.lock` (and a project with `c3c init name`) |
+| `add <ns/name[@ver]>` | install from the registry |
+| `add <git-url> [tag]` | install from git (highest semver tag, or the given one) |
+| `remove <name>` | remove file, `dependencies` entry and lock line |
+| `list` | libraries and state: `ok`, `modified`, `missing`, `untracked` |
+| `verify` | check files against the lock, exit 1 on problems |
+| `outdated`, `update [--dry-run] [name...]` | newer versions, update them |
+| `sync [--frozen]` | restore from the lock; `--frozen` fails if lock and project disagree |
+| `search <text\|tag:x>`, `info <ns/name>` | registry lookups |
+| `migrate` | convert a c3l 0.x `.c3l.deps` |
 
-- Fetches the specified C3 library and registers it in `.c3l.deps` and
-  `project.json`.
+Libraries are stored as `.c3l` zip files in the first `dependency-search-paths`
+entry. Commit them, or ignore them and run `c3l sync` after cloning.
 
+## Why not just `c3c fetch`?
 
-### 3. Updating a Library
+You can. c3l is for when you also want to know *which* version you have, be
+sure it is the *same bytes* everywhere, and update on purpose. What was
+decided and why is in [docs/DESIGN.md](docs/DESIGN.md).
 
-```bash
-c3l update libname
-```
+## Upgrading from c3l 0.x
 
-- Updates the library to the newest tagged release, updating the metadata in
-  `.c3l.deps`.
+0.x cloned a git repository, zipped it (including `.git/`) and edited
+`project.json` with `sed`. 1.0 uses `c3c fetch`, builds git libraries with
+`git archive`, and reads the project only through `c3c project view`.
+Run `c3l migrate` once. `LOCALREPO` is gone; `file://` URLs and `--registry`
+cover testing.
 
+## Tests
 
-### 4. Removing a Library
+`make test` runs an offline suite (a static fake registry and local git
+repositories). `LIVE=1 make test` adds a smoke test against www.c3pkg.eu.
 
-```bash
-c3l remove libname
-```
-
-- Uninstalls the library and removes its entry from `.c3l.deps` and
-  `project.json`.
-
-
-### 5. Pulling all Libraries
-
-```bash
-c3l pull
-```
-
-- Fetches all libraries from  `.c3l.deps`. This is only required
-  when a project is freshly cloned and only `.c3l.deps` is present.
-
-***
-
-## The `.c3l.deps` File
-
-Some relevant dependency information—including name, source URL, current version or
-tag—is stored in a `.c3l.deps` file at your project root. This enables:
-
-- Easy auditing of all dependencies in use
-- Clean removal and easy updating
-
-***
-
-## Example Workflow for a New C3 Project
-
-You need the [C3 compiler](https://github.com/c3-lang/c3c)
-`c3c` to run this example.
-
-```bash
-# Create a new C3 project
-c3c init app && cd app
-
-# Update main.c3
-cat <<EOF > src/main.c3
-import encoding::hex;
-fn void main() => (void)hex::dump_bytes("C3 is great");
-EOF
-
-# Add the required library
-c3l fetch https://github.com/konimarti/hex.c3l v0.1.1
-
-# Now run the app
-c3c run
-
-# Update a library to the newest release
-c3l update hex
-
-# List installed libraries
-c3l list
-
-# Remove a library
-c3l remove hex
-```
-
-***
-
-## License
-
-MIT. See `LICENSE` for full text.
-
-***
-
-## Contributing
-
-Contributions welcome! Please open an issue or submit a pull request to get started.
-
+MIT. See LICENSE.
