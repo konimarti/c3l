@@ -209,7 +209,14 @@ PROJECT=project.json
 check "add when key is missing" deps_edit add first
 eq "created" "$(deps_list | tr '\n' ' ')" "first "
 
-#
+section "registry under a base path, with trailing slash"
+mkdir -p "$REG/c3/v1"; python3 "$HERE/fakereg.py" "$REG/c3/v1" publish acme/zed 1.0.0 >/dev/null
+newproj p7
+out="$(c3l --registry "$C3L_REGISTRY/c3/v1/" add acme/zed 2>&1)"; eq "base path rc" $? 0
+has "registry stored without trailing slash" "@registry	$C3L_REGISTRY/c3/v1$" "$(cat c3l.lock)"
+check "later commands use the locked registry" env -u C3L_REGISTRY "$C3L" outdated
+check "verify" c3l verify
+
 section "git source"
 GR="$WORK/gitlib"; mkdir -p "$GR/src"; cd "$GR" || exit 1
 git init -q . && git config commit.gpgsign false

@@ -45,6 +45,27 @@ make PREFIX=~/.local install        # or just copy ./c3l into your PATH
 Libraries are stored as `.c3l` zip files in the first `dependency-search-paths`
 entry. Commit them, or ignore them and run `c3l sync` after cloning.
 
+## Works with `c3c fetch` and its registry protocol
+
+c3l does not have its own registry format. It speaks the `c3c fetch` protocol
+and calls `c3c` for every registry install, so anything `c3c fetch` can use,
+c3l can use, and the other way round.
+
+- **Registry:** a plain HTTP server (or a directory of static files). c3l needs the two requests c3c itself makes:
+  `GET /info/<ns>/<name>` (JSON) and `GET /download/<ns>/<name>@<version>` (the `.c3l` zip).
+  The URL is passed to c3c as `--fetch-url`; give it without a trailing slash (c3l strips one), a base path such as `https://example.org/c3/v1` works.
+- **Version and checksum:** c3l reads `Latest:` and `Checksum: sha256:<hex>` from `c3c fetch-info`, always installs an *explicit* version (c3c does not know `@latest`), and compares the downloaded file with the checksum.
+  If a registry publishes no checksum, c3l warns and records the downloaded file (trust on first use).
+- **Optional, not required:** `/index.json` (needed only by `c3c fetch-list`) and `GET /search?q=&tag=` (used by `c3l search`, e.g. on www.c3pkg.eu). Without `/search`, `c3l search` falls back to `c3c fetch-list`.
+- **Installed like c3c does it:** `<name>.c3l` in the first `dependency-search-paths` entry, `<name>` added to `dependencies`.
+  The only difference is that c3l always keeps the zip (`--decompress=no`), because only a file can be hashed.
+- **Mixing both tools:** a library installed with plain `c3c fetch` shows up as `untracked` in `c3l list` and is rejected by `c3l sync --frozen` and `c3l verify`, until you run `c3l add <ns/name>@<version>` for it. If `c3c fetch` left an unpacked directory, `c3l add` replaces it with the zip.
+- **What c3c does not do and c3l adds:** a lockfile, checksum verification, update, outdated, remove, reproducible restore.
+- **Not covered:** `c3c vendor-fetch` and `c3c project fetch` (they use the `c3lang/vendor` GitHub releases, not a registry), and registries that need authentication.
+
+Checked with c3c 0.8.6 (nightly, 2026-11-01) against www.c3pkg.eu and a static
+test registry. The protocol is the one implemented by `c3c fetch`, `fetch-list` and `fetch-info`.
+
 ## Why not just `c3c fetch`?
 
 You can. c3l is for when you also want to know *which* version you have, be
