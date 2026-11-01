@@ -33,7 +33,7 @@ make PREFIX=~/.local install        # or just copy ./c3l into your PATH
 |---|---|
 | `init [name]` | create `c3l.lock` (and a project with `c3c init name`) |
 | `add <ns/name[@ver]>` | install from the registry |
-| `add <git-url> [tag]` | install from git (highest semver tag, or the given one) |
+| `add <git-url>[@ref]` | install from git. No ref: highest semver tag (HEAD if untagged). `ref` is a tag, a branch, `HEAD`, or a full 40-char commit. Branches and `HEAD` follow the tip on `update`; tags and commits stay pinned |
 | `remove <name>` | remove file, `dependencies` entry and lock line |
 | `list` | libraries and state: `ok`, `modified`, `missing`, `untracked` |
 | `verify` | check files against the lock, exit 1 on problems |

@@ -246,6 +246,23 @@ check "restored" test -f lib/gitlib.c3l
 c3l update >/dev/null 2>&1; eq "git update rc" $? 0
 has "updated to v0.2.0" "v0.2.0" "$(grep '^gitlib' c3l.lock)"
 check_not "no such tag fails" c3l add "file://$GR" v9.9.9
+git -C "$GR" branch -q dev "$C1"
+c3l remove gitlib >/dev/null 2>&1
+c3l add "file://$GR@HEAD" >/dev/null 2>&1; eq "add @HEAD rc" $? 0
+rec="$(grep '^gitlib' c3l.lock)"
+has "HEAD locked" "HEAD	.*commit:$C2" "$rec"
+git -C "$GR" commit -q --allow-empty -m three; C3="$(git -C "$GR" rev-parse HEAD)"
+has "outdated tracks HEAD over tags" "HEAD .*-> HEAD@${C3:0:12}" "$(c3l outdated)"
+c3l update >/dev/null 2>&1; has "update follows HEAD" "HEAD	.*commit:$C3" "$(grep '^gitlib' c3l.lock)"
+c3l add "file://$GR@dev" >/dev/null 2>&1; eq "add @branch rc" $? 0
+has "branch locked" "branch:dev	commit:$C1" "$(grep '^gitlib' c3l.lock)"
+rm lib/gitlib.c3l; c3l sync >/dev/null 2>&1; eq "branch sync rc" $? 0
+c3l add "file://$GR@$C2" >/dev/null 2>&1; eq "add @commit rc" $? 0
+has "commit locked" "commit:${C2:0:12}	commit:$C2" "$(grep '^gitlib' c3l.lock)"
+check_not "commit not outdated" bash -c "$(declare -f c3l 2>/dev/null); c3l outdated | grep -q gitlib"
+check_not "short hash rejected" c3l add "file://$GR@${C2:0:8}"
+check_not "ref both ways rejected" c3l add "file://$GR@v0.1.0" v0.2.0
+c3l add "file://$GR@v0.1.0" >/dev/null 2>&1; has "@tag works" "v0.1.0	.*commit:$C1" "$(grep '^gitlib' c3l.lock)"
 check_not "not a repo fails" c3l add "file://$WORK/nope"
 
 section "git: repo without manifest is rejected"

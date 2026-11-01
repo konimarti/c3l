@@ -362,30 +362,55 @@ git_highest_tag() { # url
 	printf '%s\n' "$best"
 }
 git_head() { git ls-remote "$1" HEAD 2>/dev/null | awk '{print $1; exit}'; }
+git_branch_commit() { git ls-remote --heads "$1" "refs/heads/$2" 2>/dev/null | awk '{print $1; exit}'; }
 
-install_git() { # url tag(optional) pin(optional, "commit:<sha>")
+# install_git url [ref] [pin]
+#   ref: empty (highest semver tag, else HEAD), HEAD, a tag, a branch, a full
+#   40-hex commit, or a lock label (branch:NAME, commit:SHA12). pin: "commit:<sha>".
+#   The lock label is: the tag, HEAD, branch:NAME or commit:SHA12.
+install_git() {
 	need git
-	local url="$1" tag="$2" pin="$3" commit="" name src zip dir file hash
-	if [[ -n "$pin" ]]; then commit="${pin#commit:}"
-	elif [[ -n "$tag" ]]; then
-		commit="$(git_tags "$url" | awk -v t="$tag" '$1==t{print $2; exit}')"
-		[[ -n "$commit" ]] || die "tag '$tag' not found in $url"
-	else
-		tag="$(git_highest_tag "$url")"
-		if [[ -n "$tag" ]]; then commit="$(git_tags "$url" | awk -v t="$tag" '$1==t{print $2; exit}')"
-		else tag="HEAD"; commit="$(git_head "$url")"; fi
-		[[ -n "$commit" ]] || die "cannot resolve $url (not a reachable git repository?)"
+	local url="$1" ref="$2" pin="$3" commit="" kind="" label="" name src zip dir file hash
+	if [[ -z "$ref" && -z "$pin" ]]; then
+		ref="$(git_highest_tag "$url")"; [[ -n "$ref" ]] || ref=HEAD
 	fi
-	[[ -n "$tag" ]] || tag="HEAD"
+	case "$ref" in
+		HEAD) kind=head; label=HEAD ;;
+		branch:*) kind=branch; ref="${ref#branch:}"; label="branch:$ref" ;;
+		commit:*) kind=commit; ref="${ref#commit:}"; label="commit:${ref:0:12}" ;;
+		*) kind="" ;;
+	esac
+	if [[ -n "$pin" ]]; then
+		commit="${pin#commit:}"
+		[[ -n "$kind" ]] || { kind=tag; label="$ref"; }
+	elif [[ "$kind" == head ]]; then
+		commit="$(git_head "$url")"
+		[[ -n "$commit" ]] || die "cannot resolve HEAD of $url (not a reachable git repository?)"
+	elif [[ "$kind" == branch ]]; then
+		commit="$(git_branch_commit "$url" "$ref")"
+		[[ -n "$commit" ]] || die "branch '$ref' not found in $url"
+	elif [[ "$kind" == commit ]]; then
+		commit="$ref"
+	else
+		commit="$(git_tags "$url" | awk -v t="$ref" '$1==t{print $2; exit}')"
+		if [[ -n "$commit" ]]; then kind=tag; label="$ref"
+		elif commit="$(git_branch_commit "$url" "$ref")"; [[ -n "$commit" ]]; then kind=branch; label="branch:$ref"
+		elif [[ "$ref" =~ ^[0-9a-fA-F]{40}$ ]]; then kind=commit; commit="$ref"; label="commit:${ref:0:12}"
+		else die "'$ref' is not a tag, branch or full commit hash in $url"; fi
+	fi
+	[[ "$kind" == commit && ! "$commit" =~ ^[0-9a-fA-F]{40}$ ]] && die "a commit must be given as the full 40-character hash"
 
 	tmproot
 	src="$TMPROOT/src.$RANDOM$RANDOM"; mkdir -p "$src"
 	if ! { git -C "$src" init -q && git -C "$src" remote add origin "$url" \
 		&& git -C "$src" fetch -q --depth 1 origin "$commit" 2>/dev/null && git -C "$src" checkout -q FETCH_HEAD 2>/dev/null; }; then
 		rm -rf "$src"; mkdir -p "$src"
-		if [[ "$tag" != HEAD ]]; then git clone -q --depth 1 --branch "$tag" "$url" "$src" 2>/dev/null
-		else git clone -q --depth 1 "$url" "$src" 2>/dev/null; fi || die "git clone of $url failed"
-		[[ "$(git -C "$src" rev-parse HEAD)" == "$commit" ]] || die "commit mismatch for $url@$tag: expected $commit, got $(git -C "$src" rev-parse HEAD)"
+		case "$kind" in
+			tag|branch) git clone -q --depth 1 --branch "$ref" "$url" "$src" 2>/dev/null ;;
+			head) git clone -q --depth 1 "$url" "$src" 2>/dev/null ;;
+			commit) git clone -q "$url" "$src" 2>/dev/null && git -C "$src" checkout -q "$commit" 2>/dev/null ;;
+		esac || die "git clone of $url failed"
+		[[ "$(git -C "$src" rev-parse HEAD)" == "$commit" ]] || die "commit mismatch for $url@$label: expected $commit, got $(git -C "$src" rev-parse HEAD)"
 	fi
 	[[ -f "$src/manifest.json" ]] || die "$url has no manifest.json at its root (not a C3 library)"
 	name="$(json_string_field provides < "$src/manifest.json")"
@@ -403,9 +428,9 @@ install_git() { # url tag(optional) pin(optional, "commit:<sha>")
 	mkdir -p "$dir"; rm -rf "$file"
 	cp "$zip" "$file" || txn_fail "cannot write $file"
 	in_deps "$name" || { deps_edit add "$name" || txn_fail "could not register $name in $PROJECT"; }
-	lock_put "$name" git "$url" "$tag" "commit:$commit" "$hash"
+	lock_put "$name" git "$url" "$label" "commit:$commit" "$hash"
 	TXN=""
-	info "installed $name $tag (commit ${commit:0:12})"
+	info "installed $name $label (commit ${commit:0:12})"
 }
 
 #
@@ -422,12 +447,14 @@ lib_status() { # name hash dir
 latest_for() { # kind source version pin -> newest version label (empty if unknown)
 	case "$1" in
 		registry) registry_info "$2" 2>/dev/null | info_latest ;;
-		git) local t h; t="$(git_highest_tag "$2")"
-			if [[ -n "$t" ]]; then echo "$t"
-			elif [[ "$3" == HEAD ]]; then
-				h="$(git_head "$2")"
-				if [[ -n "$h" && "commit:$h" != "$4" ]]; then echo "HEAD@${h:0:12}"; fi
-			fi ;;
+		git) local t h
+			case "$3" in
+				HEAD) h="$(git_head "$2")" ;;
+				branch:*) h="$(git_branch_commit "$2" "${3#branch:}")" ;;
+				commit:*) return 0 ;;
+				*) t="$(git_highest_tag "$2")"; [[ -n "$t" ]] && echo "$t"; return 0 ;;
+			esac
+			if [[ -n "$h" && "commit:$h" != "$4" ]]; then echo "HEAD@${h:0:12}"; fi ;;
 	esac
 	return 0
 }
@@ -445,7 +472,7 @@ cmd_usage() {
 
 	  init [name]               create a lockfile (and a project with 'c3c init name')
 	  add <ns/name[@ver]>       install from the registry, verify, lock       (alias: fetch, f)
-	  add <git-url> [tag]       install from a git repository (commit pinned)
+	  add <git-url>[@ref] [ref] install from git; ref = tag, branch, HEAD or commit
 	  remove <name>             remove library, project entry and lock line   (alias: rm)
 	  list                      show locked libraries and their state         (alias: ls)
 	  verify                    check installed files against c3l.lock (exit 1 on problems)
@@ -475,11 +502,14 @@ cmd_init() {
 }
 
 cmd_add() {
-	(( $# >= 1 )) || die "Usage: $PROGRAM add <ns/name[@version]> | <git-url> [tag]"
+	(( $# >= 1 )) || die "Usage: $PROGRAM add <ns/name[@version]> | <git-url>[@tag|branch|HEAD|commit]"
 	find_project
-	local arg="$1"
-	if is_git_url "$arg"; then
-		install_git "$arg" "$2" ""
+	local arg="$1" url ref="" last
+	url="$arg"; last="${arg##*/}"
+	if [[ "$arg" == */* && "$last" == *@* ]]; then ref="${last#*@}"; url="${arg%@"$ref"}"; fi
+	if is_git_url "$url"; then
+		if [[ -n "$ref" && -n "$2" ]]; then die "give the version either as <url>@<ref> or as a separate argument, not both"; fi
+		install_git "$url" "${ref:-$2}" ""
 	elif is_registry_id "${arg%%@*}"; then
 		if [[ "$arg" == *@* ]]; then install_registry "${arg%%@*}" "${arg#*@}" ""
 		else install_registry "$arg" "" ""; fi
@@ -568,7 +598,7 @@ cmd_update() {
 			if (( DRY_RUN )); then printf '%s: %s -> %s (dry run)\n' "$name" "$version" "$latest"; n=$((n+1)); continue; fi
 			case "$kind" in
 				registry) install_registry "$source" "$latest" "" ;;
-				git) if [[ "$latest" == HEAD@* ]]; then install_git "$source" "" ""; else install_git "$source" "$latest" ""; fi ;;
+				git) if [[ "$latest" == HEAD@* ]]; then install_git "$source" "$version" ""; else install_git "$source" "$latest" ""; fi ;;
 			esac
 			n=$((n+1))
 		fi

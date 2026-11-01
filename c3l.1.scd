@@ -26,11 +26,15 @@ kept as _.c3l_ zip files in the first entry of _dependency-search-paths_. Run
 	download with the registry's checksum, write the lock line. A mismatch or any
 	failure restores the previous library file and _project.json_.
 
-*add* _git-url_ [_tag_]
-	Install from a git repository. Without _tag_ the highest semantic version tag is
-	used, or HEAD if there are none. The tag is resolved to a commit, which is what
-	the lockfile pins. The library is built with *git archive*, so no _.git_ is
-	included. The repository needs a _manifest.json_ at its root.
+*add* _git-url_[@_ref_]
+	Install from a git repository. _ref_ is a tag, a branch, *HEAD*, or a full
+	40-character commit hash; it can also be given as a separate argument. Without
+	a _ref_ the highest semantic version tag is used, or HEAD if there are none.
+	The ref is resolved to a commit, which is what the lockfile pins. *outdated*
+	and *update* follow the tip of *HEAD* and of branches; tags and commits stay
+	put. In scp-style URLs (_git@host:path_) the *@* only starts a ref after the
+	last */*. The library is built with *git archive*, so no _.git_ is included.
+	The repository needs a _manifest.json_ at its root.
 
 *remove* _name_
 	Delete the library file, its _dependencies_ entry and its lock line.
