@@ -55,11 +55,13 @@ Options may appear before or after the command.
 	The ref is resolved to a commit, which is what the lockfile pins. *outdated*
 	and *update* follow the tip of *HEAD* and of branches; tags and commits stay
 	put. In scp-style URLs (_git@host:path_) the *@* only starts a ref after the
-	last */*. The library is built with *git archive*, so no _.git_ is included. The lockfile
-	records a hash of the library's *contents* (a git tree id), not of the zip bytes,
-	so it does not depend on the compression, timestamps or git version of the
-	machine that wrote the archive. *verify* and *sync* compare contents the same
-	way. This needs *git* and *unzip*. The repository needs a _manifest.json_ at its root.
+	last */*. The library is built with *git archive*, so no _.git_ is included, and without
+	line-ending conversion. A git library is identified by its commit: the lockfile
+	pins it, and *verify* and *sync* check that the installed file is an archive of
+	that commit (*git archive* stores the commit id in the zip comment). Edits made
+	inside the installed file are therefore not detected for git libraries, unlike
+	for registry libraries, which are checked against their SHA-256. This needs
+	*git* and *unzip*. The repository needs a _manifest.json_ at its root.
 
 *remove* _name_
 	Delete the library file, its _dependencies_ entry and its lock line.
@@ -104,11 +106,11 @@ Tab separated, one library per line, sorted by name:
 # c3l.lock v1
 @registry	https://www.c3pkg.eu
 box2d	registry	jecokef902/box2d	1.0.0	sha256:4945...	sha256:4945...
-hex	git	https://github.com/konimarti/hex.c3l	v0.1.1	commit:3fa9...	tree:9c1e...
+hex	git	https://github.com/konimarti/hex.c3l	v0.1.1	commit:3fa9...	commit:3fa9...
 ```
 
 Columns: name, kind (_registry_ or _git_), source, version, pin (checksum or
-commit), SHA-256 of the installed file (registry) or git tree id of its contents (git).
+commit), SHA-256 of the installed file (registry) or the commit again (git).
 
 # ENVIRONMENT VARIABLES
 

@@ -14,7 +14,7 @@ c3l update                          # update, rolled back on any failure
 c3l sync --frozen                   # CI: restore exactly what c3l.lock says
 ```
 
-- **Lockfile** `c3l.lock`: one line per library (version, SHA-256 or commit; for git a content hash). Diff-friendly, commit it.
+- **Lockfile** `c3l.lock`: one line per library (version, SHA-256 or commit). Diff-friendly, commit it.
 - **Verified**: the registry's checksum is compared with the downloaded file. A mismatch means rollback, not a warning.
 - **Safe**: every install is transactional (library file and `project.json` are restored on failure).
 - **Registry**: default [www.c3pkg.eu](https://www.c3pkg.eu); any `c3c fetch` registry works (`--registry`, `$C3L_REGISTRY`, or `@registry` in the lockfile).

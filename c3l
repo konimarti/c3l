@@ -221,7 +221,7 @@ deps_edit() {
 
 #
 # Lockfile: TSV, one library per line
-#   name <TAB> kind <TAB> source <TAB> version <TAB> pin <TAB> sha256-of-file
+#   name <TAB> kind <TAB> source <TAB> version <TAB> pin <TAB> hash (registry: sha256 of the file; git: the commit)
 #   @registry <TAB> url   (header)
 #
 lock_registry() { [[ -f "$LOCK" ]] && awk -F'\t' '$1=="@registry"{print $2; exit}' "$LOCK"; return 0; }
@@ -361,18 +361,6 @@ git_highest_tag() { # url
 	done < <(git_tags "$1")
 	printf '%s\n' "$best"
 }
-# tree_of_zip file -> git tree id of the zip's contents. Independent of how the
-# zip was written (compression, timestamps, header fields, git version).
-tree_of_zip() {
-	need git; need unzip; tmproot
-	local d="$TMPROOT/tree.$RANDOM$RANDOM" t
-	mkdir -p "$d" && unzip -q -o "$1" -d "$d" 2>/dev/null || { rm -rf "$d"; return 1; }
-	git -C "$d" init -q 2>/dev/null || { rm -rf "$d"; return 1; }
-	mkdir -p "$d/.git/info"; echo '* -text -filter -ident' > "$d/.git/info/attributes"
-	t="$(git -C "$d" -c core.autocrlf=false -c core.fileMode=true add -A -f >/dev/null 2>&1 && git -C "$d" write-tree 2>/dev/null)"
-	rm -rf "$d"; [[ -n "$t" ]] || return 1
-	printf '%s\n' "$t"
-}
 git_head() { git ls-remote "$1" HEAD 2>/dev/null | awk '{print $1; exit}'; }
 git_branch_commit() { git ls-remote --heads "$1" "refs/heads/$2" 2>/dev/null | awk '{print $1; exit}'; }
 
@@ -380,9 +368,9 @@ git_branch_commit() { git ls-remote --heads "$1" "refs/heads/$2" 2>/dev/null | a
 #   ref: empty (highest semver tag, else HEAD), HEAD, a tag, a branch, a full
 #   40-hex commit, or a lock label (branch:NAME, commit:SHA12). pin: "commit:<sha>".
 #   The lock label is: the tag, HEAD, branch:NAME or commit:SHA12.
-install_git() { # url [ref] [pin] [locked-hash]
+install_git() { # url [ref] [pin]
 	need git
-	local url="$1" ref="$2" pin="$3" want_hash="$4" commit="" kind="" label="" name src zip dir file hash
+	local url="$1" ref="$2" pin="$3" commit="" kind="" label="" name src zip dir file hash
 	if [[ -z "$ref" && -z "$pin" ]]; then
 		ref="$(git_highest_tag "$url")"; [[ -n "$ref" ]] || ref=HEAD
 	fi
@@ -431,17 +419,11 @@ install_git() { # url [ref] [pin] [locked-hash]
 	check_collision "$name" git "$url"
 
 	zip="$TMPROOT/$name.c3l.$RANDOM"
-	# -0: store without compression (no dependence on the local zlib); TZ=UTC:
-	# git writes zip timestamps in local time, so pin it
-	# and no line-ending/filter conversion (core.autocrlf, eol= in .gitattributes):
-	# the library is the committed blobs, the same on every machine
+	# Archive the committed bytes the same way everywhere: stored (-0), UTC
+	# timestamps, no line-ending or filter conversion (core.autocrlf, eol=).
 	mkdir -p "$src/.git/info"; echo '* -text -filter -ident -working-tree-encoding' > "$src/.git/info/attributes"
 	TZ=UTC git -C "$src" -c core.autocrlf=false -c core.eol=lf archive --format=zip -0 -o "$zip" HEAD || die "git archive failed"
-	hash="tree:$(tree_of_zip "$zip")"; [[ "$hash" != "tree:" ]] || die "cannot compute the content hash of the archive of $url"
-	case "$want_hash" in
-		tree:*) [[ "$hash" == "$want_hash" ]] || die "$name@$label: contents of commit ${commit:0:12} hash to $hash, but $LOCK has $want_hash (lock edited by hand?); re-lock with '$PROGRAM add <url>@<ref>'" ;;
-		sha256:*) warn "$name: $LOCK has a zip-byte hash from an older c3l; it is replaced by a content hash (commit and re-run 'sync')" ;;
-	esac
+	hash="commit:$commit"   # git commit ids are content-addressed; nothing else to hash
 
 	find_project
 	txn_begin "$name"
@@ -457,12 +439,14 @@ install_git() { # url [ref] [pin] [locked-hash]
 #
 # Status helpers
 #
-lib_status() { # name hash dir
+# For git libraries the file is an archive of the locked commit; `git archive`
+# stores that commit id in the zip comment, so compare it with the pin.
+lib_status() { # name hash dir kind pin
 	local f="$3/$1.c3l"
 	if [[ -d "$f" ]]; then echo unpacked
 	elif [[ ! -f "$f" ]]; then echo missing
-	elif [[ "$2" == tree:* ]]; then
-		if [[ "tree:$(tree_of_zip "$f")" == "$2" ]]; then echo ok; else echo modified; fi
+	elif [[ "$4" == git ]]; then
+		if [[ "commit:$(unzip -z "$f" 2>/dev/null | sed -n '2p' | tr -d '\r ')" == "$5" ]]; then echo ok; else echo modified; fi
 	elif [[ "sha256:$(sha256_file "$f")" == "$2" ]]; then echo ok
 	else echo modified; fi
 }
@@ -561,7 +545,7 @@ cmd_list() {
 	while IFS=$'\t' read -r name kind source version pin hash; do
 		[[ -n "$name" ]] || continue
 		n=$((n+1))
-		st="$(lib_status "$name" "$hash" "$dir")"
+		st="$(lib_status "$name" "$hash" "$dir" "$kind" "$pin")"
 		grep -qx -- "$name" <<< "$deps" || st="$st,not-in-project"
 		printf '%-20s %-8s %-12s %-10s %s\n' "$name" "$kind" "$version" "$st" "$source"
 	done < <(lock_entries)
@@ -582,7 +566,7 @@ cmd_verify() {
 	[[ -f "$LOCK" ]] || die "$LOCK not found"
 	while IFS=$'\t' read -r name kind source version pin hash; do
 		n=$((n+1))
-		st="$(lib_status "$name" "$hash" "$dir")"
+		st="$(lib_status "$name" "$hash" "$dir" "$kind" "$pin")"
 		if [[ "$st" != ok ]]; then printf '%s: %s\n' "$name" "$st" >&2; bad=1; fi
 	done < <(lock_entries)
 	while read -r d; do
@@ -656,7 +640,7 @@ cmd_sync() {
 		NOLOCKWRITE=1
 	fi
 	while IFS=$'\t' read -r name kind source version pin hash; do
-		st="$(lib_status "$name" "$hash" "$dir")"
+		st="$(lib_status "$name" "$hash" "$dir" "$kind" "$pin")"
 		if [[ "$st" == ok ]]; then
 			in_deps "$name" || { info "registering $name in $PROJECT"; deps_edit add "$name" || die "could not register $name in $PROJECT"; }
 			continue
@@ -664,7 +648,7 @@ cmd_sync() {
 		[[ "$st" == modified ]] && warn "$name differs from the lockfile; restoring"
 		case "$kind" in
 			registry) install_registry "$source" "$version" "$pin" ;;
-			git) install_git "$source" "$version" "$pin" "$hash" ;;
+			git) install_git "$source" "$version" "$pin" ;;
 			*) die "unknown source kind '$kind' for $name" ;;
 		esac
 	done < <(lock_entries)
@@ -714,7 +698,7 @@ cmd_migrate() {
 		if [[ "$tag" == HEAD ]]; then commit="$(git_head "$url")"
 		else commit="$(git_tags "$url" | awk -v t="$tag" '$1==t{print $2; exit}')"; fi
 		[[ -n "$commit" ]] || { warn "cannot resolve $url@$tag, skipping $name"; continue; }
-		hash="tree:$(tree_of_zip "$f")"
+		hash="commit:$commit"
 		lock_put "$name" git "$url" "$tag" "commit:$commit" "$hash"
 		info "migrated $name ($tag, commit ${commit:0:12}); commit pin resolved now, not at install time"
 	done < "$OLDRECORDS"
