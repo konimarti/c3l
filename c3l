@@ -465,7 +465,7 @@ op_begin() {
 	OP_DIR="$TMPROOT/op.$RANDOM$RANDOM"; mkdir -p "$OP_DIR/lib"
 	cp -p "$PROJECT" "$OP_DIR/project"
 	[[ -f "$LOCK" ]] && cp -p "$LOCK" "$OP_DIR/lock"
-	OP_LIBDIR="$(lib_dir)"; OP_NEW=(); OP_SAVED=(); OP_ON=1
+	OP_LIBDIR="$(lib_dir)" || exit 1; OP_NEW=(); OP_SAVED=(); OP_ON=1
 	STACK=(); DEP_COUNT=0
 }
 op_backup() { # name: remember the library file before it is replaced
@@ -830,7 +830,7 @@ auth_header_file() {
 be_c3pkg_publish() { # name version file c3_version
 	need curl; tmproot
 	local name="$1" ver="$2" file="$3" c3v="$4" hdr body="$TMPROOT/publish.json" heads="$TMPROOT/publish.hdr" code msg wait
-	hdr="$(auth_header_file)"
+	hdr="$(auth_header_file)" || exit 1   # its die ran in the subshell
 	local -a a=(-sS -m 600 -X PUT -H "@$hdr" -D "$heads" -o "$body" -w '%{http_code}'
 		-F "file=@$file;type=application/zip" --form-string "c3_version=$c3v")
 	[[ -n "$DESC_OPT" ]] && a+=(--form-string "description=$DESC_OPT")
@@ -1190,7 +1190,7 @@ cmd_remove() {
 	(( $# >= 1 )) || die "Usage: $PROGRAM remove <name>"
 	find_project
 	local name="${1%.c3l}" dir f
-	dir="$(lib_dir)"; f="$dir/$name.c3l"
+	dir="$(lib_dir)" || exit 1; f="$dir/$name.c3l"
 	[[ -n "$(lock_get "$name")" ]] || in_deps "$name" || [[ -e "$f" ]] || die "'$name' is not installed"
 	[[ -n "$(lock_get "$name")" ]] || warn "$name is not tracked in $LOCK"
 	local needed orphans
@@ -1209,7 +1209,7 @@ cmd_remove() {
 cmd_prune() {
 	find_project
 	local dir name orphans n=0
-	dir="$(lib_dir)"; orphans="$(lock_orphans)"
+	dir="$(lib_dir)" || exit 1; orphans="$(lock_orphans)"
 	[[ -n "$orphans" ]] && ! (( DRY_RUN )) && op_begin
 	while IFS= read -r name; do
 		[[ -n "$name" ]] || continue
@@ -1273,7 +1273,7 @@ cmd_list() {
 	find_project
 	(( TREE )) && { list_tree; return 0; }
 	local dir deps name kind source version pin hash role reqs st n=0
-	dir="$(lib_dir)"; deps="$(deps_list)"
+	dir="$(lib_dir)" || exit 1; deps="$(deps_list)"
 	while IFS=$'\t' read -r name kind source version pin hash role reqs; do
 		[[ -n "$name" ]] || continue
 		n=$((n+1))
@@ -1295,7 +1295,7 @@ cmd_list() {
 cmd_verify() {
 	find_project
 	local dir name kind source version pin hash role reqs st bad=0 n=0 d r
-	dir="$(lib_dir)"
+	dir="$(lib_dir)" || exit 1
 	[[ -f "$LOCK" ]] || die "$LOCK not found"
 	while IFS=$'\t' read -r name kind source version pin hash role reqs; do
 		n=$((n+1))
@@ -1367,7 +1367,7 @@ cmd_sync() {
 	find_project
 	[[ -f "$LOCK" ]] || die "$LOCK not found (nothing to sync; try '$PROGRAM migrate' or '$PROGRAM add')"
 	local dir name kind source version pin hash role reqs st d drift=0
-	dir="$(lib_dir)"
+	dir="$(lib_dir)" || exit 1
 	if (( FROZEN )); then
 		while read -r d; do
 			[[ -n "$d" && -z "$(lock_get "$d")" ]] && { printf 'drift: %s is in %s but not in %s\n' "$d" "$PROJECT" "$LOCK" >&2; drift=1; }
@@ -1466,7 +1466,7 @@ cmd_publish() {
 # Read it and lock the same commits as git libraries. Nothing is written back to c3po.
 migrate_c3po() {
 	local dir name repo origin ref commit url label file hash
-	dir="$(lib_dir)"
+	dir="$(lib_dir)" || exit 1
 	: | lock_write ""
 	while IFS=$'\t' read -r name repo origin ref commit; do
 		[[ -n "$name" && "$commit" =~ ^[0-9a-fA-F]{40}$ ]] || { warn "skipping a c3po entry without name or commit"; continue; }
@@ -1497,7 +1497,7 @@ cmd_migrate() {
 	[[ -f "$LOCK" ]] && die "$LOCK already exists"
 	need git
 	local dir name path url tag commit hash f
-	dir="$(lib_dir)"
+	dir="$(lib_dir)" || exit 1
 	: | lock_write ""
 	while read -r name path url tag; do
 		[[ -n "$name" ]] || continue

@@ -537,6 +537,13 @@ out="$(pc --token-file "$WORK/token" publish 2>&1)"; eq "republish rc" $? 1
 has "immutable" "already published" "$out"
 out="$(C3L_TOKEN=c3p_test pc publish --version 1.0.1 2>&1)"; eq "token from env, --version rc" $? 0
 has "tag vs --version warning" "says 1.0.0, but --version says 1.0.1" "$out"
+check_not "no token: no request is sent after the error" grep -q "rejected the token" <<< "$(pc publish --description Demo 2>&1)"
+out="$(C3PKG_TOKEN=c3p_test pc publish --version 1.0.2 2>&1)"; eq "C3PKG_TOKEN is used rc" $? 0
+has "C3PKG_TOKEN publishes" "registry checksum matches" "$out"
+out="$(C3PKG_TOKEN=c3p_wrong pc publish --version 1.0.3 2>&1)"; eq "wrong C3PKG_TOKEN rc" $? 1
+has "wrong C3PKG_TOKEN rejected" "rejected the token" "$out"
+out="$(C3L_TOKEN=c3p_wrong C3PKG_TOKEN=c3p_test pc publish --version 1.0.3 2>&1)"; eq "C3L_TOKEN wins over C3PKG_TOKEN rc" $? 1
+out="$(C3L_TOKEN=c3p_wrong C3PKG_TOKEN=c3p_test pc --token-file "$WORK/token" publish --version 1.0.3 2>&1)"; eq "--token-file wins over both rc" $? 0
 
 # manifest.json disagrees with the tag: warn, the tag wins
 sed -i 's|"provides" : "demo",|"provides" : "demo",\n  "version" : "0.0.9",|' manifest.json
