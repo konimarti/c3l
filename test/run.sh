@@ -592,6 +592,13 @@ has "version" "c3l 1" "$(c3l version)"
 check_not "unknown command" c3l frobnicate
 cd "$WORK" && mkdir -p empty && cd empty
 check_not "outside project" c3l list
+out="$(c3l list 2>&1)"; has "plain directory: project hint" "no project.json found" "$out"
+mkdir -p "$WORK/libdir" && cd "$WORK/libdir" && echo '{ "provides": "x" }' > manifest.json
+for cmd in list add verify sync outdated; do
+	out="$(c3l $cmd acme/x 2>&1)"; eq "library dir: $cmd fails" $? 1
+	has "library dir: $cmd explains" "is a library directory" "$out"
+done
+has "library dir: points to publish" "c3l publish" "$out"
 
 if [[ -n "$LIVE" ]]; then
 	section "live: www.c3pkg.eu"

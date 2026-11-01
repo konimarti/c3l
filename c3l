@@ -120,6 +120,9 @@ find_project() {
 	for f in project.json project.json5; do
 		[[ -f "$f" ]] && { PROJECT="$f"; return 0; }
 	done
+	if [[ -f manifest.json ]]; then
+		die "$PWD is a library directory (it has manifest.json, no project.json). This command manages the libraries of a project; to release this library use '$PROGRAM check' and '$PROGRAM publish'."
+	fi
 	die "no project.json found in $PWD. Run c3l from the project root (create one with 'c3c init' or 'c3l init <name>')."
 }
 
