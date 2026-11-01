@@ -49,7 +49,24 @@ Has no effect on other commands.\&
 .RS 4
 With \fBadd\fR and \fBupdate\fR: fail instead of warn when the registry says a library
 was published for another C3 release than your \fBc3c\fR (compared by
-major.\&minor), or does not list your platform.\&
+major.\&minor), or does not list your platform, and when libraries require each
+other in a cycle or a library requires itself.\&
+.P
+.RE
+\fB--force\fR
+.RS 4
+With \fBremove\fR: remove the library even if another library requires it.\&
+.P
+.RE
+\fB--tree\fR
+.RS 4
+With \fBlist\fR: print the dependency graph instead of the table.\&
+.P
+.RE
+\fB--allow-host\fR \fIHOST\fR
+.RS 4
+Trust \fIHOST\fR for git dependencies named by a library'\&s manifest.\& Local paths
+and \fBfile://\fR URLs are the host \fIfile\fR.\& See \fBDEPENDENCIES\fR.\&
 .P
 .RE
 \fB--version\fR \fIX.\&Y.\&Z\fR, \fB--version=\fR\fIX.\&Y.\&Z\fR
@@ -142,13 +159,28 @@ for registry libraries, which are checked against their SHA-256.\& This needs
 .RE
 \fBremove\fR \fIname\fR
 .RS 4
-Delete the library file, its \fIdependencies\fR entry and its lock line.\&
+Delete the library file, its \fIdependencies\fR entry and its lock line.\& Refuses if
+another library requires it (\fB--force\fR overrides) and lists libraries that are no
+longer needed.\&
 .P
 .RE
-\fBlist\fR
+\fBprune\fR
+.RS 4
+Remove dependency libraries that no directly added library needs any more.\&
+With \fB--dry-run\fR only list them.\&
+.P
+.RE
+\fBwhy\fR \fIname\fR
+.RS 4
+Show which libraries require \fIname\fR, and why they are installed.\&
+.P
+.RE
+\fBlist\fR [\fB--tree\fR]
 .RS 4
 Show every locked library with its state: \fIok\fR, \fImodified\fR, \fImissing\fR,
 \fIunpacked\fR, and \fIuntracked\fR for libraries in \fIproject.\&json\fR not in the lockfile.\&
+\fIdep\fR marks a library pulled in by another one.\& With \fB--tree\fR print the
+dependency graph.\&
 .P
 .RE
 \fBverify\fR
@@ -190,7 +222,9 @@ Run \fBc3c fetch-info\fR.\&
 .RE
 \fBmigrate\fR
 .RS 4
-Convert a c3l 0.\&x \fI.\&c3l.\&deps\fR file into \fIc3l.\&lock\fR.\&
+Convert a c3l 0.\&x \fI.\&c3l.\&deps\fR file, or a c3po \fIproject.\&lock.\&json\fR, into
+\fIc3l.\&lock\fR.\& For c3po the same commits are locked as git libraries; run \fBsync\fR
+afterwards to rebuild them as verified archives.\&
 .P
 .RE
 \fBcheck\fR [\fIdir\fR]
@@ -235,6 +269,35 @@ The C3 version of the library is sent with each upload and checked on \fBadd\fR 
 \fBinfo\fR: a different major.\&minor or a missing platform gives a warning (an error
 with \fB--strict\fR).\&
 .P
+.SH DEPENDENCIES
+.P
+c3c lists a library'\&s dependencies by name only and does not install them
+transitively: every one must be in \fIproject.\&json\fR.\& \fBadd\fR and \fBupdate\fR therefore
+follow the dependencies a library declares and add them all, flat, to \fIlib\fR and
+\fIproject.\&json\fR, as one transaction.\&
+.P
+A library declares them in its \fImanifest.\&json\fR (c3c ignores the \fIvendor\fR key):
+.P
+.nf
+.RS 4
+"vendor": { "c3l": { "requires": [
+    { "name": "vk", "source": "tonis2/vk", "version": "1\&.0\&.1" } ] } }
+.fi
+.RE
+.P
+\fIsource\fR is a registry id or a git URL.\& \fIversion\fR is the minimum for registry
+libraries, a tag, branch or commit for git libraries.\& \fBpublish\fR writes this block
+from the library'\&s own \fIc3l.\&lock\fR.\& c3l also reads c3po'\&s \fIvendor.\&c3po.\&sources\fR and
+c3c'\&s plain \fIdependencies\fR names (no source: a warning, and \fBverify\fR fails until
+the library is added).\&
+.P
+Versions are chosen as in Go (minimum version selection): the highest of all
+requested minimums, never newer.\& Different major versions are an error.\& A cycle,
+or a library requiring itself, is a warning (an error with \fB--strict\fR); each
+library is installed once.\& Git sources other than github.\&com, codeberg.\&org and the
+hosts of URLs given on the command line need \fB--allow-host\fR or an answer at the
+prompt.\& More than 200 libraries are refused.\&
+.P
 .SH LOCKFILE
 .P
 Tab separated, one library per line, sorted by name:
@@ -249,7 +312,10 @@ hex	git	https://github\&.com/konimarti/hex\&.c3l	v0\&.1\&.1	commit:3fa9\&.\&.\&.
 .RE
 .P
 Columns: name, kind (\fIregistry\fR or \fIgit\fR), source, version, pin (checksum or
-commit), SHA-256 of the installed file (registry) or the commit again (git).\&
+commit), SHA-256 of the installed file (registry) or the commit again (git), role
+(\fIdirect\fR: added by you; \fIdep\fR: required by another library) and the comma
+separated names the library requires (\fI-\fR for none).\& The format is still version 1;
+lines with only six columns are read as \fIdirect\fR.\&
 .P
 .SH ENVIRONMENT VARIABLES
 .P
@@ -257,6 +323,17 @@ commit), SHA-256 of the installed file (registry) or the commit again (git).\&
 .RS 4
 Registry base URL.\& Overridden by \fB--registry\fR, overrides the lockfile.\&
 Default: https://www.\&c3pkg.\&eu
+.P
+.RE
+\fIC3L_ALLOWED_HOSTS\fR
+.RS 4
+Space separated git hosts that dependencies may fetch from, in addition to
+github.\&com and codeberg.\&org.\&
+.P
+.RE
+\fIC3L_MAX_DEPS\fR
+.RS 4
+Largest number of transitive libraries one command may install.\& Default: 200.\&
 .P
 .RE
 \fIC3L_TOKEN\fR, \fIC3PKG_TOKEN\fR

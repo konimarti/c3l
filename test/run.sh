@@ -291,6 +291,137 @@ NR="$WORK/nomanifest"; mkdir -p "$NR"; (cd "$NR" && git init -q . && echo x > a 
 out="$(c3l add "file://$NR" 2>&1)"; eq "no manifest rc" $? 1
 has "message" "manifest.json" "$out"
 
+section "dependencies: transitive install, roles, graph"
+newproj pd1
+c3l init >/dev/null 2>&1
+publish acme/dcc 1.0.0 >/dev/null
+publish acme/dcb 1.0.0 --requires=acme/dcc:1.0.0 >/dev/null
+publish acme/dca 1.0.0 --requires=acme/dcb:1.0.0 >/dev/null
+out="$(c3l add acme/dca 2>&1)"; eq "add with deps rc" $? 0
+has "dependency installed" "dcb installed for dca" "$out"
+has "transitive installed" "dcc installed for dcb" "$out"
+for n in dca dcb dcc; do check "$n file" test -f lib/$n.c3l; has "$n in project.json" "\"$n\"" "$(cat project.json)"; done
+eq "lock header stays v1" "$(head -n 1 c3l.lock | cut -d' ' -f1-3)" "# c3l.lock v1"
+eq "dca is direct" "$(awk -F'\t' '$1=="dca"{print $7}' c3l.lock)" "direct"
+eq "dcb is dep" "$(awk -F'\t' '$1=="dcb"{print $7}' c3l.lock)" "dep"
+eq "dcb requires dcc" "$(awk -F'\t' '$1=="dcb"{print $8}' c3l.lock)" "dcc"
+eq "lock has 8 columns" "$(awk -F'\t' '$1=="dca"{print NF}' c3l.lock)" "8"
+check "verify ok" c3l verify
+has "list shows dep" "dcb .*ok,dep" "$(c3l list)"
+tree="$(c3l list --tree)"; has "tree root" "^dca 1.0.0" "$tree"; has "tree nested" "    dcc 1.0.0" "$tree"
+why="$(c3l why dcc 2>&1)"; has "why dcc" "dcb requires dcc" "$why"; has "why chain" "dca requires dcb" "$why"
+out="$(c3l remove dcb 2>&1)"; eq "remove needed dep refused" $? 1
+has "refusal names dependent" "required by: dca" "$out"
+check "dcb still there" test -f lib/dcb.c3l
+c3l update dcb >/dev/null 2>&1
+eq "update keeps role dep" "$(awk -F'\t' '$1=="dcb"{print $7}' c3l.lock)" "dep"
+rm -f lib/dcb.c3l lib/dcc.c3l
+c3l sync --frozen >/dev/null 2>&1; eq "frozen sync restores the graph" $? 0
+check "dcc restored" test -f lib/dcc.c3l
+c3l remove dca >/dev/null 2>&1
+out="$(c3l prune --dry-run 2>&1)"; has "prune dry run lists dcb" "dcb: not needed" "$out"
+check "dry run kept dcb" test -f lib/dcb.c3l
+c3l prune >/dev/null 2>&1; eq "prune rc" $? 0
+check_not "dcb pruned" test -e lib/dcb.c3l
+check_not "dcc pruned" test -e lib/dcc.c3l
+check_not "project.json cleaned" grep -q '"dcb"' project.json
+eq "lock empty after prune" "$(awk -F'\t' '$0 !~ /^#/ && $1 !~ /^@/' c3l.lock | wc -l)" "0"
+
+section "dependencies: diamond, minimum version selection, conflicts"
+newproj pd2
+c3l init >/dev/null 2>&1
+publish acme/dl 1.0.0 >/dev/null
+publish acme/dl 1.2.0 --not-latest >/dev/null
+publish acme/dl 2.0.0 --not-latest >/dev/null
+publish acme/dm 1.0.0 --requires=acme/dl:1.2.0 >/dev/null
+publish acme/dtop 1.0.0 --requires=acme/dl:1.0.0,acme/dm >/dev/null
+out="$(c3l add acme/dtop 2>&1)"; eq "diamond rc" $? 0
+has "dl raised to the highest minimum" "dl 1.0.0 -> 1.2.0" "$out"
+eq "dl is at 1.2.0" "$(awk -F'\t' '$1=="dl"{print $4}' c3l.lock)" "1.2.0"
+check "diamond verify" c3l verify
+newproj pd3
+c3l init >/dev/null 2>&1; c3l add acme/dl@1.0.0 >/dev/null 2>&1
+publish acme/dx 1.0.0 --requires=acme/dl:2.0.0 >/dev/null
+cp c3l.lock "$WORK/lock.before"; cp project.json "$WORK/project.before"
+out="$(c3l add acme/dx 2>&1)"; eq "major conflict rc" $? 1
+has "conflict message" "version conflict" "$out"
+check "conflict: lock unchanged" cmp -s c3l.lock "$WORK/lock.before"
+check "conflict: project unchanged" cmp -s project.json "$WORK/project.before"
+check_not "conflict: dx not left behind" test -e lib/dx.c3l
+
+section "dependencies: failure anywhere rolls the whole operation back"
+newproj pd4
+c3l init >/dev/null 2>&1
+publish acme/rok 1.0.0 >/dev/null
+publish acme/rtop 1.0.0 --requires=acme/rok:1.0.0,acme/doesnotexist:1.0.0 >/dev/null
+cp c3l.lock "$WORK/lock.before"; cp project.json "$WORK/project.before"
+out="$(c3l add acme/rtop 2>&1)"; eq "missing dependency rc" $? 1
+check "lock unchanged" cmp -s c3l.lock "$WORK/lock.before"
+check "project unchanged" cmp -s project.json "$WORK/project.before"
+check_not "rok removed again" test -e lib/rok.c3l
+check_not "rtop removed again" test -e lib/rtop.c3l
+
+section "dependencies: cycles and self-dependency are warnings, never a loop"
+newproj pd5
+c3l init >/dev/null 2>&1
+publish acme/cp 1.0.0 --requires=acme/cq:1.0.0 >/dev/null
+publish acme/cq 1.0.0 --requires=acme/cp:1.0.0 >/dev/null
+out="$(timeout 120 "$C3L" add acme/cp 2>&1)"; eq "cycle rc" $? 0
+has "cycle warning with path" "dependency cycle: cp -> cq -> cp" "$out"
+eq "each installed once" "$(awk -F'\t' '$0 !~ /^#/ && $1 !~ /^@/' c3l.lock | wc -l)" "2"
+check "cycle verify" c3l verify
+has "tree marks the cycle" "(cycle)" "$(c3l list --tree)"
+newproj pd6
+c3l init >/dev/null 2>&1
+out="$(timeout 120 "$C3L" --strict add acme/cp 2>&1)"; eq "cycle --strict rc" $? 1
+has "strict says cycle" "dependency cycle" "$out"
+check_not "strict leaves nothing behind" test -e lib/cp.c3l
+check_not "strict leaves no cq" test -e lib/cq.c3l
+publish acme/selfdep 1.0.0 --requires=acme/selfdep:1.0.0 >/dev/null
+out="$(timeout 120 "$C3L" add acme/selfdep 2>&1)"; eq "self dependency rc" $? 0
+has "self dependency warning" "lists itself" "$out"
+
+section "dependencies: names without a source (c3c 'dependencies')"
+newproj pd7
+c3l init >/dev/null 2>&1
+publish acme/needs 1.0.0 --deps=nosrc >/dev/null
+out="$(c3l add acme/needs 2>&1)"; eq "no-source rc" $? 0
+has "warns about the missing source" "needs 'nosrc' but declares no source" "$out"
+out="$(c3l verify 2>&1)"; eq "verify fails while it is missing" $? 1
+has "verify names it" "requires nosrc, which is not installed" "$out"
+publish acme/nosrc 1.0.0 >/dev/null; c3l add acme/nosrc >/dev/null 2>&1
+check "verify ok once installed" c3l verify
+
+section "dependencies: c3po manifests are followed (vendor.c3po.sources), hosts are trusted explicitly"
+newproj pd8
+c3l init >/dev/null 2>&1
+publish acme/viapo 1.0.0 --c3po="gitlib|file://$GR" >/dev/null
+out="$(c3l add acme/viapo 2>&1)"; eq "untrusted host rc" $? 1
+has "refusal explains --allow-host" "allow-host file" "$out"
+check_not "nothing left behind" test -e lib/viapo.c3l
+out="$(c3l --allow-host file add acme/viapo 2>&1)"; eq "trusted host rc" $? 0
+has "c3po source followed" "gitlib installed for viapo" "$out"
+eq "gitlib is a dep, git kind" "$(awk -F'\t' '$1=="gitlib"{print $2 "/" $7}' c3l.lock)" "git/dep"
+check "c3po verify" c3l verify
+
+section "dependencies: c3po project.lock.json is imported; old 6-column lock lines still work"
+newproj pd9
+c3l init >/dev/null 2>&1
+SHA40="0123456789abcdef0123456789abcdef01234567"
+cat > project.lock.json <<JSON
+{ "version": 1, "packages": [
+  { "name": "seali", "repo": "Ecoral360/seali.c3l", "origin": "github", "path": "lib/seali.c3l", "zip": true, "ref": "", "commit": "$SHA40" },
+  { "name": "other", "repo": "o/other", "origin": "codeberg", "path": "lib/other.c3l", "zip": false, "ref": "v1.0.0", "commit": "$SHA40" } ] }
+JSON
+rm -f c3l.lock
+out="$(c3l migrate 2>&1)"; eq "c3po migrate rc" $? 0
+has "seali locked at HEAD" "^seali	git	https://github.com/Ecoral360/seali.c3l	HEAD	commit:$SHA40" "$(cat c3l.lock)"
+has "codeberg mapped, tag kept" "^other	git	https://codeberg.org/o/other	v1.0.0	commit:$SHA40" "$(cat c3l.lock)"
+newproj pd10
+printf '# c3l.lock v1\nold\tregistry\tacme/old\t1.0.0\tsha256:aa\tsha256:aa\n' > c3l.lock
+out="$(c3l list 2>&1)"; has "6-column line is readable" "old " "$out"
+eq "6-column line defaults to direct" "$(source "$C3L"; LOCK=c3l.lock lock_entries | cut -f7)" "direct"
+
 section "migrate from c3l 0.x"
 newproj p6
 mkdir -p lib; cp "$WORK/p5/app/lib/gitlib.c3l" lib/gitlib.c3l
@@ -349,6 +480,23 @@ check_not "obj/ and c3l.lock not packed" bash -c "unzip -l '$WORK/u2.c3l' | grep
 rm -rf obj c3l.lock tests
 out="$(pc --offline check --version 2>&1)"; eq "--version without value rc" $? 1
 has "--version message" "needs a value" "$out"
+
+# publishing a library that has dependencies: vendor.c3l.requires comes from its own c3l.lock
+printf '# c3l.lock v1\n@registry\thttp://example.invalid\ndcb\tregistry\tacme/dcb\t1.2.0\tsha256:aa\tsha256:aa\tdirect\t-\ndcc\tregistry\tacme/dcc\t1.0.0\tsha256:bb\tsha256:bb\tdep\t-\ngl\tgit\thttps://github.com/o/gl\tv0.3.0\tcommit:x\tcommit:x\tdirect\t-\n' > c3l.lock
+c3l pack --no-build --output "$WORK/withdeps.c3l" >/dev/null 2>&1; eq "pack with a lockfile rc" $? 0
+man="$(unzip -p "$WORK/withdeps.c3l" manifest.json)"
+has "requires has the registry dependency" '"source": "acme/dcb", "version": "1.2.0"' "$man"
+has "requires has the git dependency" '"source": "https://github.com/o/gl", "version": "v0.3.0"' "$man"
+check_not "transitive-only libs are not listed" grep -q acme/dcc <<< "$man"
+check_not "c3l.lock itself is not packed" bash -c "unzip -l '$WORK/withdeps.c3l' | grep -q c3l.lock"
+has "repo manifest untouched" '"provides" : "demo"' "$(cat manifest.json)"
+check_not "no requires without a lock" bash -c "unzip -p '$WORK/a.c3l' manifest.json | grep -q requires"
+rm -f c3l.lock
+sed -i 's|"provides" : "demo",|"provides" : "demo",\n  "dependencies" : [ "nowhere", "demo" ],|' manifest.json
+out="$(pc --offline --no-build --allow-dirty check 2>&1)"; eq "undeclared dependency is a warning, not an error" $? 0
+has "warns where-from is missing" "'nowhere' is in the manifest's dependencies but nothing says where to get it" "$out"
+has "warns about self dependency" "demo lists itself as a dependency" "$out"
+git checkout -q manifest.json
 
 out="$(pc --token-file "$WORK/token" publish 2>&1)"; eq "new package needs description rc" $? 1
 has "description message" "description is required" "$out"

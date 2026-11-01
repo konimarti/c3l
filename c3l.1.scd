@@ -35,7 +35,18 @@ Options may appear before or after the command.
 *--strict*
 	With *add* and *update*: fail instead of warn when the registry says a library
 	was published for another C3 release than your *c3c* (compared by
-	major.minor), or does not list your platform.
+	major.minor), or does not list your platform, and when libraries require each
+	other in a cycle or a library requires itself.
+
+*--force*
+	With *remove*: remove the library even if another library requires it.
+
+*--tree*
+	With *list*: print the dependency graph instead of the table.
+
+*--allow-host* _HOST_
+	Trust _HOST_ for git dependencies named by a library's manifest. Local paths
+	and *file://* URLs are the host _file_. See *DEPENDENCIES*.
 
 *--version* _X.Y.Z_, *--version=*_X.Y.Z_
 	For *check*, *pack* and *publish*: the version to publish. Without an argument
@@ -98,11 +109,22 @@ Options may appear before or after the command.
 	*git* and *unzip*. The repository needs a _manifest.json_ at its root.
 
 *remove* _name_
-	Delete the library file, its _dependencies_ entry and its lock line.
+	Delete the library file, its _dependencies_ entry and its lock line. Refuses if
+	another library requires it (*--force* overrides) and lists libraries that are no
+	longer needed.
 
-*list*
+*prune*
+	Remove dependency libraries that no directly added library needs any more.
+	With *--dry-run* only list them.
+
+*why* _name_
+	Show which libraries require _name_, and why they are installed.
+
+*list* [*--tree*]
 	Show every locked library with its state: _ok_, _modified_, _missing_,
 	_unpacked_, and _untracked_ for libraries in _project.json_ not in the lockfile.
+	_dep_ marks a library pulled in by another one. With *--tree* print the
+	dependency graph.
 
 *verify*
 	Check installed files against the lockfile. Exit status 1 on any difference.
@@ -130,7 +152,9 @@ Options may appear before or after the command.
 	Run *c3c fetch-info*.
 
 *migrate*
-	Convert a c3l 0.x _.c3l.deps_ file into _c3l.lock_.
+	Convert a c3l 0.x _.c3l.deps_ file, or a c3po _project.lock.json_, into
+	_c3l.lock_. For c3po the same commits are locked as git libraries; run *sync*
+	afterwards to rebuild them as verified archives.
 
 *check* [_dir_]
 	Verify that the library in _dir_ (default: .) can be published, without
@@ -168,6 +192,33 @@ The C3 version of the library is sent with each upload and checked on *add* and
 *info*: a different major.minor or a missing platform gives a warning (an error
 with *--strict*).
 
+# DEPENDENCIES
+
+c3c lists a library's dependencies by name only and does not install them
+transitively: every one must be in _project.json_. *add* and *update* therefore
+follow the dependencies a library declares and add them all, flat, to _lib_ and
+_project.json_, as one transaction.
+
+A library declares them in its _manifest.json_ (c3c ignores the _vendor_ key):
+
+```
+"vendor": { "c3l": { "requires": [
+    { "name": "vk", "source": "tonis2/vk", "version": "1.0.1" } ] } }
+```
+
+_source_ is a registry id or a git URL. _version_ is the minimum for registry
+libraries, a tag, branch or commit for git libraries. *publish* writes this block
+from the library's own _c3l.lock_. c3l also reads c3po's _vendor.c3po.sources_ and
+c3c's plain _dependencies_ names (no source: a warning, and *verify* fails until
+the library is added).
+
+Versions are chosen as in Go (minimum version selection): the highest of all
+requested minimums, never newer. Different major versions are an error. A cycle,
+or a library requiring itself, is a warning (an error with *--strict*); each
+library is installed once. Git sources other than github.com, codeberg.org and the
+hosts of URLs given on the command line need *--allow-host* or an answer at the
+prompt. More than 200 libraries are refused.
+
 # LOCKFILE
 
 Tab separated, one library per line, sorted by name:
@@ -180,13 +231,23 @@ hex	git	https://github.com/konimarti/hex.c3l	v0.1.1	commit:3fa9...	commit:3fa9..
 ```
 
 Columns: name, kind (_registry_ or _git_), source, version, pin (checksum or
-commit), SHA-256 of the installed file (registry) or the commit again (git).
+commit), SHA-256 of the installed file (registry) or the commit again (git), role
+(_direct_: added by you; _dep_: required by another library) and the comma
+separated names the library requires (_-_ for none). The format is still version 1;
+lines with only six columns are read as _direct_.
 
 # ENVIRONMENT VARIABLES
 
 _C3L_REGISTRY_
 	Registry base URL. Overridden by *--registry*, overrides the lockfile.
 	Default: https://www.c3pkg.eu
+
+_C3L_ALLOWED_HOSTS_
+	Space separated git hosts that dependencies may fetch from, in addition to
+	github.com and codeberg.org.
+
+_C3L_MAX_DEPS_
+	Largest number of transitive libraries one command may install. Default: 200.
 
 _C3L_TOKEN_, _C3PKG_TOKEN_
 	API token for *publish*, if no *--token-file* is given.

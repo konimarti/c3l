@@ -14,7 +14,8 @@ c3l update                          # update, rolled back on any failure
 c3l sync --frozen                   # CI: restore exactly what c3l.lock says
 ```
 
-- **Lockfile** `c3l.lock`: one line per library (version, SHA-256 or commit). Diff-friendly, commit it.
+- **Lockfile** `c3l.lock`: one line per library (version, SHA-256 or commit, and who needs it). Diff-friendly, commit it.
+- **Dependencies of libraries**: `c3l add` also installs what a library declares it needs, once each, cycles included. See [Dependencies](#dependencies).
 - **Verified**: the registry's checksum is compared with the downloaded file. A mismatch means rollback, not a warning.
 - **Safe**: every install is transactional (library file and `project.json` are restored on failure).
 - **Registry**: default [www.c3pkg.eu](https://www.c3pkg.eu); any `c3c fetch` registry works (`--registry`, `$C3L_REGISTRY`, or `@registry` in the lockfile).
@@ -34,13 +35,15 @@ make PREFIX=~/.local install        # or just copy ./c3l into your PATH
 | `init [name]` | create `c3l.lock` (and a project with `c3c init name`) |
 | `add <ns/name[@ver]>` | install from the registry |
 | `add <git-url>[@ref]` | install from git. No ref: highest semver tag (HEAD if untagged). `ref` is a tag, a branch, `HEAD`, or a full 40-char commit. Branches and `HEAD` follow the tip on `update`; tags and commits stay pinned |
-| `remove <name>` | remove file, `dependencies` entry and lock line |
-| `list` | libraries and state: `ok`, `modified`, `missing`, `untracked` |
+| `remove <name>` | remove file, `dependencies` entry and lock line; refuses if another library needs it (`--force`) |
+| `prune` | remove dependency libraries that nothing needs any more (`--dry-run` to look first) |
+| `why <name>` | which libraries require `<name>` |
+| `list [--tree]` | libraries and state: `ok`, `modified`, `missing`, `untracked`; `dep` marks libraries pulled in by another; `--tree` shows the dependency graph |
 | `verify` | check files against the lock, exit 1 on problems |
 | `outdated`, `update [--dry-run] [name[@ref]...]` | newer versions, update them; `name@ref` switches to an explicit version, tag, branch, `HEAD` or commit |
 | `sync [--frozen]` | restore from the lock; `--frozen` fails if lock and project disagree |
 | `search <text\|tag:x>`, `info <ns/name>` | registry lookups |
-| `migrate` | convert a c3l 0.x `.c3l.deps` |
+| `migrate` | convert a c3l 0.x `.c3l.deps` or a c3po `project.lock.json` |
 | `check [dir]`, `pack [dir]`, `publish [dir]` | publish a library to a registry, see [Publishing](#publishing) |
 
 Libraries are stored as `.c3l` zip files in the first `dependency-search-paths`
@@ -53,7 +56,9 @@ Options may appear before or after the command:
 | `--registry URL` | registry for this command (overrides `$C3L_REGISTRY` and the lockfile) |
 | `--dry-run` | with `update`: print what would change |
 | `--frozen` | with `sync`, for CI: fail on lock/project drift, never write the lockfile |
-| `--strict` | with `add`/`update`: a library built for another C3 release or platform is an error, not a warning |
+| `--strict` | with `add`/`update`: a library built for another C3 release or platform, or a dependency cycle, is an error, not a warning |
+| `--force` | with `remove`: remove even if another library needs it |
+| `--allow-host HOST` | trust a git host named by a library's dependencies (`file` for local paths), see [Dependencies](#dependencies) |
 | `--version X.Y.Z`, `--token-file F`, `--description`, `--license`, `--tags`, `--docs-url`, `--git-url`, `--c3-version`, `--output`, `--allow-dirty`, `--no-build`, `--offline`, `--registry-type` | see [Publishing](#publishing) |
 | `-h`, `-v` | help, version |
 
@@ -77,6 +82,67 @@ c3l can use, and the other way round.
 
 Checked with c3c 0.8.6 (nightly, 2026-11-01) against www.c3pkg.eu and a static
 test registry. The protocol is the one implemented by `c3c fetch`, `fetch-list` and `fetch-info`.
+
+## Dependencies
+
+c3c does not install the libraries a library needs: it only lists their names, and
+every one of them has to be in your `project.json`. c3l does that work for you.
+
+```sh
+c3l add acme/app      # installs app, and whatever app (and its dependencies) declare
+c3l list --tree       # app 1.0.0 / dcb 1.0.0 / dcc 1.0.0
+c3l why dcc           # dcb requires dcc / app requires dcb
+c3l remove app        # then 'c3l prune' removes what nothing needs any more
+```
+
+**Where a library declares its dependencies**, in its `manifest.json`:
+
+```json
+"vendor": { "c3l": { "requires": [
+    { "name": "vk",    "source": "tonis2/vk",                      "version": "1.0.1" },
+    { "name": "chess", "source": "https://github.com/me/chess.c3l", "version": "v0.2.0" } ] } }
+```
+
+`source` is a registry id or a git URL; `version` is the minimum for registry
+libraries, and a tag, branch or commit for git ones (optional). c3c ignores the
+`vendor` key. You do not have to write it by hand: `c3l publish` fills it in from
+the library's own `c3l.lock` (its direct dependencies, `c3l add` them as usual).
+c3l also reads, in this order: that block, **c3po's** `vendor.c3po.sources`, and c3c's
+plain `dependencies` names (a name with no source cannot be installed: c3l warns and
+`c3l verify` fails until you `c3l add` it).
+
+**Rules**
+
+- *Minimum version selection*, as in Go: if two libraries ask for different versions of a
+  third, the highest of those minimums is used, never a newer one by surprise. Different
+  *major* versions are an error (library names are global in C3).
+- *Flat*: everything goes into `lib/` and `project.json`, which is what c3c needs.
+- *Cycles are warnings*, not errors and never a loop: each library is installed once
+  (`--strict` makes a cycle, or a library that requires itself, an error).
+- *One transaction*: if anything in the graph fails, nothing is changed.
+- *Your choice wins*: a library you `add` yourself stays "direct" (never pruned), and
+  `name@ref` pins it.
+- *Trusted hosts*: a dependency may name any git URL. github.com, codeberg.org and the
+  hosts of the git URLs you typed are trusted; for anything else c3l asks (or fails when
+  not interactive). Allow a host with `--allow-host HOST` or `$C3L_ALLOWED_HOSTS`. A
+  graph over 200 libraries is refused (`$C3L_MAX_DEPS`).
+- `sync --frozen` restores the whole graph from `c3l.lock` without resolving anything.
+
+`c3l.lock` stays at `# c3l.lock v1`; each line now ends with `direct` or `dep` and the
+names the library requires. Older six-column lines are still read (as `direct`).
+
+### Coming from c3po
+
+[c3po](https://github.com/Ecoral360/c3po) (`project.lock.json`, `vendor.c3po.sources`) and
+c3l share the `lib/` layout, so you can switch one project at a time.
+
+- c3l **follows** the dependencies c3po libraries declare in `vendor.c3po.sources`.
+- `c3l migrate` reads a `project.lock.json` and locks the same commits (GitHub and
+  Codeberg), then `c3l sync` rebuilds the libraries as verified archives.
+- c3l never writes c3po's files. Turning c3l state into a c3po lock, or emitting
+  `vendor.c3po` on publish, is not implemented.
+- c3po has no versions or checksums, only commits, so a migrated library is pinned to a
+  commit and `c3l update` follows its tag, branch or HEAD from there.
 
 ## Publishing
 
@@ -120,6 +186,10 @@ from a private temporary file, so it does not show up in `ps` or in the output.
 registry's record for that version and warns if it was published for another C3 release
 (compared by major.minor, C3 is pre-1.0) or does not list your platform. `--strict` turns
 the warning into an error. Registries that do not publish this data are not checked.
+
+**Dependencies of your library:** `c3l add` them in the library (that writes its `c3l.lock`);
+`pack` and `publish` copy the direct ones into the archive's `manifest.json` as
+`vendor.c3l.requires`. `check` warns about names in `dependencies` that have no source.
 
 **Not covered:** yanking versions, editing package metadata after the first publish, and
 registries without an upload API (publishing to those fails with a clear message).
