@@ -40,7 +40,7 @@ DESC_OPT=""; LICENSE_OPT=""; TAGS_OPT=""; DOCS_OPT=""; GIT_OPT=""; REGISTRY_TYPE
 if [[ -t 1 ]]; then C_G=$'\e[32m'; C_Y=$'\e[33m'; C_R=$'\e[31m'; C_0=$'\e[0m'; else C_G=""; C_Y=""; C_R=""; C_0=""; fi
 info() { printf '%s[INFO]%s %s\n' "$C_G" "$C_0" "$*"; }
 warn() { printf '%s[WARN]%s %s\n' "$C_Y" "$C_0" "$*" >&2; }
-die()  { printf '%s[ERROR]%s %s\n' "$C_R" "$C_0" "$*" >&2; op_rollback; exit 1; }
+die()  { printf '%s[ERROR]%s %s\n' "$C_R" "$C_0" "$*" >&2; [[ "${BASHPID:-$$}" == "$$" ]] && op_rollback; exit 1; }
 
 #
 # Utilities
@@ -621,8 +621,9 @@ url_host() {
 	esac
 }
 trust_host() { # url: 0 if the host is allowed (asks when interactive), else dies
-	local h a; h="$(url_host "$1")"
-	[[ "$TRUSTED_HOSTS $C3L_ALLOWED_HOSTS " == *" $h "* ]] && return 0
+	local h a t; h="$(url_host "$1")"
+	[[ -n "$h" ]] || die "refusing to fetch $1: no host in the URL"
+	for t in $TRUSTED_HOSTS ${C3L_ALLOWED_HOSTS//,/ }; do [[ "$t" == "$h" ]] && return 0; done
 	if [[ -t 0 && -t 2 ]]; then
 		read -r -p "A dependency wants to fetch from '$h' ($1). Allow? [y/N] " a
 		if [[ "$a" == [yY]* ]]; then TRUSTED_HOSTS+=" $h "; return 0; fi
@@ -640,6 +641,7 @@ cycle_warn() {
 	(( STRICT )) && die "dependency cycle: $1 (--strict)"
 	warn "dependency cycle: $1 (each library is installed once)"
 }
+git_ref_of() { local v="$1"; v="${v#>=}"; v="${v#^}"; v="${v#\~}"; printf '%s' "$v"; }
 norm_ver() { local v="$1"; v="${v#>=}"; v="${v#^}"; v="${v#\~}"; v="${v#v}"; printf '%s' "$v"; }
 same_source() { local a="${1%/}" b="${2%/}"; a="${a%.git}"; b="${b%.git}"; [[ "$a" == "$b" ]]; }
 
@@ -647,11 +649,11 @@ follow_deps() { # name requirement-records
 	local name="$1" reqs="$2" rname rsrc rver
 	[[ -n "$reqs" ]] || return 0
 	STACK+=("$name")
-	while IFS=$'\t' read -r rname rsrc rver; do
+	while IFS=$'\t' read -r -u 3 rname rsrc rver; do
 		[[ -n "$rname" ]] || continue
 		[[ "$rsrc" == - ]] && rsrc=""; [[ "$rver" == - ]] && rver=""
 		resolve_req "$name" "$rname" "$rsrc" "$rver"
-	done <<< "$reqs"
+	done 3<<< "$reqs"
 	STACK=("${STACK[@]:0:${#STACK[@]}-1}")
 }
 
@@ -701,7 +703,7 @@ resolve_req() { # parent name source version
 	DEP_COUNT=$((DEP_COUNT+1))
 	(( DEP_COUNT <= DEP_MAX )) || die "more than $DEP_MAX transitive libraries; refusing (see C3L_MAX_DEPS)"
 	saved="$INSTALL_ROLE"; INSTALL_ROLE=dep
-	if is_git_url "$src"; then trust_host "$src"; install_git_one "$src" "$ver" ""
+	if is_git_url "$src"; then trust_host "$src"; install_git_one "$src" "$(git_ref_of "$ver")" ""
 	elif is_registry_id "$src"; then install_registry_one "$src" "$(norm_ver "$ver")" ""
 	else die "$parent requires '$name' from '$src', which is neither <namespace>/<name> nor a git URL"; fi
 	INSTALL_ROLE="$saved"
@@ -960,12 +962,12 @@ pub_requires_json() { # dir
 	return 0
 }
 
-# Add "vendor": {"c3l": {"requires": ...}} (before the version line, so commas stay valid).
+# Add "vendor": {"c3l": {"requires": ...}} right after the opening brace (commas stay valid).
 # Does nothing if the author already wrote requires or has another vendor block.
 set_manifest_requires() { # file json-array
 	local flat; flat="$(json_flatten < "$1")"
 	grep -q '^vendor\.' <<< "$flat" && return 0
-	awk -v r="$2" '!d && /^[[:space:]]*"version"[[:space:]]*:/ { print "  \"vendor\" : { \"c3l\" : { \"requires\" : " r " } },"; d=1 } { print }' "$1" > "$1.new" && mv "$1.new" "$1"
+	awk -v r="$2" '!d && /\{/ { sub(/\{/, "{\n  \"vendor\" : { \"c3l\" : { \"requires\" : " r " } },"); d=1 } { print }' "$1" > "$1.new" && mv "$1.new" "$1"
 }
 
 pub_stage() { # copies the package to $TMPROOT/stage/<name>.c3l with the final manifest
@@ -1191,15 +1193,18 @@ cmd_prune() {
 	find_project
 	local dir name orphans n=0
 	dir="$(lib_dir)"; orphans="$(lock_orphans)"
+	[[ -n "$orphans" ]] && ! (( DRY_RUN )) && op_begin
 	while IFS= read -r name; do
 		[[ -n "$name" ]] || continue
 		n=$((n+1))
 		if (( DRY_RUN )); then printf '%s: not needed (dry run)\n' "$name"; continue; fi
+		op_backup "$name"
 		rm -rf "${dir:?}/$name.c3l"
 		deps_edit del "$name" || warn "could not update $PROJECT; remove \"$name\" from 'dependencies' manually"
 		lock_del "$name"
 		info "pruned $name"
 	done <<< "$orphans"
+	op_commit
 	(( n > 0 )) || info "nothing to prune"
 	return 0
 }

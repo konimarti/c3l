@@ -404,6 +404,19 @@ has "c3po source followed" "gitlib installed for viapo" "$out"
 eq "gitlib is a dep, git kind" "$(awk -F'\t' '$1=="gitlib"{print $2 "/" $7}' c3l.lock)" "git/dep"
 check "c3po verify" c3l verify
 
+
+section "review fixes: trust list, git constraint operators, vendor block placement"
+eq "git ref: >= stripped" "$(git_ref_of '>=1.2.0')" "1.2.0"
+eq "git ref: caret stripped" "$(git_ref_of '^v1.2.0')" "v1.2.0"
+eq "git ref: plain tag kept" "$(git_ref_of 'v1.2.0')" "v1.2.0"
+newproj pr1
+c3l init >/dev/null 2>&1
+out="$(C3L_ALLOWED_HOSTS="example.org,file" c3l add acme/viapo 2>&1)"; eq "comma separated C3L_ALLOWED_HOSTS rc" $? 0
+has "trusted via env" "gitlib installed for viapo" "$out"
+newproj pr2
+c3l init >/dev/null 2>&1
+out="$(C3L_ALLOWED_HOSTS="" c3l add acme/viapo 2>&1)"; eq "empty list still refuses" $? 1
+check "prune is transactional and quiet when nothing to do" c3l prune
 section "dependencies: c3po project.lock.json is imported; old 6-column lock lines still work"
 newproj pd9
 c3l init >/dev/null 2>&1
@@ -497,6 +510,16 @@ out="$(pc --offline --no-build --allow-dirty check 2>&1)"; eq "undeclared depend
 has "warns where-from is missing" "'nowhere' is in the manifest's dependencies but nothing says where to get it" "$out"
 has "warns about self dependency" "demo lists itself as a dependency" "$out"
 git checkout -q manifest.json
+
+# vendor block goes to the top level even if a nested "version" comes first
+printf '# c3l.lock v1\ndcb\tregistry\tacme/dcb\t1.2.0\tsha256:aa\tsha256:aa\tdirect\t-\n' > c3l.lock
+sed -i 's|"provides" : "demo",|"targets-note" : { "version" : "9" },\n  "provides" : "demo",|' manifest.json
+c3l pack --no-build --allow-dirty --output "$WORK/nested.c3l" >/dev/null 2>&1; eq "pack with a nested version rc" $? 0
+flat="$(unzip -p "$WORK/nested.c3l" manifest.json | ( source "$C3L"; json_flatten ))"
+has "vendor block at top level" "^vendor.c3l.requires\[0\].source	acme/dcb" "$flat"
+has "nested version untouched" "^targets-note.version	9" "$flat"
+has "top-level version set" "^version	" "$flat"
+rm -f c3l.lock; git checkout -q manifest.json
 
 out="$(pc --token-file "$WORK/token" publish 2>&1)"; eq "new package needs description rc" $? 1
 has "description message" "description is required" "$out"
