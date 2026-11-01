@@ -5,12 +5,12 @@
 # c3l - reproducible dependencies for C3 projects, on top of `c3c fetch`.
 #
 # c3c installs libraries; c3l keeps the books: a lockfile (c3l.lock), checksum
-# verification with rollback, update/outdated/remove/sync. See docs/DESIGN.md.
+# verification with rollback, update/outdated/remove/sync.
 
 set -o pipefail
 [[ -n "$DEBUGC3L" ]] && set -x
 
-VERSION="1.0.0-dev"
+VERSION="1.0.0"
 PROGRAM="${0##*/}"
 C3C="${C3C:-c3c}"
 LOCK="${C3L_LOCK:-c3l.lock}"
@@ -458,7 +458,7 @@ cmd_usage() {
 	  help | version
 
 	Registry: --registry URL > \$C3L_REGISTRY > '@registry' in c3l.lock > $DEFAULT_REGISTRY
-	See c3l(1) and docs/DESIGN.md.
+	See c3l(1).
 	_EOF
 }
 

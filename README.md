@@ -69,8 +69,7 @@ test registry. The protocol is the one implemented by `c3c fetch`, `fetch-list` 
 ## Why not just `c3c fetch`?
 
 You can. c3l is for when you also want to know *which* version you have, be
-sure it is the *same bytes* everywhere, and update on purpose. What was
-decided and why is in [docs/DESIGN.md](docs/DESIGN.md).
+sure it is the *same bytes* everywhere, and update on purpose.
 
 ## Upgrading from c3l 0.x
 
