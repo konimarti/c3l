@@ -295,6 +295,32 @@ check_not "update @bogus fails" c3l update gitlib@nope
 c3l add "file://$GR@v0.1.0" >/dev/null 2>&1; has "@tag works" "v0.1.0	.*commit:$C1" "$(grep '^gitlib' c3l.lock)"
 check_not "not a repo fails" c3l add "file://$WORK/nope"
 
+section "git: line endings do not change the content hash"
+ER="$WORK/eolrepo"; mkdir -p "$ER/src"; (cd "$ER" && git init -q . && git config commit.gpgsign false \
+	&& echo '{ "provides": "eollib", "version": "0.1.0", "targets": {} }' > manifest.json \
+	&& printf 'module eollib;\nfn int x() => 1;\n' > src/eollib.c3 \
+	&& printf '* text eol=crlf\n' > .gitattributes && git add -A 2>/dev/null && git commit -qm one && git tag v0.1.0)
+newproj p5b; c3l init >/dev/null 2>&1
+c3l add "file://$ER@v0.1.0" >/dev/null 2>&1; eq "eol add rc" $? 0
+t_plain="$(sed -n 's/^eollib.*\(tree:[0-9a-f]*\).*/\1/p' c3l.lock)"
+check_not "no CR in archive" python3 -c "import zipfile,sys;sys.exit(0 if b'\r' in zipfile.ZipFile('lib/eollib.c3l').read('src/eollib.c3') else 1)"
+c3l remove eollib >/dev/null 2>&1
+GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=true GIT_CONFIG_KEY_1=core.eol GIT_CONFIG_VALUE_1=crlf \
+	c3l add "file://$ER@v0.1.0" >/dev/null 2>&1; eq "eol add with autocrlf=true rc" $? 0
+eq "same tree under autocrlf=true" "$(sed -n 's/^eollib.*\(tree:[0-9a-f]*\).*/\1/p' c3l.lock)" "$t_plain"
+rm lib/eollib.c3l
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=true c3l sync --frozen >/dev/null 2>&1; eq "frozen sync under autocrlf=true" $? 0
+
+# the Windows case: no .gitattributes, only the runner's core.autocrlf=true
+ER2="$WORK/eolrepo2"; mkdir -p "$ER2/src"; (cd "$ER2" && git init -q . && git config commit.gpgsign false \
+	&& echo '{ "provides": "eollib2", "version": "0.1.0", "targets": {} }' > manifest.json \
+	&& printf 'module eollib2;\nfn int x() => 1;\n' > src/eollib2.c3 && git add -A && git commit -qm one && git tag v0.1.0)
+c3l add "file://$ER2@v0.1.0" >/dev/null 2>&1
+t_lf="$(sed -n 's/^eollib2.*\(tree:[0-9a-f]*\).*/\1/p' c3l.lock)"
+c3l remove eollib2 >/dev/null 2>&1
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=true c3l add "file://$ER2@v0.1.0" >/dev/null 2>&1
+eq "autocrlf=true gives the same tree as LF" "$(sed -n 's/^eollib2.*\(tree:[0-9a-f]*\).*/\1/p' c3l.lock)" "$t_lf"
+
 section "git: repo without manifest is rejected"
 NR="$WORK/nomanifest"; mkdir -p "$NR"; (cd "$NR" && git init -q . && echo x > a && git add a && git commit -qm x)
 out="$(c3l add "file://$NR" 2>&1)"; eq "no manifest rc" $? 1

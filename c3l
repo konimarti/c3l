@@ -433,7 +433,10 @@ install_git() { # url [ref] [pin] [locked-hash]
 	zip="$TMPROOT/$name.c3l.$RANDOM"
 	# -0: store without compression (no dependence on the local zlib); TZ=UTC:
 	# git writes zip timestamps in local time, so pin it
-	TZ=UTC git -C "$src" archive --format=zip -0 -o "$zip" HEAD || die "git archive failed"
+	# and no line-ending/filter conversion (core.autocrlf, eol= in .gitattributes):
+	# the library is the committed blobs, the same on every machine
+	mkdir -p "$src/.git/info"; echo '* -text -filter -ident -working-tree-encoding' > "$src/.git/info/attributes"
+	TZ=UTC git -C "$src" -c core.autocrlf=false -c core.eol=lf archive --format=zip -0 -o "$zip" HEAD || die "git archive failed"
 	hash="tree:$(tree_of_zip "$zip")"; [[ "$hash" != "tree:" ]] || die "cannot compute the content hash of the archive of $url"
 	case "$want_hash" in
 		tree:*) [[ "$hash" == "$want_hash" ]] || die "$name@$label: contents of commit ${commit:0:12} hash to $hash, but $LOCK has $want_hash (lock edited by hand?); re-lock with '$PROGRAM add <url>@<ref>'" ;;
