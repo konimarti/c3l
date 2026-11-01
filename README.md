@@ -166,8 +166,9 @@ archive's `manifest.json`. Your repository file is not touched.
 
 **Where the version comes from**, in this order: `--version X.Y.Z`; a semver tag on
 `HEAD` (`v1.2.3` or `1.2.3`, the highest if there are several); `version` in
-`manifest.json`. If `manifest.json` says something different from the chosen version,
-c3l warns and uses the chosen one. Versions are `MAJOR.MINOR.PATCH` or
+`manifest.json`; `version` in `project.json`. If `manifest.json` or `project.json` says
+something different from the chosen version, c3l warns and uses the chosen one
+(`manifest.json` wins over `project.json`). Versions are `MAJOR.MINOR.PATCH` or
 `MAJOR.MINOR.PATCH-prerelease` and **immutable once published** (no overwrite, no delete).
 
 **What is checked before upload** (`c3l check`): `manifest.json` with `provides`; a valid

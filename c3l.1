@@ -260,9 +260,10 @@ For c3pkg: create an API token under Settings, API tokens, and give it to c3l wi
 .P
 The package name is \fIprovides\fR in \fImanifest.\&json\fR of the library directory (see
 \fBc3c init-lib\fR).\& The version is, in this order: \fB--version\fR, a semantic version tag on
-HEAD (\fIv1.\&2.\&3\fR or \fI1.\&2.\&3\fR), \fIversion\fR in \fImanifest.\&json\fR.\& If the manifest says
-something else, c3l warns and the archive gets the chosen version; the file in the
-repository is not changed.\& A version is \fIMAJOR.\&MINOR.\&PATCH\fR or
+HEAD (\fIv1.\&2.\&3\fR or \fI1.\&2.\&3\fR), \fIversion\fR in \fImanifest.\&json\fR, \fIversion\fR in
+\fIproject.\&json\fR (\fImanifest.\&json\fR wins).\& If the manifest or the project file says
+something else, c3l warns and the archive gets the chosen version; the files in the
+repository are not changed.\& A version is \fIMAJOR.\&MINOR.\&PATCH\fR or
 \fIMAJOR.\&MINOR.\&PATCH-prerelease\fR and can never be changed once published.\&
 .P
 The C3 version of the library is sent with each upload and checked on \fBadd\fR and

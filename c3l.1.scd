@@ -183,9 +183,10 @@ _Authorization: Bearer_ from a private temporary file, never on the command line
 
 The package name is _provides_ in _manifest.json_ of the library directory (see
 *c3c init-lib*). The version is, in this order: *--version*, a semantic version tag on
-HEAD (_v1.2.3_ or _1.2.3_), _version_ in _manifest.json_. If the manifest says
-something else, c3l warns and the archive gets the chosen version; the file in the
-repository is not changed. A version is _MAJOR.MINOR.PATCH_ or
+HEAD (_v1.2.3_ or _1.2.3_), _version_ in _manifest.json_, _version_ in
+_project.json_ (_manifest.json_ wins). If the manifest or the project file says
+something else, c3l warns and the archive gets the chosen version; the files in the
+repository are not changed. A version is _MAJOR.MINOR.PATCH_ or
 _MAJOR.MINOR.PATCH-prerelease_ and can never be changed once published.
 
 The C3 version of the library is sent with each upload and checked on *add* and

@@ -552,6 +552,27 @@ has "read-only message" "read-only" "$out"
 out="$(c3l --registry "http://127.0.0.1:$PKG429" --token-file "$WORK/token" --registry-type c3pkg publish --version 3.0.0 --description D 2>&1)"; eq "rate limit rc" $? 1
 has "rate limit message" "retry in 7 seconds" "$out"
 
+section "version from project.json; manifest.json wins; tag and --version win over both"
+rm -rf "$WORK/pubver"; mkdir -p "$WORK/pubver"; cd "$WORK/pubver" && "$C3C" init-lib vdemo >/dev/null 2>&1 && cd vdemo.c3l || exit 1
+mkdir -p src; printf 'module vdemo;\nfn int answer() => 42;\n' > src/vdemo.c3
+printf '{ "version": "0.3.0", "authors": [], "sources": ["src/**"] }\n' > project.json
+git init -q .; git add -A; git commit -qm init
+out="$(pc --offline --no-build check 2>&1)"; eq "project.json version used rc" $? 0
+has "version from project.json" "vdemo 0.3.0 (from project.json" "$out"
+sed -i 's|"provides" : "vdemo",|"provides" : "vdemo",\n  "version" : "0.4.0",|' manifest.json; git commit -qam manifest
+out="$(pc --offline --no-build check 2>&1)"; eq "manifest and project.json differ rc" $? 0
+has "manifest.json wins" "vdemo 0.4.0 (from manifest.json" "$out"
+has "project.json mismatch warned" "project.json says version 0.3.0, publishing 0.4.0" "$out"
+git tag v1.0.0
+out="$(pc --offline --no-build check 2>&1)"
+has "tag wins over both" "vdemo 1.0.0 (from git tag v1.0.0" "$out"
+has "manifest warned about" "manifest.json says version 0.4.0, publishing 1.0.0" "$out"
+has "project.json warned about" "project.json says version 0.3.0, publishing 1.0.0" "$out"
+out="$(pc --offline --no-build --version 2.0.0 check 2>&1)"; has "--version wins" "vdemo 2.0.0 (from --version" "$out"
+c3l pack --no-build --output "$WORK/vd.c3l" >/dev/null 2>&1
+has "archive manifest gets the chosen version" '"version" : "1.0.0"' "$(unzip -p "$WORK/vd.c3l" manifest.json)"
+has "project.json untouched" '"version": "0.3.0"' "$(cat project.json)"
+
 section "install-side compatibility (c3_version, targets)"
 cd "$WORK" && newproj p7
 c3l --registry "$PR" init >/dev/null 2>&1

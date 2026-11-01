@@ -895,9 +895,18 @@ PUB_DIR=""; PUB_NAME=""; PUB_VERSION=""; PUB_VSRC=""; PUB_C3V=""; PUB_NEW=0; PUB
 perr() { printf '%s[ERROR]%s %s\n' "$C_R" "$C_0" "$*" >&2; ERRS=$((ERRS+1)); }
 
 # Version of a library, in this order: --version, a semver tag on HEAD, "version" in manifest.json.
+json_top_version() { # file -> its top-level "version" string (empty if none or no file)
+	[[ -f "$1" ]] || return 0
+	json_flatten < "$1" | awk -F'\t' '$1 == "version" { print $2; exit }'
+}
+
+# Order: --version, a semver tag on HEAD, "version" in manifest.json, "version" in project.json.
+# A source that says something else than the chosen version only gets a warning.
 pub_resolve_version() { # dir
-	local dir="$1" mver tag t best="" v
-	mver="$(json_string_field version < "$dir/manifest.json")"
+	local dir="$1" mver pver pfile tag t best="" v
+	mver="$(json_top_version "$dir/manifest.json")"
+	pfile="$dir/project.json"; [[ -f "$pfile" ]] || pfile="$dir/project.json5"
+	pver="$(json_top_version "$pfile")"
 	if command -v git >/dev/null 2>&1 && git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 		while IFS= read -r t; do
 			v="${t#v}"; strict_semver "$v" || continue
@@ -911,11 +920,16 @@ pub_resolve_version() { # dir
 		PUB_VERSION="$best"; PUB_VSRC="git tag $tag"
 	elif [[ -n "$mver" ]]; then
 		PUB_VERSION="$mver"; PUB_VSRC="manifest.json"
+	elif [[ -n "$pver" ]]; then
+		PUB_VERSION="$pver"; PUB_VSRC="${pfile##*/}"
 	else
 		return 1
 	fi
 	if [[ -n "$mver" && "$mver" != "$PUB_VERSION" ]]; then
 		warn "manifest.json says version $mver, publishing $PUB_VERSION (from $PUB_VSRC); the archive's manifest gets $PUB_VERSION"
+	fi
+	if [[ -n "$pver" && "$pver" != "$PUB_VERSION" ]]; then
+		warn "${pfile##*/} says version $pver, publishing $PUB_VERSION (from $PUB_VSRC)"
 	fi
 	return 0
 }
@@ -1027,7 +1041,7 @@ pub_check() {
 	[[ "$PUB_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || perr "invalid package name '$PUB_NAME' (letters, digits, '.', '_', '-')"
 
 	if ! pub_resolve_version "$dir"; then
-		perr "no version: tag the commit (git tag v1.2.3), pass --version 1.2.3, or set \"version\" in manifest.json"
+		perr "no version: tag the commit (git tag v1.2.3), pass --version 1.2.3, or set \"version\" in manifest.json (or project.json)"
 		return 1
 	fi
 	if strict_semver "$PUB_VERSION"; then :; else
