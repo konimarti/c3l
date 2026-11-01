@@ -23,6 +23,38 @@ verification with rollback, and update, outdated, remove and sync.\& Libraries a
 kept as \fI.\&c3l\fR zip files in the first entry of \fIdependency-search-paths\fR.\& Run
 \fBc3l\fR in the project root.\&
 .P
+.SH OPTIONS
+.P
+Options may appear before or after the command.\&
+.P
+\fB--registry\fR \fIURL\fR, \fB--registry=\fR\fIURL\fR
+.RS 4
+Use this registry for the command.\& Overrides \fBC3L_REGISTRY\fR and the registry
+recorded in \fIc3l.\&lock\fR.\& Only matters for registry libraries and for \fBsearch\fR.\&
+.P
+.RE
+\fB--dry-run\fR
+.RS 4
+Only print what \fBupdate\fR would change.\& Has no effect on other commands.\&
+.P
+.RE
+\fB--frozen\fR
+.RS 4
+For \fBsync\fR, meant for CI.\& Fail if \fIproject.\&json\fR and \fIc3l.\&lock\fR list different
+libraries, restore only what the lockfile says, and never write the lockfile.\&
+Has no effect on other commands.\&
+.P
+.RE
+\fB-h\fR, \fB--help\fR
+.RS 4
+Print the usage text.\&
+.P
+.RE
+\fB-v\fR, \fB--version\fR
+.RS 4
+Print the version.\&
+.P
+.RE
 .SH COMMANDS
 .P
 \fBinit\fR [\fIname\fR]

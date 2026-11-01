@@ -45,6 +45,15 @@ make PREFIX=~/.local install        # or just copy ./c3l into your PATH
 Libraries are stored as `.c3l` zip files in the first `dependency-search-paths`
 entry. Commit them, or ignore them and run `c3l sync` after cloning.
 
+Options may appear before or after the command:
+
+| | |
+|---|---|
+| `--registry URL` | registry for this command (overrides `$C3L_REGISTRY` and the lockfile) |
+| `--dry-run` | with `update`: print what would change |
+| `--frozen` | with `sync`, for CI: fail on lock/project drift, never write the lockfile |
+| `-h`, `-v` | help, version |
+
 ## Works with `c3c fetch` and its registry protocol
 
 c3l does not have its own registry format. It speaks the `c3c fetch` protocol

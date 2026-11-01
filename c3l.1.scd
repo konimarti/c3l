@@ -16,6 +16,28 @@ verification with rollback, and update, outdated, remove and sync. Libraries are
 kept as _.c3l_ zip files in the first entry of _dependency-search-paths_. Run
 *c3l* in the project root.
 
+# OPTIONS
+
+Options may appear before or after the command.
+
+*--registry* _URL_, *--registry=*_URL_
+	Use this registry for the command. Overrides *C3L_REGISTRY* and the registry
+	recorded in _c3l.lock_. Only matters for registry libraries and for *search*.
+
+*--dry-run*
+	Only print what *update* would change. Has no effect on other commands.
+
+*--frozen*
+	For *sync*, meant for CI. Fail if _project.json_ and _c3l.lock_ list different
+	libraries, restore only what the lockfile says, and never write the lockfile.
+	Has no effect on other commands.
+
+*-h*, *--help*
+	Print the usage text.
+
+*-v*, *--version*
+	Print the version.
+
 # COMMANDS
 
 *init* [_name_]
