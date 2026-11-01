@@ -53,6 +53,19 @@ major.\&minor), or does not list your platform, and when libraries require each
 other in a cycle or a library requires itself.\&
 .P
 .RE
+\fB--fail-fast\fR
+.RS 4
+With \fBsync\fR and \fBupdate\fR: stop at the first library that fails.\& The default is to
+go on with the others and report the failures at the end (exit status 1).\&
+.P
+.RE
+\fB--emit-c3po\fR
+.RS 4
+With \fBpack\fR and \fBpublish\fR: also write \fIvendor.\&c3po.\&sources\fR for c3po users, from
+the direct git dependencies on github.\&com and codeberg.\&org.\& Other dependencies
+are named in a warning.\&
+.P
+.RE
 \fB--force\fR
 .RS 4
 With \fBremove\fR: remove the library even if another library requires it.\&
@@ -140,6 +153,21 @@ download with the registry'\&s checksum, write the lock line.\& A mismatch or an
 failure restores the previous library file and \fIproject.\&json\fR.\&
 .P
 .RE
+\fBadd\fR \fIgithub:owner/repo\fR[@\fIref\fR], \fIcodeberg:owner/repo\fR, \fIgitlab:owner/repo\fR
+.RS 4
+Shorthand for the https URL of that host; otherwise as \fBadd\fR \fIgit-url\fR.\& Plain
+\fIowner/repo\fR is a registry id.\&
+.P
+.RE
+\fBadd\fR \fI.\&/dir\fR
+.RS 4
+Link a local library directory (\fI.\&/dir\fR, \fI.\&.\&/dir\fR or an absolute path with a
+\fImanifest.\&json\fR) into \fIlib/\fR with a symlink, so edits show up in the next build.\&
+Recorded in the lockfile as kind \fIpath\fR; \fBsync\fR re-creates the link, \fBupdate\fR skips
+it, and its own dependencies are followed.\& A library that depends on a local
+directory cannot be published.\&
+.P
+.RE
 \fBadd\fR \fIgit-url\fR[@\fIref\fR]
 .RS 4
 Install from a git repository.\& \fIref\fR is a tag, a branch, \fBHEAD\fR, or a full
@@ -207,7 +235,10 @@ example \fBc3l update lib@HEAD\fR moves a tag-locked library to HEAD).\& With
 Make the project match \fIc3l.\&lock\fR: reinstall missing or modified libraries at the
 locked version and verify against the locked checksum or commit.\& With
 \fB--frozen\fR fail instead if \fIproject.\&json\fR and the lockfile list different
-libraries, and never write the lockfile.\&
+libraries, and never write the lockfile.\& A library that cannot be restored does
+not stop the others: \fBsync\fR goes on, then exits with status 1 and names the
+failures.\& \fB--fail-fast\fR stops at the first one.\& Each library is still restored
+atomically.\&
 .P
 .RE
 \fBsearch\fR \fItext\fR | \fBtag:\fR\fIname\fR
@@ -271,6 +302,11 @@ The C3 version of the library is sent with each upload and checked on \fBadd\fR 
 with \fB--strict\fR).\&
 .P
 .SH DEPENDENCIES
+.P
+A library directory (a \fImanifest.\&json\fR and no \fIproject.\&json\fR) works too: \fBadd\fR installs
+into \fI.\&/lib\fR (keep it out of git; it is never packed), lists only the dependencies you
+asked for in the manifest'\&s \fIdependencies\fR, and writes \fIc3l.\&lock\fR, from which \fBpublish\fR
+fills in \fIvendor.\&c3l.\&requires\fR.\&
 .P
 c3c lists a library'\&s dependencies by name only and does not install them
 transitively: every one must be in \fIproject.\&json\fR.\& \fBadd\fR and \fBupdate\fR therefore

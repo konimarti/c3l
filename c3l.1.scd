@@ -38,6 +38,15 @@ Options may appear before or after the command.
 	major.minor), or does not list your platform, and when libraries require each
 	other in a cycle or a library requires itself.
 
+*--fail-fast*
+	With *sync* and *update*: stop at the first library that fails. The default is to
+	go on with the others and report the failures at the end (exit status 1).
+
+*--emit-c3po*
+	With *pack* and *publish*: also write _vendor.c3po.sources_ for c3po users, from
+	the direct git dependencies on github.com and codeberg.org. Other dependencies
+	are named in a warning.
+
 *--force*
 	With *remove*: remove the library even if another library requires it.
 
@@ -93,6 +102,17 @@ Options may appear before or after the command.
 	download with the registry's checksum, write the lock line. A mismatch or any
 	failure restores the previous library file and _project.json_.
 
+*add* _github:owner/repo_[@_ref_], _codeberg:owner/repo_, _gitlab:owner/repo_
+	Shorthand for the https URL of that host; otherwise as *add* _git-url_. Plain
+	_owner/repo_ is a registry id.
+
+*add* _./dir_
+	Link a local library directory (_./dir_, _../dir_ or an absolute path with a
+	_manifest.json_) into _lib/_ with a symlink, so edits show up in the next build.
+	Recorded in the lockfile as kind _path_; *sync* re-creates the link, *update* skips
+	it, and its own dependencies are followed. A library that depends on a local
+	directory cannot be published.
+
 *add* _git-url_[@_ref_]
 	Install from a git repository. _ref_ is a tag, a branch, *HEAD*, or a full
 	40-character commit hash; it can also be given as a separate argument. Without
@@ -143,7 +163,10 @@ Options may appear before or after the command.
 	Make the project match _c3l.lock_: reinstall missing or modified libraries at the
 	locked version and verify against the locked checksum or commit. With
 	*--frozen* fail instead if _project.json_ and the lockfile list different
-	libraries, and never write the lockfile.
+	libraries, and never write the lockfile. A library that cannot be restored does
+	not stop the others: *sync* goes on, then exits with status 1 and names the
+	failures. *--fail-fast* stops at the first one. Each library is still restored
+	atomically.
 
 *search* _text_ | *tag:*_name_
 	Search the registry (the _/search_ endpoint, else *c3c fetch-list*).
@@ -194,6 +217,11 @@ The C3 version of the library is sent with each upload and checked on *add* and
 with *--strict*).
 
 # DEPENDENCIES
+
+A library directory (a _manifest.json_ and no _project.json_) works too: *add* installs
+into _./lib_ (keep it out of git; it is never packed), lists only the dependencies you
+asked for in the manifest's _dependencies_, and writes _c3l.lock_, from which *publish*
+fills in _vendor.c3l.requires_.
 
 c3c lists a library's dependencies by name only and does not install them
 transitively: every one must be in _project.json_. *add* and *update* therefore

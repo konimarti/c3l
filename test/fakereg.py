@@ -28,7 +28,7 @@ def main():
 
     path = os.path.join(dl, f"{name}@{version}")
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
-        man = {"provides": name, "version": version, "targets": {}}
+        man = {"provides": name, "version": version, "targets": {t: {} for t in ("linux-x64", "linux-aarch64", "macos-x64", "macos-aarch64", "windows-x64")}}
         if "deps" in opts:
             man["dependencies"] = opts["deps"].split(",")
         if "requires" in opts:

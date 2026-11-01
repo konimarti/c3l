@@ -41,7 +41,9 @@ make PREFIX=~/.local install        # or just copy ./c3l into your PATH
 | `list [--tree]` | libraries and state: `ok`, `modified`, `missing`, `untracked`; `dep` marks libraries pulled in by another; `--tree` shows the dependency graph |
 | `verify` | check files against the lock, exit 1 on problems |
 | `outdated`, `update [--dry-run] [name[@ref]...]` | newer versions, update them; `name@ref` switches to an explicit version, tag, branch, `HEAD` or commit |
-| `sync [--frozen]` | restore from the lock; `--frozen` fails if lock and project disagree |
+| `add github:o/r`, `codeberg:o/r`, `gitlab:o/r` | git shorthand for the https URL, also with `@ref` |
+| `add ./dir` | link a local library directory into `lib/` (a symlink: edits show up in the next build; never publishable) |
+| `sync [--frozen] [--fail-fast]` | restore from the lock; `--frozen` fails if lock and project disagree. A library that cannot be restored does not stop the others (exit status 1 and a summary); `--fail-fast` stops at the first one |
 | `search <text\|tag:x>`, `info <ns/name>` | registry lookups |
 | `migrate` | convert a c3l 0.x `.c3l.deps` or a c3po `project.lock.json` |
 | `check [dir]`, `pack [dir]`, `publish [dir]` | publish a library to a registry, see [Publishing](#publishing) |
@@ -58,6 +60,8 @@ Options may appear before or after the command:
 | `--frozen` | with `sync`, for CI: fail on lock/project drift, never write the lockfile |
 | `--strict` | with `add`/`update`: a library built for another C3 release or platform, or a dependency cycle, is an error, not a warning |
 | `--force` | with `remove`: remove even if another library needs it |
+| `--fail-fast` | with `sync`/`update`: stop at the first library that fails instead of going on with the rest |
+| `--emit-c3po` | with `pack`/`publish`: also write `vendor.c3po.sources` for c3po users (direct git dependencies on GitHub or Codeberg) |
 | `--allow-host HOST` | trust a git host named by a library's dependencies (`file` for local paths), see [Dependencies](#dependencies) |
 | `--version X.Y.Z`, `--token-file F`, `--description`, `--license`, `--tags`, `--docs-url`, `--git-url`, `--c3-version`, `--output`, `--allow-dirty`, `--no-build`, `--offline`, `--registry-type` | see [Publishing](#publishing) |
 | `-h`, `-v` | help, version |
@@ -128,6 +132,16 @@ plain `dependencies` names (a name with no source cannot be installed: c3l warns
   graph over 200 libraries is refused (`$C3L_MAX_DEPS`).
 - `sync --frozen` restores the whole graph from `c3l.lock` without resolving anything.
 
+**Local libraries.** `c3l add ./dir` (or `../dir`, `/abs/dir`) links a library directory
+into `lib/`, for developing a library and its user side by side. It is recorded in the lock
+as kind `path`, `sync` re-creates the link, `update` leaves it alone, and the library's own
+dependencies are followed like any other. Git repositories on disk are added with a
+`file://` URL.
+
+**Short git sources.** `github:owner/repo`, `codeberg:owner/repo` and `gitlab:owner/repo`
+stand for the https URL (`owner/repo` alone is a registry id), also in `vendor.c3l.requires`.
+When a project has no `dependency-search-paths`, the first install adds `"lib"`.
+
 `c3l.lock` stays at `# c3l.lock v1`; each line now ends with `direct` or `dep` and the
 names the library requires. Older six-column lines are still read (as `direct`).
 
@@ -139,8 +153,10 @@ c3l share the `lib/` layout, so you can switch one project at a time.
 - c3l **follows** the dependencies c3po libraries declare in `vendor.c3po.sources`.
 - `c3l migrate` reads a `project.lock.json` and locks the same commits (GitHub and
   Codeberg), then `c3l sync` rebuilds the libraries as verified archives.
-- c3l never writes c3po's files. Turning c3l state into a c3po lock, or emitting
-  `vendor.c3po` on publish, is not implemented.
+- c3l never writes c3po's lock or `project.json`. `c3l publish --emit-c3po` also writes
+  `vendor.c3po.sources` into the published manifest, for the direct git dependencies on
+  GitHub or Codeberg, so c3po users who add your library get them too (registry
+  libraries cannot be expressed for c3po; c3l says which).
 - c3po has no versions or checksums, only commits, so a migrated library is pinned to a
   commit and `c3l update` follows its tag, branch or HEAD from there.
 
@@ -188,9 +204,13 @@ registry's record for that version and warns if it was published for another C3 
 (compared by major.minor, C3 is pre-1.0) or does not list your platform. `--strict` turns
 the warning into an error. Registries that do not publish this data are not checked.
 
-**Dependencies of your library:** `c3l add` them in the library (that writes its `c3l.lock`);
-`pack` and `publish` copy the direct ones into the archive's `manifest.json` as
-`vendor.c3l.requires`. `check` warns about names in `dependencies` that have no source.
+**Dependencies of your library:** `c3l add` them right in the library directory, no
+`project.json` needed. c3l installs them into `./lib` (put `lib/` in `.gitignore`; it is
+never packed), lists the ones you asked for in the manifest's `dependencies`, and writes
+`c3l.lock`. `pack` and `publish` copy those direct dependencies into the archive's
+`manifest.json` as `vendor.c3l.requires`, and `check` compiles the library against them.
+`check` warns about names in `dependencies` that have no source, and refuses a dependency
+that is a local directory (`c3l add ./dir`), since consumers cannot fetch it.
 
 **Not covered:** yanking versions, editing package metadata after the first publish, and
 registries without an upload API (publishing to those fails with a clear message).

@@ -593,6 +593,122 @@ out="$(c3l --registry "$PR" --strict add me/demo@1.2.0 2>&1)"; eq "--strict add 
 has "strict refuses" "not compatible" "$out"
 check_not "nothing installed under --strict" test -e lib/demo.c3l
 
+section "library mode: a directory with only manifest.json can add, list, remove, prune"
+rm -rf "$WORK/libm"; mkdir -p "$WORK/libm"; cd "$WORK/libm" && "$C3C" init-lib lm >/dev/null 2>&1 && cd lm.c3l || exit 1
+mkdir -p src; printf 'module lm;\nfn int answer() => 42;\n' > src/lm.c3
+printf 'lib/\n' > .gitignore
+git init -q .; git add -A; git commit -qm init; git tag v0.1.0
+publish acme/lmc 1.0.0 >/dev/null
+publish acme/lmb 1.0.0 --requires=acme/lmc:1.0.0 >/dev/null
+out="$(c3l list 2>&1)"; eq "list in a library directory rc" $? 0
+out="$(c3l init 2>&1)"; eq "init in a library directory rc" $? 0
+out="$(c3l add acme/lmb 2>&1)"; eq "add in a library directory rc" $? 0
+check "dependency in lib/" test -f lib/lmb.c3l
+check "transitive dependency in lib/" test -f lib/lmc.c3l
+flat="$(json_flatten < manifest.json 2>/dev/null || ( source "$C3L"; json_flatten < manifest.json ))"
+has "manifest.json lists the direct dependency" "^dependencies\[0\]	lmb" "$flat"
+check_not "manifest.json does not list the transitive one" grep -q '"lmc"' manifest.json
+eq "lock has both" "$(awk -F'\t' '$0 !~ /^#/ && $1 !~ /^@/' c3l.lock | wc -l)" "2"
+check "verify in a library directory" c3l verify
+has "list shows the dependency" "lmb " "$(c3l list)"
+git add -A; git commit -qm "add dependencies"; git tag v0.1.1
+out="$(c3l check 2>&1)"; eq "check with installed dependencies rc" $? 0
+has "compile check sees lib/" "compiles" "$out"
+c3l pack --no-build --output "$WORK/lm.c3l" >/dev/null 2>&1
+check_not "installed dependencies are not packed" bash -c "unzip -l '$WORK/lm.c3l' | grep -q 'lib/'"
+has "requires written from the lock" 'acme/lmb' "$(unzip -p "$WORK/lm.c3l" manifest.json)"
+check "untracked c3l.lock and ignored lib/ do not make the tree dirty" c3l --offline --no-build check
+rm -f lib/lmb.c3l lib/lmc.c3l
+c3l sync >/dev/null 2>&1; eq "sync in a library directory rc" $? 0
+check "sync restored lib/lmc.c3l" test -f lib/lmc.c3l
+c3l sync --frozen >/dev/null 2>&1; eq "sync --frozen in a library directory: no false drift rc" $? 0
+check_not "list does not flag transitive libraries" bash -c "'$C3L' list | grep -q not-in-project"
+c3l remove lmb >/dev/null 2>&1
+check_not "remove drops the manifest dependency" grep -q '"lmb"' manifest.json
+c3l prune >/dev/null 2>&1
+check_not "prune removed the transitive library" test -e lib/lmc.c3l
+
+section "path dependencies: linked, transitive, never published"
+newproj ppd
+mkdir -p ../pl/src; printf '{ "provides": "pl", "sources": ["src/**"], "vendor": { "c3l": { "requires": [ { "name": "lmc", "source": "acme/lmc", "version": "1.0.0" } ] } } }\n' > ../pl/manifest.json
+printf 'module pl;\nfn int one() => 1;\n' > ../pl/src/pl.c3
+c3l init >/dev/null 2>&1
+out="$(c3l add ../pl 2>&1)"; eq "add ../pl rc" $? 0
+check "linked, not copied" test -L lib/pl.c3l
+check "dependencies of the linked library are installed" test -f lib/lmc.c3l
+eq "lock kind is path" "$(awk -F'\t' '$1=="pl"{print $2}' c3l.lock)" "path"
+eq "lmc is a dependency" "$(awk -F'\t' '$1=="lmc"{print $7}' c3l.lock)" "dep"
+check "verify with a path dependency" c3l verify
+has "list shows path" "pl .*path" "$(c3l list)"
+printf 'module pl;\nfn int one() => 1;\nfn int two() => 2;\n' > ../pl/src/pl.c3
+check "edits are visible through the link" grep -q two lib/pl.c3l/src/pl.c3
+out="$(c3l update 2>&1)"; eq "update skips path dependencies rc" $? 0
+rm lib/pl.c3l; c3l sync >/dev/null 2>&1; eq "sync restores the link rc" $? 0
+check "link restored" test -L lib/pl.c3l
+c3l remove pl >/dev/null 2>&1
+check_not "remove deletes the link" test -e lib/pl.c3l
+check "remove leaves the directory alone" test -f ../pl/manifest.json
+# a library depending on a local directory cannot be published
+c3l add ../pl >/dev/null 2>&1; cp c3l.lock "$WORK/pl.lock"
+cd "$WORK/libm/lm.c3l" && cp "$WORK/pl.lock" c3l.lock
+out="$(c3l --offline --no-build check 2>&1)"; eq "publishing a path dependency fails rc" $? 1
+has "path dependency explained" "is a local directory" "$out"
+rm -f c3l.lock
+
+section "git shorthand, and 'lib' is added to dependency-search-paths"
+eq "github:" "$(expand_source github:o/r)" "https://github.com/o/r"
+eq "codeberg:" "$(expand_source codeberg:o/r)" "https://codeberg.org/o/r"
+eq "gitlab:" "$(expand_source gitlab:o/r)" "https://gitlab.com/o/r"
+eq "other sources unchanged" "$(expand_source acme/x)" "acme/x"
+eq "urls unchanged" "$(expand_source https://example.org/x)" "https://example.org/x"
+rm -rf "$WORK/nosp"; mkdir -p "$WORK/nosp/src"; cd "$WORK/nosp" || exit 1
+printf '{ "langrev": "1", "authors": [], "version": "0.1.0", "sources": ["src/**"], "targets": { "app": { "type": "executable" } } }\n' > project.json
+echo 'fn void main() {}' > src/main.c3
+cp project.json "$WORK/nosp.before"
+c3l init >/dev/null 2>&1; c3l list >/dev/null 2>&1
+check "list does not edit the project" cmp -s project.json "$WORK/nosp.before"
+out="$(c3l add acme/lmc 2>&1)"; eq "add without dependency-search-paths rc" $? 0
+has "lib added to dependency-search-paths" '"dependency-search-paths"' "$(cat project.json)"
+check "installed into lib/" test -f lib/lmc.c3l
+
+section "sync and update keep going by default; --fail-fast stops"
+newproj kg
+c3l init >/dev/null 2>&1
+publish acme/ka 1.0.0 >/dev/null; publish acme/kb 1.0.0 >/dev/null
+c3l add acme/ka >/dev/null 2>&1; c3l add acme/kb >/dev/null 2>&1
+rm -f lib/ka.c3l lib/kb.c3l; mv "$REG/download/acme/ka@1.0.0" "$WORK/ka.hidden"
+out="$(c3l sync 2>&1)"; eq "sync with one failure rc" $? 1
+check "the other library was restored" test -f lib/kb.c3l
+has "summary names the failure" "could not restore 1 library: ka" "$out"
+rm -f lib/kb.c3l
+out="$(c3l --fail-fast sync 2>&1)"; eq "--fail-fast rc" $? 1
+check_not "--fail-fast stopped before kb" test -e lib/kb.c3l
+mv "$WORK/ka.hidden" "$REG/download/acme/ka@1.0.0"
+c3l sync >/dev/null 2>&1; eq "sync works once fixed rc" $? 0
+check "both restored" test -f lib/ka.c3l -a -f lib/kb.c3l
+publish acme/ka 1.1.0 --badsum >/dev/null; publish acme/kb 1.1.0 >/dev/null
+out="$(c3l update 2>&1)"; eq "update with one failure rc" $? 1
+has "update summary" "could not update 1 library: ka" "$out"
+eq "kb was updated anyway" "$(awk -F'\t' '$1=="kb"{print $4}' c3l.lock)" "1.1.0"
+eq "ka stayed" "$(awk -F'\t' '$1=="ka"{print $4}' c3l.lock)" "1.0.0"
+check "ka intact after its rollback" c3l verify
+
+section "publish --emit-c3po"
+cd "$WORK/libm/lm.c3l" || exit 1
+printf '# c3l.lock v1\ngl\tgit\thttps://github.com/o/gl\tv0.3.0\tcommit:x\tcommit:x\tdirect\t-\nreg\tregistry\tacme/reg\t1.0.0\tsha256:aa\tsha256:aa\tdirect\t-\nel\tgit\thttps://example.org/o/el\tv1\tcommit:y\tcommit:y\tdirect\t-\n' > c3l.lock
+c3l pack --no-build --allow-dirty --version 0.9.0 --output "$WORK/plain.c3l" >/dev/null 2>&1
+check_not "no c3po block unless asked" bash -c "unzip -p '$WORK/plain.c3l' manifest.json | grep -q c3po"
+out="$(c3l --emit-c3po pack --no-build --allow-dirty --version 0.9.0 --output "$WORK/emit.c3l" 2>&1)"; eq "emit-c3po pack rc" $? 0
+man="$(unzip -p "$WORK/emit.c3l" manifest.json)"
+has "c3po-version stamped" '"c3po-version" : 1' "$man"
+has "github dependency expressed for c3po" '"name": "gl", "source": "https://github.com/o/gl"' "$man"
+check_not "registry library not in the c3po block" bash -c "unzip -p '$WORK/emit.c3l' manifest.json | grep -o '\"c3po\".*' | grep -q acme/reg"
+has "unrepresentable dependencies are named" "'reg' cannot be expressed for c3po" "$out"
+has "unknown host is named" "'el' cannot be expressed for c3po" "$out"
+flat="$(unzip -p "$WORK/emit.c3l" manifest.json | ( source "$C3L"; json_flatten ))"
+has "c3l requires still there" "vendor.c3l.requires\[0\].source" "$flat"
+rm -f c3l.lock
+
 section "cli"
 has "help" "reproducible dependencies" "$(c3l help)"
 has "version" "c3l 1" "$(c3l version)"
@@ -600,13 +716,6 @@ check_not "unknown command" c3l frobnicate
 cd "$WORK" && mkdir -p empty && cd empty
 check_not "outside project" c3l list
 out="$(c3l list 2>&1)"; has "plain directory: project hint" "no project.json found" "$out"
-mkdir -p "$WORK/libdir" && cd "$WORK/libdir" && echo '{ "provides": "x" }' > manifest.json
-for cmd in list add verify sync outdated; do
-	out="$(c3l $cmd acme/x 2>&1)"; eq "library dir: $cmd fails" $? 1
-	has "library dir: $cmd explains" "is a library directory" "$out"
-done
-has "library dir: points to publish" "c3l publish" "$out"
-
 if [[ -n "$LIVE" ]]; then
 	section "live: www.c3pkg.eu"
 	unset C3L_REGISTRY
