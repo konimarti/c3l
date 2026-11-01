@@ -13,7 +13,7 @@
 .P
 .SH SYNOPSIS
 .P
-\fBc3l\fR [\fB--registry\fR \fIURL\fR] [\fB--dry-run\fR] [\fB--frozen\fR] \fICOMMAND\fR [\fIARGS\fR]
+\fBc3l\fR [\fB--registry\fR \fIURL\fR] [\fB--dry-run\fR] [\fB--frozen\fR] [\fB--strict\fR] \fICOMMAND\fR [\fIARGS\fR]
 .P
 .SH DESCRIPTION
 .P
@@ -43,6 +43,60 @@ Only print what \fBupdate\fR would change.\& Has no effect on other commands.\&
 For \fBsync\fR, meant for CI.\& Fail if \fIproject.\&json\fR and \fIc3l.\&lock\fR list different
 libraries, restore only what the lockfile says, and never write the lockfile.\&
 Has no effect on other commands.\&
+.P
+.RE
+\fB--strict\fR
+.RS 4
+With \fBadd\fR and \fBupdate\fR: fail instead of warn when the registry says a library
+was published for another C3 release than your \fBc3c\fR (compared by
+major.\&minor), or does not list your platform.\&
+.P
+.RE
+\fB--version\fR \fIX.\&Y.\&Z\fR, \fB--version=\fR\fIX.\&Y.\&Z\fR
+.RS 4
+For \fBcheck\fR, \fBpack\fR and \fBpublish\fR: the version to publish.\& Without an argument
+(or when the next word does not start with a digit), print the version.\&
+.P
+.RE
+\fB--token-file\fR \fIFILE\fR
+.RS 4
+File with the registry API token (first line).\& See \fBPUBLISHING\fR.\&
+.P
+.RE
+\fB--description\fR \fITEXT\fR, \fB--license\fR \fIID\fR, \fB--tags\fR \fIa,b\fR, \fB--docs-url\fR \fIURL\fR, \fB--git-url\fR \fIURL\fR
+.RS 4
+Package metadata for \fBpublish\fR.\& The description is required the first time a
+package is published.\&
+.P
+.RE
+\fB--c3-version\fR \fIX.\&Y.\&Z\fR
+.RS 4
+C3 version sent to the registry.\& Default: the version of \fBc3c\fR.\&
+.P
+.RE
+\fB--output\fR \fIFILE\fR
+.RS 4
+For \fBpack\fR: where to write the package.\&
+.P
+.RE
+\fB--allow-dirty\fR
+.RS 4
+Let \fBcheck\fR, \fBpack\fR and \fBpublish\fR run on a working tree with uncommitted changes.\&
+.P
+.RE
+\fB--no-build\fR
+.RS 4
+Skip the compile check in \fBcheck\fR, \fBpack\fR and \fBpublish\fR.\&
+.P
+.RE
+\fB--offline\fR
+.RS 4
+Do not query the registry in \fBcheck\fR (the registry is always skipped by \fBpack\fR).\&
+.P
+.RE
+\fB--registry-type\fR \fIstatic|c3pkg\fR
+.RS 4
+Override the detected registry type.\& See \fBPUBLISHING\fR.\&
 .P
 .RE
 \fB-h\fR, \fB--help\fR
@@ -139,6 +193,48 @@ Run \fBc3c fetch-info\fR.\&
 Convert a c3l 0.\&x \fI.\&c3l.\&deps\fR file into \fIc3l.\&lock\fR.\&
 .P
 .RE
+\fBcheck\fR [\fIdir\fR]
+.RS 4
+Verify that the library in \fIdir\fR (default: .\&) can be published, without
+uploading: \fImanifest.\&json\fR with \fIprovides\fR, a valid version, a clean working
+tree, the library compiles, and the version is not yet on the registry.\&
+Exit status 1 on any problem.\&
+.P
+.RE
+\fBpack\fR [\fIdir\fR]
+.RS 4
+Write \fIname-version.\&c3l\fR (or \fB--output\fR): a zip with \fImanifest.\&json\fR at its
+root and the repository files (git: tracked and untracked-not-ignored; not
+\fI.\&git\fR).\& The archive is deterministic, the same tree gives the same bytes.\&
+.P
+.RE
+\fBpublish\fR [\fIdir\fR]
+.RS 4
+Run \fBcheck\fR, \fBpack\fR and upload to the registry, then compare the registry'\&s
+checksum with the uploaded file.\& With \fB--dry-run\fR stop before the upload.\&
+.P
+.RE
+.SH PUBLISHING
+.P
+\fBpublish\fR needs a registry with an upload API.\& Registry types: \fIc3pkg\fR (www.\&c3pkg.\&eu;
+detected by probing \fI/api/v1/packages\fR) and \fIstatic\fR (read-only, anything else).\&
+A new type is one set of functions in the script.\&
+.P
+For c3pkg: create an API token under Settings, API tokens, and give it to c3l with
+\fB--token-file\fR \fIFILE\fR, \fBC3L_TOKEN\fR or \fBC3PKG_TOKEN\fR.\& It is sent as
+\fIAuthorization: Bearer\fR from a private temporary file, never on the command line.\&
+.P
+The package name is \fIprovides\fR in \fImanifest.\&json\fR of the library directory (see
+\fBc3c init-lib\fR).\& The version is, in this order: \fB--version\fR, a semantic version tag on
+HEAD (\fIv1.\&2.\&3\fR or \fI1.\&2.\&3\fR), \fIversion\fR in \fImanifest.\&json\fR.\& If the manifest says
+something else, c3l warns and the archive gets the chosen version; the file in the
+repository is not changed.\& A version is \fIMAJOR.\&MINOR.\&PATCH\fR or
+\fIMAJOR.\&MINOR.\&PATCH-prerelease\fR and can never be changed once published.\&
+.P
+The C3 version of the library is sent with each upload and checked on \fBadd\fR and
+\fBinfo\fR: a different major.\&minor or a missing platform gives a warning (an error
+with \fB--strict\fR).\&
+.P
 .SH LOCKFILE
 .P
 Tab separated, one library per line, sorted by name:
@@ -161,6 +257,16 @@ commit), SHA-256 of the installed file (registry) or the commit again (git).\&
 .RS 4
 Registry base URL.\& Overridden by \fB--registry\fR, overrides the lockfile.\&
 Default: https://www.\&c3pkg.\&eu
+.P
+.RE
+\fIC3L_TOKEN\fR, \fIC3PKG_TOKEN\fR
+.RS 4
+API token for \fBpublish\fR, if no \fB--token-file\fR is given.\&
+.P
+.RE
+\fIC3L_REGISTRY_TYPE\fR
+.RS 4
+Same as \fB--registry-type\fR.\&
 .P
 .RE
 \fIC3C\fR

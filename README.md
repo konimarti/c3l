@@ -18,7 +18,7 @@ c3l sync --frozen                   # CI: restore exactly what c3l.lock says
 - **Verified**: the registry's checksum is compared with the downloaded file. A mismatch means rollback, not a warning.
 - **Safe**: every install is transactional (library file and `project.json` are restored on failure).
 - **Registry**: default [www.c3pkg.eu](https://www.c3pkg.eu); any `c3c fetch` registry works (`--registry`, `$C3L_REGISTRY`, or `@registry` in the lockfile).
-- **One file**: a single bash script. Needs `c3c` with `fetch` (0.8.6 or a nightly), `awk`, `sha256sum` or `shasum`; `git` and `unzip` for git sources.
+- **One file**: a single bash script. Needs `c3c` with `fetch` (0.8.6 or a nightly), `awk`, `sha256sum` or `shasum`; `git` and `unzip` for git sources; `curl`, `tar` and `zip` for publishing.
 
 ## Install
 
@@ -41,6 +41,7 @@ make PREFIX=~/.local install        # or just copy ./c3l into your PATH
 | `sync [--frozen]` | restore from the lock; `--frozen` fails if lock and project disagree |
 | `search <text\|tag:x>`, `info <ns/name>` | registry lookups |
 | `migrate` | convert a c3l 0.x `.c3l.deps` |
+| `check [dir]`, `pack [dir]`, `publish [dir]` | publish a library to a registry, see [Publishing](#publishing) |
 
 Libraries are stored as `.c3l` zip files in the first `dependency-search-paths`
 entry. Commit them, or ignore them and run `c3l sync` after cloning.
@@ -52,6 +53,8 @@ Options may appear before or after the command:
 | `--registry URL` | registry for this command (overrides `$C3L_REGISTRY` and the lockfile) |
 | `--dry-run` | with `update`: print what would change |
 | `--frozen` | with `sync`, for CI: fail on lock/project drift, never write the lockfile |
+| `--strict` | with `add`/`update`: a library built for another C3 release or platform is an error, not a warning |
+| `--version X.Y.Z`, `--token-file F`, `--description`, `--license`, `--tags`, `--docs-url`, `--git-url`, `--c3-version`, `--output`, `--allow-dirty`, `--no-build`, `--offline`, `--registry-type` | see [Publishing](#publishing) |
 | `-h`, `-v` | help, version |
 
 ## Works with `c3c fetch` and its registry protocol
@@ -74,6 +77,52 @@ c3l can use, and the other way round.
 
 Checked with c3c 0.8.6 (nightly, 2026-11-01) against www.c3pkg.eu and a static
 test registry. The protocol is the one implemented by `c3c fetch`, `fetch-list` and `fetch-info`.
+
+## Publishing
+
+c3l can publish a library to a registry with an upload API. Today that is
+[www.c3pkg.eu](https://www.c3pkg.eu); other registries are one set of functions
+(`be_<type>_versions|index|publish`) in the script, selected with `--registry-type`
+or detected.
+
+```sh
+cd mylib.c3l                       # a library directory (c3c init-lib mylib)
+git tag v1.0.0                     # the version comes from the tag
+export C3PKG_TOKEN=c3p_...         # or --token-file FILE, or C3L_TOKEN
+c3l check                          # everything below, without uploading
+c3l publish --description "My library" --license MIT --tags "gpu,vulkan"
+```
+
+**What a package is.** A zip with `manifest.json` at its root, whose `provides` is the
+package name and whose `version` is the release. c3l builds it (`c3l pack`) from the
+git-tracked files (no `.git`), deterministically, and writes the version into the
+archive's `manifest.json`. Your repository file is not touched.
+
+**Where the version comes from**, in this order: `--version X.Y.Z`; a semver tag on
+`HEAD` (`v1.2.3` or `1.2.3`, the highest if there are several); `version` in
+`manifest.json`. If `manifest.json` says something different from the chosen version,
+c3l warns and uses the chosen one. Versions are `MAJOR.MINOR.PATCH` or
+`MAJOR.MINOR.PATCH-prerelease` and **immutable once published** (no overwrite, no delete).
+
+**What is checked before upload** (`c3l check`): `manifest.json` with `provides`; a valid
+name and version; a clean working tree (`--allow-dirty` to override); the library
+compiles with `c3c` (`--no-build` to skip); the version is not yet on the registry (and
+a warning if it is older than one that is); the first publish has a `--description`.
+After the upload c3l downloads the registry's record and compares its SHA-256 with the
+file it sent. `--dry-run` stops before the upload.
+
+**Token.** Create it in the registry under Settings, API tokens. c3l reads it from
+`--token-file`, `$C3L_TOKEN` or `$C3PKG_TOKEN` (never a command line argument) and sends it
+from a private temporary file, so it does not show up in `ps` or in the output.
+
+**Compatibility.** Each upload carries the C3 version it was published with
+(`--c3-version`, default: your `c3c`). On `c3l add`, `update` and `info`, c3l reads the
+registry's record for that version and warns if it was published for another C3 release
+(compared by major.minor, C3 is pre-1.0) or does not list your platform. `--strict` turns
+the warning into an error. Registries that do not publish this data are not checked.
+
+**Not covered:** yanking versions, editing package metadata after the first publish, and
+registries without an upload API (publishing to those fails with a clear message).
 
 ## Why not just `c3c fetch`?
 

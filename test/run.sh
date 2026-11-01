@@ -300,6 +300,100 @@ has "migrated line" "^gitlib.git.file://$GR.v0.2.0.commit:$C2" "$(cat c3l.lock)"
 check "old file renamed" test -f .c3l.deps.migrated
 check_not "migrate again refuses" c3l migrate
 
+section "publish: check, pack, publish (fake c3pkg server)"
+PKG=$((PORT + 1)); PKG429=$((PORT + 2))
+python3 "$HERE/fakepkg.py" "$PKG" >/dev/null 2>&1 & PKGPID=$!
+python3 "$HERE/fakepkg.py" "$PKG429" --ratelimit >/dev/null 2>&1 & PKGPID2=$!
+trap 'kill $PKGPID $PKGPID2 2>/dev/null; cleanup' EXIT
+for _ in $(seq 1 50); do curl -fs -o /dev/null "http://127.0.0.1:$PKG/api/v1/packages" && break; sleep 0.1; done
+PR="http://127.0.0.1:$PKG"
+echo "c3p_test" > "$WORK/token"; echo "c3p_wrong" > "$WORK/badtoken"
+rm -rf "$WORK/pub"; mkdir -p "$WORK/pub"; cd "$WORK/pub" && "$C3C" init-lib demo >/dev/null 2>&1 && cd demo.c3l || exit 1
+mkdir -p src; printf 'module demo;\nfn int answer() => 42;\n' > src/demo.c3
+git init -q .; git add -A; git commit -qm init
+pc() { c3l --registry "$PR" "$@"; }
+
+out="$(pc --offline check 2>&1)"; eq "untagged without version rc" $? 1
+has "asks for a version" "no version" "$out"
+git tag v1.1; out="$(pc --offline check 2>&1)"; eq "non-semver tag ignored" $? 1
+git tag v1.0.0
+out="$(pc --offline check 2>&1)"; eq "tagged check rc" $? 0
+has "version from tag" "from git tag v1.0.0" "$out"
+has "compile check ran" "compiles" "$out"
+check_not "--version 1.0 rejected" pc --offline --version 1.0 check
+check_not "build metadata rejected" pc --offline --version 1.0.0+b1 check
+
+c3l pack --output "$WORK/a.c3l" >/dev/null 2>&1; eq "pack rc" $? 0
+c3l pack --output "$WORK/b.c3l" >/dev/null 2>&1
+eq "pack is deterministic" "$(sha "$WORK/a.c3l")" "$(sha "$WORK/b.c3l")"
+has "archive manifest has version" '"version" : "1.0.0"' "$(unzip -p "$WORK/a.c3l" manifest.json)"
+check_not "git metadata not packed" bash -c "unzip -l '$WORK/a.c3l' | grep -q '\.git/'"
+
+echo dirty >> README.md
+out="$(pc --offline check 2>&1)"; eq "dirty tree rc" $? 1
+has "dirty message" "not clean" "$out"
+check "--allow-dirty passes" pc --offline --allow-dirty check
+git checkout -q README.md
+
+# review fixes: unpacked junk is not "dirty"; modes do not depend on umask; nested .c3l is kept
+mkdir -p obj tests; echo x > obj/a.o; echo x > c3l.lock
+check "untracked obj/ and c3l.lock are not dirt" pc --offline --no-build check
+echo x > tests/fixture.c3l; echo y > newfile.c3
+check_not "untracked packaged file is dirt" pc --offline --no-build check
+rm newfile.c3
+( umask 002; c3l pack --no-build --allow-dirty --output "$WORK/u2.c3l" >/dev/null 2>&1 )
+( umask 077; c3l pack --no-build --allow-dirty --output "$WORK/u7.c3l" >/dev/null 2>&1 )
+eq "pack independent of umask" "$(sha "$WORK/u2.c3l")" "$(sha "$WORK/u7.c3l")"
+has "nested .c3l kept" "tests/fixture.c3l" "$(unzip -l "$WORK/u2.c3l")"
+check_not "obj/ and c3l.lock not packed" bash -c "unzip -l '$WORK/u2.c3l' | grep -q -e obj/ -e c3l.lock"
+rm -rf obj c3l.lock tests
+out="$(pc --offline check --version 2>&1)"; eq "--version without value rc" $? 1
+has "--version message" "needs a value" "$out"
+
+out="$(pc --token-file "$WORK/token" publish 2>&1)"; eq "new package needs description rc" $? 1
+has "description message" "description is required" "$out"
+out="$(pc publish --description "Demo" 2>&1)"; eq "no token rc" $? 1
+has "no token message" "no API token" "$out"
+out="$(pc --token-file "$WORK/badtoken" publish --description Demo 2>&1)"; eq "bad token rc" $? 1
+has "bad token message" "rejected the token" "$out"
+out="$(pc --token-file "$WORK/token" --dry-run publish --description Demo 2>&1)"; eq "dry run rc" $? 0
+has "dry run text" "would publish demo 1.0.0" "$out"
+check_not "dry run uploaded nothing" curl -fs "$PR/api/v1/packages/demo/versions"
+out="$(pc --token-file "$WORK/token" publish --description Demo --license MIT 2>&1)"; eq "publish rc" $? 0
+has "publish ok and verified" "registry checksum matches" "$out"
+check_not "token not printed" grep -q c3p_test <<< "$out"
+out="$(pc --token-file "$WORK/token" publish 2>&1)"; eq "republish rc" $? 1
+has "immutable" "already published" "$out"
+out="$(C3L_TOKEN=c3p_test pc publish --version 1.0.1 2>&1)"; eq "token from env, --version rc" $? 0
+has "tag vs --version warning" "says 1.0.0, but --version says 1.0.1" "$out"
+
+# manifest.json disagrees with the tag: warn, the tag wins
+sed -i 's|"provides" : "demo",|"provides" : "demo",\n  "version" : "0.0.9",|' manifest.json
+git commit -qam "manifest version"; git tag v1.2.0
+out="$(pc --token-file "$WORK/token" --c3-version 0.7.1 publish 2>&1)"; eq "publish with mismatching manifest rc" $? 0
+has "manifest mismatch warning" "manifest.json says version 0.0.9, publishing 1.2.0" "$out"
+curl -fs "$PR/download/me/demo@1.2.0" > "$WORK/dl.c3l"
+has "archive carries tag version" '"version" : "1.2.0"' "$(unzip -p "$WORK/dl.c3l" manifest.json)"
+has "repo manifest untouched" '"version" : "0.0.9"' "$(cat manifest.json)"
+
+out="$(c3l --registry "$C3L_REGISTRY" --token-file "$WORK/token" publish 2>&1)"; eq "static registry publish rc" $? 1
+has "read-only message" "read-only" "$out"
+out="$(c3l --registry "http://127.0.0.1:$PKG429" --token-file "$WORK/token" --registry-type c3pkg publish --version 3.0.0 --description D 2>&1)"; eq "rate limit rc" $? 1
+has "rate limit message" "retry in 7 seconds" "$out"
+
+section "install-side compatibility (c3_version, targets)"
+cd "$WORK" && newproj p7
+c3l --registry "$PR" init >/dev/null 2>&1
+out="$(c3l --registry "$PR" add me/demo@1.0.0 2>&1)"; eq "compatible add rc" $? 0
+check_not "no warning for matching C3" grep -q "published for C3" <<< "$out"
+c3l --registry "$PR" remove demo >/dev/null 2>&1
+out="$(c3l --registry "$PR" add me/demo@1.2.0 2>&1)"; eq "other-C3 add (warn) rc" $? 0
+has "C3 mismatch warns" "published for C3 0.7.1" "$out"
+c3l --registry "$PR" remove demo >/dev/null 2>&1
+out="$(c3l --registry "$PR" --strict add me/demo@1.2.0 2>&1)"; eq "--strict add rc" $? 1
+has "strict refuses" "not compatible" "$out"
+check_not "nothing installed under --strict" test -e lib/demo.c3l
+
 section "cli"
 has "help" "reproducible dependencies" "$(c3l help)"
 has "version" "c3l 1" "$(c3l version)"

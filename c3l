@@ -10,7 +10,7 @@
 set -o pipefail
 [[ -n "$DEBUGC3L" ]] && set -x
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 PROGRAM="${0##*/}"
 C3C="${C3C:-c3c}"
 LOCK="${C3L_LOCK:-c3l.lock}"
@@ -27,6 +27,9 @@ TMPROOT=""
 TXN=""
 TXN_NAME=""
 TXN_DIR=""
+STRICT=0; ALLOW_DIRTY=0; NO_BUILD=0; OFFLINE=0
+TOKEN_FILE=""; PKG_VERSION=""; C3_VERSION_OPT=""; OUTPUT_OPT=""
+DESC_OPT=""; LICENSE_OPT=""; TAGS_OPT=""; DOCS_OPT=""; GIT_OPT=""; REGISTRY_TYPE_OPT=""
 
 #
 # Output
@@ -320,6 +323,10 @@ install_registry() { # id version(optional) pin(optional)
 	[[ -n "$want" ]] || want="$(info_latest <<< "$text")"
 	[[ -n "$want" ]] || die "registry returned no latest version for $id"
 	info_has_version "$want" <<< "$text" || die "no such version '$want' for $id"
+	if [[ -z "$pin" ]]; then   # a pinned (lock) restore must stay reproducible
+		compat_check "$id" "$want"
+		(( STRICT && COMPAT_WARNED )) && die "$id@$want is not compatible with this toolchain (--strict)"
+	fi
 	sum="$(info_checksum "$want" <<< "$text")"
 	expected="$pin"; [[ -n "$expected" ]] || expected="$sum"
 	if [[ -n "$pin" && -n "$sum" && "$pin" != "$sum" ]]; then
@@ -467,6 +474,314 @@ latest_for() { # kind source version pin -> newest version label (empty if unkno
 }
 
 #
+# Registry backends
+#
+# A registry is a set of functions be_<type>_<op>. Types:
+#   static  read-only c3c-fetch registry (any HTTP server or directory); the default
+#   c3pkg   www.c3pkg.eu API: also publishing, version list, per-version compatibility data
+# The type is --registry-type > $C3L_REGISTRY_TYPE > detected by probing the registry.
+# Ops: versions <name>        (published versions, one per line; rc 2 = unknown package, rc 1 = cannot tell)
+#      index <name> <ver>     (JSON with c3_version, targets, sha256_file; rc 1 = none)
+#      publish <name> <ver> <file> <c3_version>
+# A new registry type only needs these functions.
+#
+BE_TYPE=""; BE_GUESSED=0
+
+be_detect() {
+	local t="${REGISTRY_TYPE_OPT:-$C3L_REGISTRY_TYPE}" r
+	r="$(registry)"
+	if [[ -z "$t" && "$r" == http* ]]; then
+		local probe; probe="$(curl -fsS -m 10 --retry 1 "$r/api/v1/packages?per_page=1" 2>/dev/null)"
+		[[ "$probe" == \{* || "$probe" == \[* ]] && t=c3pkg
+		BE_GUESSED=1
+	fi
+	BE_TYPE="${t:-static}"
+	declare -F "be_${BE_TYPE}_versions" >/dev/null || die "unknown registry type '$BE_TYPE' (known: static, c3pkg)"
+}
+be() { local op="$1"; shift; [[ -n "$BE_TYPE" ]] || be_detect; "be_${BE_TYPE}_$op" "$@"; }
+
+be_static_can_publish() { return 1; }
+be_c3pkg_can_publish()  { return 0; }
+be_static_versions() { return 1; }
+be_static_index()    { return 1; }
+be_static_publish()  {
+	die "registry $(registry) is read-only (type 'static'); publishing needs a registry with an upload API such as c3pkg$( ((BE_GUESSED)) && echo ". The type was detected automatically; if this is a c3pkg registry, retry or pass --registry-type c3pkg")"
+}
+
+be_c3pkg_versions() { # name
+	need curl; tmproot
+	local body="$TMPROOT/versions.json" code
+	code="$(curl -sS -m 30 -o "$body" -w '%{http_code}' "$(registry)/api/v1/packages/$1/versions" 2>/dev/null)" || return 1
+	case "$code" in
+		200) grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$body" | sed 's/.*:[[:space:]]*"\(.*\)"/\1/'; return 0 ;;
+		404) return 2 ;;
+		*) return 1 ;;
+	esac
+}
+be_c3pkg_index() { # id|name version
+	need curl
+	curl -fsS -m 30 "$(registry)/index/${1##*/}/$2.json" 2>/dev/null
+}
+
+# Authorization header in a 0600 file, so the token never shows up in argv or ps.
+auth_header_file() {
+	local t=""
+	if [[ -n "$TOKEN_FILE" ]]; then
+		[[ -r "$TOKEN_FILE" ]] || die "cannot read token file $TOKEN_FILE"
+		t="$(head -n 1 "$TOKEN_FILE")"
+	elif [[ -n "$C3L_TOKEN" ]]; then t="$C3L_TOKEN"
+	elif [[ -n "$C3PKG_TOKEN" ]]; then t="$C3PKG_TOKEN"
+	fi
+	t="${t//[[:space:]]/}"
+	[[ -n "$t" ]] || die "no API token. Create one in the registry settings and pass it with --token-file FILE, \$C3L_TOKEN or \$C3PKG_TOKEN"
+	tmproot
+	local f="$TMPROOT/auth.hdr"
+	( umask 077; printf 'Authorization: Bearer %s\n' "$t" > "$f" )
+	printf '%s\n' "$f"
+}
+
+be_c3pkg_publish() { # name version file c3_version
+	need curl; tmproot
+	local name="$1" ver="$2" file="$3" c3v="$4" hdr body="$TMPROOT/publish.json" heads="$TMPROOT/publish.hdr" code msg wait
+	hdr="$(auth_header_file)"
+	local -a a=(-sS -m 600 -X PUT -H "@$hdr" -D "$heads" -o "$body" -w '%{http_code}'
+		-F "file=@$file;type=application/zip" --form-string "c3_version=$c3v")
+	[[ -n "$DESC_OPT" ]] && a+=(--form-string "description=$DESC_OPT")
+	[[ -n "$LICENSE_OPT" ]] && a+=(--form-string "license=$LICENSE_OPT")
+	[[ -n "$TAGS_OPT" ]] && a+=(--form-string "tags=$TAGS_OPT")
+	[[ -n "$DOCS_OPT" ]] && a+=(--form-string "docs_url=$DOCS_OPT")
+	[[ -n "$GIT_OPT" ]] && a+=(--form-string "git_url=$GIT_OPT")
+	code="$(curl "${a[@]}" "$(registry)/api/v1/packages/$name/versions/$ver")" || die "upload failed: cannot reach $(registry)"
+	if [[ "$code" == 201 ]]; then return 0; fi
+	msg="$(json_string_field error < "$body")"; [[ -n "$msg" ]] || msg="$(head -c 300 "$body")"
+	case "$code" in
+		401|403) die "registry rejected the token (HTTP $code): ${msg:-not authorized}" ;;
+		429) wait="$(awk -F': *' 'tolower($1)=="retry-after"{gsub(/\r/,"",$2); print $2}' "$heads")"
+			die "rate limited by the registry; retry in ${wait:-a few} seconds" ;;
+		*) die "registry refused $name@$ver (HTTP $code): $msg" ;;
+	esac
+}
+
+#
+# Compatibility between a library version and the local toolchain
+#
+local_c3_version() {
+	local out; out="$("$C3C" --version 2>&1)"
+	sed -n 's/^C3 Compiler Version:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' <<< "$out" | head -n 1
+}
+
+host_target() {
+	local os arch
+	case "$(uname -s)" in Linux) os=linux ;; Darwin) os=macos ;; MINGW*|MSYS*|CYGWIN*) os=windows ;; FreeBSD) os=freebsd ;; *) return 0 ;; esac
+	case "$(uname -m)" in x86_64|amd64) arch=x64 ;; aarch64|arm64) arch=aarch64 ;; *) return 0 ;; esac
+	printf '%s-%s\n' "$os" "$arch"
+}
+
+COMPAT_WARNED=0
+# compat_check <id> <version>: warn when the library was built for another C3 release
+# or does not list this host. Needs a registry that publishes this data; silent otherwise.
+compat_check() {
+	COMPAT_WARNED=0
+	local json c3v mine host targets
+	be_type_name >/dev/null   # detect once in this shell
+	json="$(be index "$1" "$2")" || return 0
+	json="$(printf '%s' "$json" | tr -d '\n\r')"
+	[[ -n "$json" ]] || return 0
+	c3v="$(json_string_field c3_version <<< "$json")"
+	mine="$(local_c3_version)"
+	if [[ -n "$c3v" && -n "$mine" && "${c3v%.*}" != "${mine%.*}" ]]; then
+		warn "$1@$2 was published for C3 $c3v, you have c3c $mine (C3 is pre-1.0: minor releases can break libraries)"
+		COMPAT_WARNED=1
+	fi
+	host="$(host_target)"
+	targets="$(grep -o '"targets"[[:space:]]*:[[:space:]]*\[[^]]*\]' <<< "$json")"
+	if [[ -n "$host" && "$targets" == *'"'* && "$targets" != *"\"$host\""* ]]; then
+		warn "$1@$2 does not list this platform ($host); it supports: $(grep -o '"[a-z0-9-]*"' <<< "${targets#*:}" | tr -d '"' | paste -sd, -)"
+		COMPAT_WARNED=1
+	fi
+	return 0
+}
+
+#
+# Packaging and publishing
+#
+strict_semver() { [[ "$1" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; }
+
+PUB_DIR=""; PUB_NAME=""; PUB_VERSION=""; PUB_VSRC=""; PUB_C3V=""; PUB_NEW=0; PUB_STAGE=""; ERRS=0
+perr() { printf '%s[ERROR]%s %s\n' "$C_R" "$C_0" "$*" >&2; ERRS=$((ERRS+1)); }
+
+# Version of a library, in this order: --version, a semver tag on HEAD, "version" in manifest.json.
+pub_resolve_version() { # dir
+	local dir="$1" mver tag t best="" v
+	mver="$(json_string_field version < "$dir/manifest.json")"
+	if command -v git >/dev/null 2>&1 && git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+		while IFS= read -r t; do
+			v="${t#v}"; strict_semver "$v" || continue
+			if [[ -z "$best" || "$(semver_cmp "$v" "$best")" == 1 ]]; then best="$v"; tag="$t"; fi
+		done < <(git -C "$dir" tag --points-at HEAD)
+	fi
+	if [[ -n "$PKG_VERSION" ]]; then
+		PUB_VERSION="${PKG_VERSION#v}"; PUB_VSRC="--version"
+		[[ -n "$best" && "$best" != "$PUB_VERSION" ]] && warn "tag $tag on HEAD says $best, but --version says $PUB_VERSION; using $PUB_VERSION"
+	elif [[ -n "$best" ]]; then
+		PUB_VERSION="$best"; PUB_VSRC="git tag $tag"
+	elif [[ -n "$mver" ]]; then
+		PUB_VERSION="$mver"; PUB_VSRC="manifest.json"
+	else
+		return 1
+	fi
+	if [[ -n "$mver" && "$mver" != "$PUB_VERSION" ]]; then
+		warn "manifest.json says version $mver, publishing $PUB_VERSION (from $PUB_VSRC); the archive's manifest gets $PUB_VERSION"
+	fi
+	return 0
+}
+
+set_manifest_version() { # file version
+	if grep -Eq '^[[:space:]]*"version"[[:space:]]*:' "$1"; then
+		awk -v v="$2" '!d && /^[[:space:]]*"version"[[:space:]]*:/ { sub(/"version"[[:space:]]*:[[:space:]]*"[^"]*"/, "\"version\" : \"" v "\""); d=1 } { print }' "$1" > "$1.new" && mv "$1.new" "$1"
+	else
+		awk -v v="$2" '!d && /\{/ { sub(/\{/, "{\n  \"version\" : \"" v "\","); d=1 } { print }' "$1" > "$1.new" && mv "$1.new" "$1"
+	fi
+}
+
+# Files that belong in the package: tracked + untracked-not-ignored in a git repo, else everything.
+pub_files() { # dir
+	local f
+	{
+		if command -v git >/dev/null 2>&1 && git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+			( cd "$1" && git -c core.quotepath=off ls-files -co --exclude-standard )
+		else
+			( cd "$1" && find . -type f -not -path './.git/*' | sed 's|^\./||' )
+		fi
+	} | pub_exclude | LC_ALL=C sort -u | while IFS= read -r f; do
+		[[ -f "$1/$f" ]] && printf '%s\n' "$f"
+	done
+}
+
+# untracked, not ignored, and part of the package (what 'git status' would flag, minus what is never packed)
+pub_untracked() { # dir
+	( cd "$1" && git -c core.quotepath=off ls-files -o --exclude-standard ) | pub_exclude
+}
+pub_exclude() { grep -v -e '^c3l\.lock$' -e '^[^/]*\.c3l$' -e '^obj/' -e '^build/'; }
+
+pub_stage() { # copies the package to $TMPROOT/stage/<name>.c3l with the final manifest
+	tmproot
+	local base="$TMPROOT/stage" files="$TMPROOT/files.lst"
+	rm -rf "$base"; mkdir -p "$base/$PUB_NAME.c3l"
+	pub_files "$PUB_DIR" > "$files"
+	[[ -s "$files" ]] || die "no files to pack in $PUB_DIR"
+	( cd "$PUB_DIR" && tar -cf - -T "$files" ) | tar -xf - -C "$base/$PUB_NAME.c3l" || die "staging $PUB_DIR failed"
+	set_manifest_version "$base/$PUB_NAME.c3l/manifest.json" "$PUB_VERSION"
+	find "$base/$PUB_NAME.c3l" -type f ! -perm -u+x -exec chmod 644 {} + 2>/dev/null
+	find "$base/$PUB_NAME.c3l" -type f -perm -u+x -exec chmod 755 {} + 2>/dev/null
+	PUB_STAGE="$base/$PUB_NAME.c3l"
+}
+
+# Deterministic zip: sorted names, fixed timestamps, so the same tree gives the same bytes.
+# Uses zip(1); python3 is only a fallback when zip is missing.
+pub_zip() { # stagedir outfile
+	local out; out="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
+	rm -f "$out"
+	if command -v zip >/dev/null 2>&1; then
+		( cd "$1" && find . -type f -exec touch -t 198001010000 {} + &&
+			find . -type f | sed 's|^\./||' | LC_ALL=C sort | zip -X -q "$out" -@ ) || die "creating $out failed"
+	elif command -v python3 >/dev/null 2>&1; then
+		python3 -I - "$1" "$out" <<'PY' || die "creating $out failed"
+import os, sys, zipfile
+src, out = sys.argv[1:3]
+names = sorted(os.path.relpath(os.path.join(r, f), src) for r, _, fs in os.walk(src) for f in fs)
+with zipfile.ZipFile(out, "w") as z:
+    for n in names:
+        p = os.path.join(src, n)
+        zi = zipfile.ZipInfo(n.replace(os.sep, "/"), (1980, 1, 1, 0, 0, 0))
+        zi.compress_type = zipfile.ZIP_DEFLATED
+        zi.external_attr = (0o755 if os.access(p, os.X_OK) else 0o644) << 16
+        with open(p, "rb") as fh:
+            z.writestr(zi, fh.read())
+PY
+	else
+		die "zip is required to create the package (python3 also works)"
+	fi
+}
+
+# pub_check <dir>: everything that can be verified before upload. Sets PUB_*, counts ERRS.
+pub_check() {
+	local dir="$1" vs v dirty
+	ERRS=0; PUB_NEW=0
+	[[ -d "$dir" ]] || { perr "$dir is not a directory"; return 1; }
+	if [[ ! -f "$dir/manifest.json" ]]; then
+		perr "no manifest.json in $dir; publish a library directory (create one with 'c3c init-lib <name>')"
+		return 1
+	fi
+	PUB_DIR="$dir"
+	PUB_NAME="$(json_string_field provides < "$dir/manifest.json")"
+	if [[ -z "$PUB_NAME" ]]; then perr "manifest.json has no \"provides\" (the package name)"; return 1; fi
+	[[ "$PUB_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || perr "invalid package name '$PUB_NAME' (letters, digits, '.', '_', '-')"
+
+	if ! pub_resolve_version "$dir"; then
+		perr "no version: tag the commit (git tag v1.2.3), pass --version 1.2.3, or set \"version\" in manifest.json"
+		return 1
+	fi
+	if strict_semver "$PUB_VERSION"; then :; else
+		perr "'$PUB_VERSION' (from $PUB_VSRC) is not a valid semantic version; the registry wants MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-prerelease, e.g. 1.2.3 or 1.2.3-rc.1"
+		return 1
+	fi
+	PUB_C3V="${C3_VERSION_OPT:-$(local_c3_version)}"
+	[[ -n "$PUB_C3V" ]] || perr "cannot determine the C3 version; pass --c3-version"
+
+	if [[ -z "$(find "$dir" -path "$dir/.git" -prune -o \( -name '*.c3' -o -name '*.c3i' \) -print -quit)" ]]; then
+		warn "$dir contains no .c3/.c3i sources"
+	fi
+	[[ -f "$dir/README.md" ]] || warn "no README.md in $dir (the registry shows it as the package page)"
+
+	if command -v git >/dev/null 2>&1 && git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+		dirty="$(git -C "$dir" status --porcelain --untracked-files=no -- . | head -n 1)"
+		[[ -n "$dirty" ]] || dirty="$(pub_untracked "$dir" | head -n 1)"
+		if [[ -n "$dirty" ]]; then
+			if (( ALLOW_DIRTY )); then warn "working tree is not clean; the package will not match the commit"
+			else perr "working tree is not clean (commit or stash, or pass --allow-dirty), so the package would not match a commit"; fi
+		fi
+	fi
+
+	if (( ! NO_BUILD )); then
+		if command -v "$C3C" >/dev/null 2>&1; then
+			pub_stage; tmproot
+			mkdir -p "$TMPROOT/buildcwd"
+			if v="$(cd "$TMPROOT/buildcwd" && "$C3C" --libdir "$TMPROOT/stage" compile-only --lib "$PUB_NAME" --no-obj 2>&1)"; then
+				info "library compiles with c3c $(local_c3_version)"
+			else
+				perr "the library does not compile:"; printf '%s\n' "$v" | tail -n 15 >&2
+			fi
+		else
+			warn "c3c not found, skipping the compile check"
+		fi
+	fi
+
+	if (( ! OFFLINE )); then
+		be_type_name >/dev/null   # detect in this shell, not in the $(...) below
+		local rc; vs="$(be versions "$PUB_NAME")"; rc=$?
+		case $rc in
+			0) if grep -qxF -- "$PUB_VERSION" <<< "$vs"; then
+					perr "$PUB_NAME $PUB_VERSION is already published; versions are immutable, bump the version"
+				else
+					while IFS= read -r v; do
+						[[ -n "$v" ]] || continue
+						if [[ "$(semver_cmp "$PUB_VERSION" "$v")" == -1 ]]; then
+							warn "$PUB_VERSION is older than the published $v"; break
+						fi
+					done <<< "$vs"
+				fi ;;
+			2) PUB_NEW=1
+				[[ -n "$DESC_OPT" ]] || perr "$PUB_NAME is new on this registry: --description is required for the first publish" ;;
+			*) [[ "$(be_type_name)" == static ]] || warn "could not query $(registry) for existing versions" ;;
+		esac
+	fi
+	(( ERRS == 0 )) && info "$PUB_NAME $PUB_VERSION (from $PUB_VSRC, C3 $PUB_C3V) passes all checks"
+	return 0
+}
+be_type_name() { [[ -n "$BE_TYPE" ]] || be_detect; printf '%s\n' "$BE_TYPE"; }
+
+#
 # Commands
 #
 cmd_version() { echo "c3l $VERSION"; }
@@ -489,6 +804,9 @@ cmd_usage() {
 	  search <text|tag:x>       search the registry
 	  info <ns/name>            show registry record (c3c fetch-info)
 	  migrate                   convert .c3l.deps (c3l 0.x) to c3l.lock
+	  check [dir]               verify a library is ready to publish (no upload)
+	  pack [dir] [--output F]   build the deterministic <name>-<version>.c3l
+	  publish [dir]             check, pack and upload to the registry (token: --token-file, \$C3L_TOKEN)
 	  help | version
 
 	Registry: --registry URL > \$C3L_REGISTRY > '@registry' in c3l.lock > $DEFAULT_REGISTRY
@@ -678,7 +996,49 @@ cmd_search() {
 cmd_info() {
 	(( $# >= 1 )) || die "Usage: $PROGRAM info <namespace>/<name>"
 	c3_has_fetch || die "this c3c has no 'fetch-info'"
-	c3fetch fetch-info "$1"
+	local text latest
+	text="$(c3fetch fetch-info "$1")" || return 1
+	printf '%s\n' "$text"
+	latest="$(info_latest <<< "$text")"
+	[[ -n "$latest" ]] && compat_check "$1" "$latest"
+	return 0
+}
+
+cmd_check() {
+	pub_check "${1:-.}"
+	(( ERRS == 0 )) || exit 1
+}
+
+cmd_pack() {
+	OFFLINE=1
+	pub_check "${1:-.}"
+	(( ERRS == 0 )) || die "not packing: $ERRS problem(s) found"
+	local out="${OUTPUT_OPT:-$PWD/$PUB_NAME-$PUB_VERSION.c3l}"
+	pub_stage; pub_zip "$PUB_STAGE" "$out"
+	info "packed $out (sha256:$(sha256_file "$out"))"
+}
+
+cmd_publish() {
+	local file sha idx got
+	be_type_name >/dev/null
+	be can_publish || be publish "" "" "" ""   # dies with the registry's own explanation
+	pub_check "${1:-.}"
+	(( ERRS == 0 )) || die "not publishing: $ERRS problem(s) found"
+	tmproot
+	file="$TMPROOT/$PUB_NAME-$PUB_VERSION.c3l"
+	pub_stage; pub_zip "$PUB_STAGE" "$file"
+	sha="$(sha256_file "$file")"
+	if (( DRY_RUN )); then
+		info "dry run: would publish $PUB_NAME $PUB_VERSION (C3 $PUB_C3V, sha256:$sha) to $(registry)"
+		return 0
+	fi
+	info "publishing $PUB_NAME $PUB_VERSION to $(registry)"
+	be publish "$PUB_NAME" "$PUB_VERSION" "$file" "$PUB_C3V"
+	idx="$(be index "$PUB_NAME" "$PUB_VERSION")" && got="$(json_string_field sha256_file <<< "$idx")"
+	got="${got#sha256:}"
+	if [[ -z "$got" ]]; then warn "published, but the registry does not report a checksum yet; verify with 'c3l info'"
+	elif [[ "$got" != "$sha" ]]; then die "published, but the registry's checksum ($got) differs from the uploaded file ($sha)"
+	else info "published $PUB_NAME $PUB_VERSION (registry checksum matches sha256:$sha)"; fi
 }
 
 cmd_migrate() {
@@ -717,6 +1077,22 @@ while (( $# )); do
 		--registry=*) REGISTRY_OPT="${1#--registry=}"; shift ;;
 		--dry-run) DRY_RUN=1; shift ;;
 		--frozen) FROZEN=1; shift ;;
+		--strict) STRICT=1; shift ;;
+		--allow-dirty) ALLOW_DIRTY=1; shift ;;
+		--no-build) NO_BUILD=1; shift ;;
+		--offline) OFFLINE=1; shift ;;
+		--version=*) PKG_VERSION="${1#--version=}"; shift ;;
+		--version) if [[ "$2" =~ ^v?[0-9] ]]; then PKG_VERSION="$2"; shift 2
+			elif [[ "${POSITIONAL[0]}" =~ ^(check|pack|publish)$ ]]; then die "--version needs a value like 1.2.3"
+			else POSITIONAL+=(version); shift; fi ;;
+		--token-file|--c3-version|--output|--description|--license|--tags|--docs-url|--git-url|--registry-type)
+			[[ -n "$2" ]] || die "$1 needs a value"
+			case "$1" in
+				--token-file) TOKEN_FILE="$2" ;; --c3-version) C3_VERSION_OPT="$2" ;; --output) OUTPUT_OPT="$2" ;;
+				--description) DESC_OPT="$2" ;; --license) LICENSE_OPT="$2" ;; --tags) TAGS_OPT="$2" ;;
+				--docs-url) DOCS_OPT="$2" ;; --git-url) GIT_OPT="$2" ;; --registry-type) REGISTRY_TYPE_OPT="$2" ;;
+			esac
+			shift 2 ;;
 		-h|--help) POSITIONAL+=(help); shift ;;
 		-v|--version) POSITIONAL+=(version); shift ;;
 		*) POSITIONAL+=("$1"); shift ;;
@@ -739,6 +1115,9 @@ case "$COMMAND" in
 	search|s) cmd_search "$@" ;;
 	info) cmd_info "$@" ;;
 	migrate) cmd_migrate "$@" ;;
+	check) cmd_check "$@" ;;
+	pack) cmd_pack "$@" ;;
+	publish) cmd_publish "$@" ;;
 	"") cmd_usage; exit 1 ;;
 	*) cmd_usage >&2; exit 1 ;;
 esac

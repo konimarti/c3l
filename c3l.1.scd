@@ -6,7 +6,7 @@ C3L(1)
 
 # SYNOPSIS
 
-*c3l* [*--registry* _URL_] [*--dry-run*] [*--frozen*] _COMMAND_ [_ARGS_]
+*c3l* [*--registry* _URL_] [*--dry-run*] [*--frozen*] [*--strict*] _COMMAND_ [_ARGS_]
 
 # DESCRIPTION
 
@@ -31,6 +31,40 @@ Options may appear before or after the command.
 	For *sync*, meant for CI. Fail if _project.json_ and _c3l.lock_ list different
 	libraries, restore only what the lockfile says, and never write the lockfile.
 	Has no effect on other commands.
+
+*--strict*
+	With *add* and *update*: fail instead of warn when the registry says a library
+	was published for another C3 release than your *c3c* (compared by
+	major.minor), or does not list your platform.
+
+*--version* _X.Y.Z_, *--version=*_X.Y.Z_
+	For *check*, *pack* and *publish*: the version to publish. Without an argument
+	(or when the next word does not start with a digit), print the version.
+
+*--token-file* _FILE_
+	File with the registry API token (first line). See *PUBLISHING*.
+
+*--description* _TEXT_, *--license* _ID_, *--tags* _a,b_, *--docs-url* _URL_, *--git-url* _URL_
+	Package metadata for *publish*. The description is required the first time a
+	package is published.
+
+*--c3-version* _X.Y.Z_
+	C3 version sent to the registry. Default: the version of *c3c*.
+
+*--output* _FILE_
+	For *pack*: where to write the package.
+
+*--allow-dirty*
+	Let *check*, *pack* and *publish* run on a working tree with uncommitted changes.
+
+*--no-build*
+	Skip the compile check in *check*, *pack* and *publish*.
+
+*--offline*
+	Do not query the registry in *check* (the registry is always skipped by *pack*).
+
+*--registry-type* _static|c3pkg_
+	Override the detected registry type. See *PUBLISHING*.
 
 *-h*, *--help*
 	Print the usage text.
@@ -98,6 +132,42 @@ Options may appear before or after the command.
 *migrate*
 	Convert a c3l 0.x _.c3l.deps_ file into _c3l.lock_.
 
+*check* [_dir_]
+	Verify that the library in _dir_ (default: .) can be published, without
+	uploading: _manifest.json_ with _provides_, a valid version, a clean working
+	tree, the library compiles, and the version is not yet on the registry.
+	Exit status 1 on any problem.
+
+*pack* [_dir_]
+	Write _name-version.c3l_ (or *--output*): a zip with _manifest.json_ at its
+	root and the repository files (git: tracked and untracked-not-ignored; not
+	_.git_). The archive is deterministic, the same tree gives the same bytes.
+
+*publish* [_dir_]
+	Run *check*, *pack* and upload to the registry, then compare the registry's
+	checksum with the uploaded file. With *--dry-run* stop before the upload.
+
+# PUBLISHING
+
+*publish* needs a registry with an upload API. Registry types: _c3pkg_ (www.c3pkg.eu;
+detected by probing _/api/v1/packages_) and _static_ (read-only, anything else).
+A new type is one set of functions in the script.
+
+For c3pkg: create an API token under Settings, API tokens, and give it to c3l with
+*--token-file* _FILE_, *C3L_TOKEN* or *C3PKG_TOKEN*. It is sent as
+_Authorization: Bearer_ from a private temporary file, never on the command line.
+
+The package name is _provides_ in _manifest.json_ of the library directory (see
+*c3c init-lib*). The version is, in this order: *--version*, a semantic version tag on
+HEAD (_v1.2.3_ or _1.2.3_), _version_ in _manifest.json_. If the manifest says
+something else, c3l warns and the archive gets the chosen version; the file in the
+repository is not changed. A version is _MAJOR.MINOR.PATCH_ or
+_MAJOR.MINOR.PATCH-prerelease_ and can never be changed once published.
+
+The C3 version of the library is sent with each upload and checked on *add* and
+*info*: a different major.minor or a missing platform gives a warning (an error
+with *--strict*).
+
 # LOCKFILE
 
 Tab separated, one library per line, sorted by name:
@@ -117,6 +187,12 @@ commit), SHA-256 of the installed file (registry) or the commit again (git).
 _C3L_REGISTRY_
 	Registry base URL. Overridden by *--registry*, overrides the lockfile.
 	Default: https://www.c3pkg.eu
+
+_C3L_TOKEN_, _C3PKG_TOKEN_
+	API token for *publish*, if no *--token-file* is given.
+
+_C3L_REGISTRY_TYPE_
+	Same as *--registry-type*.
 
 _C3C_
 	The c3c executable. It needs *fetch* support (0.8.6 or a nightly).
