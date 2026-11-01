@@ -37,7 +37,7 @@ make PREFIX=~/.local install        # or just copy ./c3l into your PATH
 | `remove <name>` | remove file, `dependencies` entry and lock line |
 | `list` | libraries and state: `ok`, `modified`, `missing`, `untracked` |
 | `verify` | check files against the lock, exit 1 on problems |
-| `outdated`, `update [--dry-run] [name...]` | newer versions, update them |
+| `outdated`, `update [--dry-run] [name[@ref]...]` | newer versions, update them; `name@ref` switches to an explicit version, tag, branch, `HEAD` or commit |
 | `sync [--frozen]` | restore from the lock; `--frozen` fails if lock and project disagree |
 | `search <text\|tag:x>`, `info <ns/name>` | registry lookups |
 | `migrate` | convert a c3l 0.x `.c3l.deps` |

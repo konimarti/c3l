@@ -70,9 +70,12 @@ Check installed files against the lockfile.\& Exit status 1 on any difference.\&
 Show locked libraries for which the registry (or git) has a higher version.\&
 .P
 .RE
-\fBupdate\fR [\fIname\fR .\&.\&.\&]
+\fBupdate\fR [\fIname\fR[@\fIref\fR] .\&.\&.\&]
 .RS 4
 Update to the newest version, one library at a time, with rollback.\& With
+\fIname\fR@\fIref\fR switch that library to an explicit version instead: a registry
+version, or for git libraries a tag, branch, \fBHEAD\fR or full commit hash (for
+example \fBc3l update lib@HEAD\fR moves a tag-locked library to HEAD).\& With
 \fB--dry-run\fR only print what would change.\&
 .P
 .RE

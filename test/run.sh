@@ -262,6 +262,12 @@ has "commit locked" "commit:${C2:0:12}	commit:$C2" "$(grep '^gitlib' c3l.lock)"
 check_not "commit not outdated" bash -c "$(declare -f c3l 2>/dev/null); c3l outdated | grep -q gitlib"
 check_not "short hash rejected" c3l add "file://$GR@${C2:0:8}"
 check_not "ref both ways rejected" c3l add "file://$GR@v0.1.0" v0.2.0
+c3l update gitlib@HEAD >/dev/null 2>&1; eq "update @HEAD rc" $? 0
+has "update switched to HEAD" "HEAD	.*commit:$C3" "$(grep '^gitlib' c3l.lock)"
+has "dry run prints switch" "HEAD -> v0.1.0 (dry run)" "$(c3l update --dry-run gitlib@v0.1.0 2>&1)"
+c3l update gitlib@v0.1.0 >/dev/null 2>&1; eq "update @tag rc" $? 0
+has "update switched to tag" "v0.1.0	.*commit:$C1" "$(grep '^gitlib' c3l.lock)"
+check_not "update @bogus fails" c3l update gitlib@nope
 c3l add "file://$GR@v0.1.0" >/dev/null 2>&1; has "@tag works" "v0.1.0	.*commit:$C1" "$(grep '^gitlib' c3l.lock)"
 check_not "not a repo fails" c3l add "file://$WORK/nope"
 

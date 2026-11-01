@@ -49,8 +49,11 @@ kept as _.c3l_ zip files in the first entry of _dependency-search-paths_. Run
 *outdated*
 	Show locked libraries for which the registry (or git) has a higher version.
 
-*update* [_name_ ...]
+*update* [_name_[@_ref_] ...]
 	Update to the newest version, one library at a time, with rollback. With
+	_name_@_ref_ switch that library to an explicit version instead: a registry
+	version, or for git libraries a tag, branch, *HEAD* or full commit hash (for
+	example *c3l update lib@HEAD* moves a tag-locked library to HEAD). With
 	*--dry-run* only print what would change.
 
 *sync*

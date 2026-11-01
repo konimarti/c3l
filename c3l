@@ -477,7 +477,7 @@ cmd_usage() {
 	  list                      show locked libraries and their state         (alias: ls)
 	  verify                    check installed files against c3l.lock (exit 1 on problems)
 	  outdated                  show libraries with newer versions
-	  update [--dry-run] [name...]  update to the newest version, with rollback (alias: u)
+	  update [--dry-run] [name[@ref]...]  update to newest, or to name@ref (alias: u)
 	  sync [--frozen]           restore exactly what c3l.lock says            (alias: pull, p)
 	  search <text|tag:x>       search the registry
 	  info <ns/name>            show registry record (c3c fetch-info)
@@ -589,9 +589,19 @@ cmd_update() {
 	local name kind source version pin hash latest rec n=0
 	if (( ${#names[@]} == 0 )); then while IFS=$'\t' read -r name _; do names+=("$name"); done < <(lock_entries); fi
 	for name in ${names[@]+"${names[@]}"}; do
+		local want=""
+		if [[ "$name" == *@* ]]; then want="${name#*@}"; name="${name%%@*}"; [[ -n "$want" ]] || die "empty version in '$name@'"; fi
 		rec="$(lock_get "${name%.c3l}")"
 		[[ -n "$rec" ]] || { warn "$name is not in $LOCK"; continue; }
 		IFS=$'\t' read -r name kind source version pin hash <<< "$rec"
+		if [[ -n "$want" ]]; then # explicit target: switch to that version/ref
+			if (( DRY_RUN )); then printf '%s: %s -> %s (dry run)\n' "$name" "$version" "$want"; n=$((n+1)); continue; fi
+			case "$kind" in
+				registry) install_registry "$source" "$want" "" ;;
+				git) install_git "$source" "$want" "" ;;
+			esac
+			n=$((n+1)); continue
+		fi
 		latest="$(latest_for "$kind" "$source" "$version" "$pin")"
 		[[ -n "$latest" ]] || { warn "$name: cannot determine the newest version"; continue; }
 		if [[ "$latest" == HEAD@* ]] || semver_gt "$latest" "$version"; then
