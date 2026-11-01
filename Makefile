@@ -11,19 +11,19 @@ c3l.1: c3l.1.scd
 
 doc: c3l.1
 
-test: test.sh
-	./test.sh
+test:
+	./test/run.sh
 
 gitconfig:
-	ln -s contrib/pre-commit .git/hooks/pre-commit
+	ln -s ../../contrib/pre-commit .git/hooks/pre-commit
 
 clean:
-	rm c3l.1
+	rm -f c3l.1
 
 install: all
 	mkdir -p $(BINDIR) $(MANDIR)/man1
 	install -m755 c3l $(BINDIR)/c3l
-	install -m644 c3l.1 $(MANDIR)/man1/c3l.1
+	if [ -f c3l.1 ]; then install -m644 c3l.1 $(MANDIR)/man1/c3l.1; fi
 
 uninstall:
 	rm -f $(BINDIR)/c3l
