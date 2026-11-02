@@ -114,6 +114,7 @@ semver_gt() { valid_semver "$1" && valid_semver "$2" && [[ "$(semver_cmp "$1" "$
 find_project() {
 	local f
 	LIBMODE=0
+	lock_check "$LOCK"
 	for f in project.json project.json5; do
 		[[ -f "$f" ]] && { PROJECT="$f"; return 0; }
 	done
@@ -257,68 +258,79 @@ register_dep() {
 # the role a library has once installed: keep = whatever it had (direct if new)
 effective_role() { # name role
 	local role="$2" old
-	old="$(lock_get "$1" | cut -f7)"
+	old="$(lock_get "$1" | cut -f8)"
 	[[ "$role" == keep ]] && role="${old:-direct}"
 	[[ "$role" == dep && "$old" == direct ]] && role=direct
 	printf '%s' "$role"
 }
 
 #
-# Lockfile: TSV, one library per line
-#   name <TAB> kind <TAB> source <TAB> version <TAB> pin <TAB> hash (registry: sha256 of the file; git: the commit)
+# Lockfile: TSV, one library per line, 9 columns
+#   name <TAB> kind <TAB> origin <TAB> id <TAB> version <TAB> pin <TAB> hash
 #        <TAB> role (direct = asked for by the project, dep = pulled in by another library)
 #        <TAB> requires (comma separated names this library requires, "-" if none)
-#   @registry <TAB> url   (header)
+# origin is where the library is fetched from, exactly as the fetch tool wants it:
+#   registry  the registry base URL (what c3c gets as --fetch-url), no trailing slash
+#   git       the repository URL          path  the directory
+# id is the name inside the origin: <namespace>/<name> for a registry, "-" otherwise.
+# hash: registry = sha256 of the file; git = the commit.
+# There is no global registry: every line says where it came from.
 #
-lock_registry() { [[ -f "$LOCK" ]] && awk -F'\t' '$1=="@registry"{print $2; exit}' "$LOCK"; return 0; }
-lock_entries()  { # always 8 fields; short (older) lines are filled in
-	[[ -f "$LOCK" ]] && awk -F'\t' 'BEGIN{OFS="\t"} $0 !~ /^#/ && $1 !~ /^@/ && NF>=5 { if (NF<6) $6=$5; if (NF<7) $7="direct"; if (NF<8) $8="-"; print }' "$LOCK"
-	return 0
-}
+lock_entries()  { [[ -f "$LOCK" ]] && awk -F'\t' '$0 !~ /^#/ && NF>0' "$LOCK"; return 0; }
 lock_get()      { lock_entries | awk -F'\t' -v n="$1" '$1==n{print; exit}'; }
+# every data line must have 9 columns; an older file is not read, it is refused
+lock_check()    { # file
+	local bad
+	[[ -f "$1" ]] || return 0
+	bad="$(awk -F'\t' '$0 !~ /^#/ && NF>0 && NF!=9 { print NR; exit }' "$1")"
+	[[ -z "$bad" ]] || die "$1 line $bad does not have 9 columns (written by an older c3l?). Delete it and run 'c3l add' again, or restore the libraries with an older c3l first."
+}
 
 lock_write() { # reads entries on stdin, writes header + sorted entries
-	local reg="$1" tmp="$LOCK.tmp.$$"
+	local tmp="$LOCK.tmp.$$"
 	{
 		printf '# c3l.lock v1 - written by c3l, do not edit by hand\n'
-		[[ -n "$reg" ]] && printf '@registry\t%s\n' "$reg"
 		LC_ALL=C sort
 	} > "$tmp" && mv "$tmp" "$LOCK" || die "cannot write $LOCK"
 }
 
 # role: direct | dep | keep. direct always wins; dep keeps the role of an existing entry
 # (a direct library stays direct); keep restores/updates without changing the role.
-lock_put() { # name kind source version pin hash [role] [requires]
+lock_put() { # name kind origin id version pin hash [role] [requires]
 	(( NOLOCKWRITE )) && return 0
-	local name="$1" role="${7:-direct}" reqs="$8" old oldrole oldreqs reg
+	local name="$1" role="${8:-direct}" reqs="$9" old oldrole oldreqs
 	old="$(lock_get "$name")"
 	if [[ -n "$old" ]]; then
-		IFS=$'\t' read -r _ _ _ _ _ _ oldrole oldreqs <<< "$old"
+		IFS=$'\t' read -r _ _ _ _ _ _ _ oldrole oldreqs <<< "$old"
 		[[ "$role" == direct ]] || role="$oldrole"
 		[[ -n "$reqs" ]] || reqs="$oldreqs"
 	elif [[ "$role" == keep ]]; then role=direct
 	fi
 	[[ -n "$reqs" ]] || reqs="-"
-	reg="$(lock_registry)"
-	[[ "$2" == registry && -z "$reg" ]] && reg="$(registry)"
-	{ lock_entries | awk -F'\t' -v n="$name" '$1!=n'; printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" "$6" "$role" "$reqs"; } | lock_write "$reg"
+	{ lock_entries | awk -F'\t' -v n="$name" '$1!=n'; printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$role" "$reqs"; } | lock_write
 }
 
 lock_del() {
 	[[ -f "$LOCK" ]] || return 0
-	lock_entries | awk -F'\t' -v n="$1" '$1!=n' | lock_write "$(lock_registry)"
+	lock_entries | awk -F'\t' -v n="$1" '$1!=n' | lock_write
 }
 
 #
 # Registry
 #
-registry() {
+# The registry in use: a library's own origin while it is being installed (CUR_REG, set by
+# install_registry_one/latest_for), else --registry, $C3L_REGISTRY, the built-in default.
+# Always the base URL, trailing slashes removed; c3l appends only what the protocol needs.
+CUR_REG=""
+default_registry() {
 	local r
 	if [[ -n "$REGISTRY_OPT" ]]; then r="$REGISTRY_OPT"
 	elif [[ -n "$C3L_REGISTRY" ]]; then r="$C3L_REGISTRY"
-	else r="$(lock_registry)"; [[ -n "$r" ]] || r="$DEFAULT_REGISTRY"; fi
-	printf '%s\n' "${r%/}"
+	else r="$DEFAULT_REGISTRY"; fi
+	while [[ "$r" == */ ]]; do r="${r%/}"; done
+	printf '%s\n' "$r"
 }
+registry() { if [[ -n "$CUR_REG" ]]; then printf '%s\n' "$CUR_REG"; else default_registry; fi; }
 
 c3_has_fetch() { # (captured first: grep -q would SIGPIPE c3c and trip pipefail)
 	local out
@@ -359,18 +371,19 @@ txn_fail() { op_rollback; die "$@ (rolled back)"; }
 #
 # Installers
 #
-check_collision() { # name kind source
-	local rec kind source
+check_collision() { # name kind origin id
+	local rec kind origin id
 	rec="$(lock_get "$1")"
 	[[ -z "$rec" ]] && return 0
-	IFS=$'\t' read -r _ kind source _ <<< "$rec"
-	[[ "$kind" == "$2" && "$source" == "$3" ]] && return 0
-	die "'$1' is already installed from $kind:$source. Library names are global in a project; run 'c3l remove $1' first."
+	IFS=$'\t' read -r _ kind origin id _ <<< "$rec"
+	[[ "$kind" == "$2" && "$origin" == "$3" && "$id" == "$4" ]] && return 0
+	[[ "$id" == - ]] && id="" || id=" $id"
+	die "'$1' is already installed from $kind:$origin$id. Library names are global in a project; run 'c3l remove $1' first."
 }
 
-install_registry_one() { # id version(optional) pin(optional)
-	local id="$1" want="$2" pin="$3" name="${1##*/}" text sum expected dir file got prov
-	check_collision "$name" registry "$id"
+install_registry_one() { # origin id version(optional) pin(optional)
+	local CUR_REG="${1%/}" id="$2" want="$3" pin="$4" name="${2##*/}" text sum expected dir file got prov
+	check_collision "$name" registry "$CUR_REG" "$id"
 	text="$(registry_info "$id")" || die "cannot read info for $id"
 	[[ -n "$want" ]] || want="$(info_latest <<< "$text")"
 	[[ -n "$want" ]] || die "registry returned no latest version for $id"
@@ -402,7 +415,7 @@ install_registry_one() { # id version(optional) pin(optional)
 	register_dep "$name" "$(effective_role "$name" "$INSTALL_ROLE")" || txn_fail "could not register $name in $PROJECT"
 	local role="$INSTALL_ROLE"; [[ -n "$pin" ]] && role=keep
 	read_reqs "$name" "$file"
-	lock_put "$name" registry "$id" "$want" "$got" "$got" "$role" "$REQ_NAMES"
+	lock_put "$name" registry "$CUR_REG" "$id" "$want" "$got" "$got" "$role" "$REQ_NAMES"
 	info "installed $name $want ($got)"
 }
 
@@ -476,7 +489,7 @@ install_git_one() { # url [ref] [pin]
 	name="$(json_string_field provides < "$src/manifest.json")"
 	[[ -n "$name" ]] || die "manifest.json of $url has no 'provides'"
 	[[ -f "$src/.gitmodules" ]] && warn "$url uses submodules; they are not included in the library"
-	check_collision "$name" git "$url"
+	check_collision "$name" git "$url" -
 
 	zip="$TMPROOT/$name.c3l.$RANDOM"
 	# Archive the committed bytes the same way everywhere: stored (-0), UTC
@@ -493,7 +506,7 @@ install_git_one() { # url [ref] [pin]
 	register_dep "$name" "$(effective_role "$name" "$INSTALL_ROLE")" || txn_fail "could not register $name in $PROJECT"
 	local role="$INSTALL_ROLE"; [[ -n "$pin" ]] && role=keep
 	read_reqs "$name" "$file"
-	lock_put "$name" git "$url" "$label" "commit:$commit" "$hash" "$role" "$REQ_NAMES"
+	lock_put "$name" git "$url" - "$label" "commit:$commit" "$hash" "$role" "$REQ_NAMES"
 	info "installed $name $label (commit ${commit:0:12})"
 }
 
@@ -582,31 +595,31 @@ function emit(v) { print valpath() "\t" v; after_value() }
 '
 json_flatten() { awk "$AWK_FLAT"; }
 
-# manifest_reqs: flattened manifest on stdin -> "name<TAB>source<TAB>version" per requirement
-# ("-" = unknown). Precedence per name: vendor.c3l.requires, vendor.c3po.sources (read-only
+# manifest_reqs: flattened manifest on stdin -> "name<TAB>source<TAB>version<TAB>registry" per
+# requirement ("-" = unknown; registry is only given for registry sources). Precedence per name: vendor.c3l.requires, vendor.c3po.sources (read-only
 # c3po compatibility), then c3c's own "dependencies" names (no source, no version).
 AWK_REQS='
 BEGIN { FS = "\t" }
 function guess(s,   t) { t = s; sub(/\/+$/, "", t); sub(/.*[\/:]/, "", t); sub(/\.git$/, "", t); sub(/\.c3l$/, "", t); return t }
 function idx(p,   t) { t = substr(p, index(p, "[") + 1); sub(/\].*/, "", t); return t }
 function key(p,   t) { t = p; sub(/.*\./, "", t); return t }
-$1 ~ /^vendor\.c3l\.requires\[[0-9]+\]\.(name|source|version)$/ { i = idx($1); a[i, key($1)] = $2; if (!(i in sa)) { sa[i] = 1; oa[++na] = i }; next }
+$1 ~ /^vendor\.c3l\.requires\[[0-9]+\]\.(name|source|version|registry)$/ { i = idx($1); a[i, key($1)] = $2; if (!(i in sa)) { sa[i] = 1; oa[++na] = i }; next }
 $1 ~ /^vendor\.c3po\.sources\[[0-9]+\]\.(name|source)$/ { i = idx($1); b[i, key($1)] = $2; if (!(i in sb)) { sb[i] = 1; ob[++nb] = i }; next }
 $1 ~ /^(targets\.[^.]*\.)?dependencies\[[0-9]+\]$/ { if (!($2 in sp)) { sp[$2] = 1; op[++np] = $2 }; next }
 END {
 	for (j = 1; j <= na; j++) {
-		i = oa[j]; nm = a[i, "name"]; src = a[i, "source"]; ver = a[i, "version"]
+		i = oa[j]; nm = a[i, "name"]; src = a[i, "source"]; ver = a[i, "version"]; reg = a[i, "registry"]
 		if (nm == "") nm = guess(src)
 		if (nm == "" || (nm in done)) continue
-		done[nm] = 1; print nm "\t" (src == "" ? "-" : src) "\t" (ver == "" ? "-" : ver)
+		done[nm] = 1; print nm "\t" (src == "" ? "-" : src) "\t" (ver == "" ? "-" : ver) "\t" (reg == "" ? "-" : reg)
 	}
 	for (j = 1; j <= nb; j++) {
 		i = ob[j]; nm = b[i, "name"]; src = b[i, "source"]
 		if (nm == "") nm = guess(src)
 		if (nm == "" || (nm in done)) continue
-		done[nm] = 1; print nm "\t" (src == "" ? "-" : src) "\t-"
+		done[nm] = 1; print nm "\t" (src == "" ? "-" : src) "\t-\t-"
 	}
-	for (j = 1; j <= np; j++) if (!(op[j] in done)) { done[op[j]] = 1; print op[j] "\t-\t-" }
+	for (j = 1; j <= np; j++) if (!(op[j] in done)) { done[op[j]] = 1; print op[j] "\t-\t-\t-" }
 }
 '
 manifest_reqs() { awk "$AWK_REQS"; }
@@ -627,7 +640,7 @@ read_reqs() {
 #
 lock_reaches() { # from to: can <from> reach <to> through requirements?
 	lock_entries | awk -F'\t' -v s="$1" -v t="$2" '
-		{ adj[$1] = $8 }
+		{ adj[$1] = $9 }
 		END {
 			q[1] = s; seen[s] = 1; tail = 1
 			for (h = 1; h <= tail; h++) {
@@ -639,11 +652,11 @@ lock_reaches() { # from to: can <from> reach <to> through requirements?
 		}'
 }
 lock_dependents() { # name -> libraries that require it
-	lock_entries | awk -F'\t' -v n="$1" '$1 != n { m = split($8, a, ","); for (i = 1; i <= m; i++) if (a[i] == n) { print $1; break } }'
+	lock_entries | awk -F'\t' -v n="$1" '$1 != n { m = split($9, a, ","); for (i = 1; i <= m; i++) if (a[i] == n) { print $1; break } }'
 }
 lock_orphans() { # dependency libraries that no direct library reaches
 	lock_entries | awk -F'\t' '
-		{ role[$1] = $7; adj[$1] = $8; names[++cnt] = $1 }
+		{ role[$1] = $8; adj[$1] = $9; names[++cnt] = $1 }
 		END {
 			for (i = 1; i <= cnt; i++) if (role[names[i]] == "direct") { q[++tail] = names[i]; seen[names[i]] = 1 }
 			for (h = 1; h <= tail; h++) {
@@ -693,23 +706,40 @@ norm_ver() { local v; v="$(git_ref_of "$1")"; printf '%s' "${v#v}"; }
 same_source() { local a="${1%/}" b="${2%/}"; a="${a%.git}"; b="${b%.git}"; [[ "$a" == "$b" ]]; }
 
 follow_deps() { # name requirement-records
-	local name="$1" reqs="$2" rname rsrc rver
+	local name="$1" reqs="$2" rname rsrc rver rreg
 	[[ -n "$reqs" ]] || return 0
 	STACK+=("$name")
-	while IFS=$'\t' read -r -u 3 rname rsrc rver; do
+	while IFS=$'\t' read -r -u 3 rname rsrc rver rreg; do
 		[[ -n "$rname" ]] || continue
-		[[ "$rsrc" == - ]] && rsrc=""; [[ "$rver" == - ]] && rver=""
-		resolve_req "$name" "$rname" "$rsrc" "$rver"
+		[[ "$rsrc" == - ]] && rsrc=""; [[ "$rver" == - ]] && rver=""; [[ "$rreg" == - ]] && rreg=""
+		resolve_req "$name" "$rname" "$rsrc" "$rver" "$rreg"
 	done 3<<< "$reqs"
 	STACK=("${STACK[@]:0:${#STACK[@]}-1}")
 }
 
-satisfy_existing() { # parent name source version lock-record
-	local parent="$1" name="$2" src="$3" ver rec="$5" ekind esrc ever em rm saved nm rq
+# the registry a required <ns>/<name> comes from: the one the manifest names, else the default
+req_registry() { local r="$1"; [[ -n "$r" ]] || r="$(default_registry)"; while [[ "$r" == */ ]]; do r="${r%/}"; done; printf '%s' "$r"; }
+# a registry is known when it is the default one or some locked library already comes from it
+registry_known() {
+	[[ "$1" == "$(default_registry)" ]] && return 0
+	lock_entries | awk -F'\t' -v o="$1" '$2=="registry" && $3==o {f=1} END{exit !f}'
+}
+
+satisfy_existing() { # parent name source version lock-record registry
+	local parent="$1" name="$2" src="$3" ver rec="$5" reg="$6" ekind eorigin eid ever em rm saved nm rq want_origin same=1
 	ver="$(norm_ver "$4")"
-	IFS=$'\t' read -r _ ekind esrc ever _ <<< "$rec"
-	if [[ -n "$src" ]] && ! same_source "$src" "$esrc"; then
-		die "'$name' is installed from $ekind:$esrc but $parent requires it from $src. Library names are global in a project; remove one of them"
+	IFS=$'\t' read -r _ ekind eorigin eid ever _ <<< "$rec"
+	if [[ -n "$src" ]]; then
+		if [[ "$ekind" == registry ]]; then
+			is_registry_id "$src" || same=0
+			if (( same )); then want_origin="$(req_registry "$reg")"; [[ "$want_origin" == "$eorigin" && "$src" == "$eid" ]] || same=0; fi
+		else
+			same_source "$src" "$eorigin" || same=0
+		fi
+		if (( ! same )); then
+			[[ "$ekind" == registry ]] && eorigin="$eorigin $eid"
+			die "'$name' is installed from $ekind:$eorigin but $parent requires it from ${reg:+$reg }$src. Library names are global in a project; remove one of them"
+		fi
 	fi
 	[[ -n "$ver" ]] || return 0
 	if [[ "$ekind" == registry ]]; then
@@ -719,7 +749,7 @@ satisfy_existing() { # parent name source version lock-record
 		if [[ "$(semver_cmp "$ever" "$ver")" == -1 ]]; then
 			info "  $name $ever -> $ver (required by $parent)"
 			saved="$INSTALL_ROLE"; INSTALL_ROLE=keep
-			install_registry_one "$esrc" "$ver" ""
+			install_registry_one "$eorigin" "$eid" "$ver" ""
 			INSTALL_ROLE="$saved"
 			nm="$LAST_NAME"; rq="$LAST_REQS"; follow_deps "$nm" "$rq"
 		fi
@@ -729,8 +759,8 @@ satisfy_existing() { # parent name source version lock-record
 	return 0
 }
 
-resolve_req() { # parent name source version
-	local parent="$1" name="$2" src="$3" ver="$4" rec saved nm rq
+resolve_req() { # parent name source version registry
+	local parent="$1" name="$2" src="$3" ver="$4" reg="$5" rec saved nm rq origin
 	if [[ "$name" == "$parent" ]]; then
 		(( STRICT )) && die "$parent lists itself as a dependency (--strict)"
 		warn "$parent lists itself as a dependency; ignored"; return 0
@@ -739,7 +769,7 @@ resolve_req() { # parent name source version
 	rec="$(lock_get "$name")"
 	if [[ -n "$rec" ]]; then
 		if lock_reaches "$name" "$parent"; then cycle_warn "$(stack_path "$name") -> ... -> $parent (through installed libraries)"; fi
-		satisfy_existing "$parent" "$name" "$src" "$ver" "$rec"
+		satisfy_existing "$parent" "$name" "$src" "$ver" "$rec" "$reg"
 		return 0
 	fi
 	if [[ -z "$src" ]]; then
@@ -751,7 +781,10 @@ resolve_req() { # parent name source version
 	(( DEP_COUNT <= DEP_MAX )) || die "more than $DEP_MAX transitive libraries; refusing (see C3L_MAX_DEPS)"
 	saved="$INSTALL_ROLE"; INSTALL_ROLE=dep
 	if is_git_url "$src"; then trust_host "$src"; install_git_one "$src" "$(git_ref_of "$ver")" ""
-	elif is_registry_id "$src"; then install_registry_one "$src" "$(norm_ver "$ver")" ""
+	elif is_registry_id "$src"; then
+		origin="$(req_registry "$reg")"
+		registry_known "$origin" || trust_host "$origin"
+		install_registry_one "$origin" "$src" "$(norm_ver "$ver")" ""
 	else die "$parent requires '$name' from '$src', which is neither <namespace>/<name> nor a git URL"; fi
 	INSTALL_ROLE="$saved"
 	info "  $LAST_NAME installed for $parent"
@@ -766,7 +799,7 @@ install_path_one() { # dir [pin: any value = restore from the lock]
 	abs="$(cd "$src" && pwd)" || die "cannot enter $src"
 	name="$(json_top_field "$src/manifest.json" provides)"
 	[[ -n "$name" ]] || die "manifest.json of $src has no 'provides'"
-	check_collision "$name" path "$src"
+	check_collision "$name" path "$src" -
 	find_project
 	txn_begin "$name"
 	dir="$TXN_DIR"; file="$dir/$name.c3l"
@@ -775,16 +808,16 @@ install_path_one() { # dir [pin: any value = restore from the lock]
 	register_dep "$name" "$(effective_role "$name" "$INSTALL_ROLE")" || txn_fail "could not register $name in $PROJECT"
 	role="$INSTALL_ROLE"; [[ -n "$2" ]] && role=keep
 	read_reqs "$name" "$abs"
-	lock_put "$name" path "$src" "-" "-" "-" "$role" "$REQ_NAMES"
+	lock_put "$name" path "$src" - - - - "$role" "$REQ_NAMES"
 	info "linked $name -> $abs"
 }
 
 # Top level: install one library and, unless this is a restore from the lock (pin given),
 # follow the dependencies it declares. One transaction for all of it.
-install_registry() { # id version pin
+install_registry() { # origin id version pin
 	install_registry_one "$@"
 	local nm="$LAST_NAME" rq="$LAST_REQS"
-	[[ -n "$3" ]] || follow_deps "$nm" "$rq"
+	[[ -n "$4" ]] || follow_deps "$nm" "$rq"
 	op_commit
 }
 install_git() { # url ref pin
@@ -819,17 +852,17 @@ lib_status() { # name hash dir kind pin
 	else echo modified; fi
 }
 
-latest_for() { # kind source version pin -> newest version label (empty if unknown)
+latest_for() { # kind origin id version pin -> newest version label (empty if unknown)
 	case "$1" in
-		registry) registry_info "$2" 2>/dev/null | info_latest ;;
+		registry) local CUR_REG="$2"; registry_info "$3" 2>/dev/null | info_latest ;;
 		git) local t h
-			case "$3" in
+			case "$4" in
 				HEAD) h="$(git_head "$2")" ;;
-				branch:*) h="$(git_branch_commit "$2" "${3#branch:}")" ;;
+				branch:*) h="$(git_branch_commit "$2" "${4#branch:}")" ;;
 				commit:*) return 0 ;;
 				*) t="$(git_highest_tag "$2")"; [[ -n "$t" ]] && echo "$t"; return 0 ;;
 			esac
-			if [[ -n "$h" && "commit:$h" != "$4" ]]; then echo "HEAD@${h:0:12}"; fi ;;
+			if [[ -n "$h" && "commit:$h" != "$5" ]]; then echo "HEAD@${h:0:12}"; fi ;;
 	esac
 	return 0
 }
@@ -846,7 +879,7 @@ latest_for() { # kind source version pin -> newest version label (empty if unkno
 #      publish <name> <ver> <file> <c3_version>
 # A new registry type only needs these functions.
 #
-BE_TYPE=""; BE_GUESSED=0
+BE_TYPE=""; BE_GUESSED=0; BE_FOR=""
 
 be_detect() {
 	local t="${REGISTRY_TYPE_OPT:-$C3L_REGISTRY_TYPE}" r
@@ -856,10 +889,10 @@ be_detect() {
 		[[ "$probe" == \{* || "$probe" == \[* ]] && t=c3pkg
 		BE_GUESSED=1
 	fi
-	BE_TYPE="${t:-static}"
+	BE_TYPE="${t:-static}"; BE_FOR="$r"
 	declare -F "be_${BE_TYPE}_versions" >/dev/null || die "unknown registry type '$BE_TYPE' (known: static, c3pkg)"
 }
-be() { local op="$1"; shift; [[ -n "$BE_TYPE" ]] || be_detect; "be_${BE_TYPE}_$op" "$@"; }
+be() { local op="$1"; shift; [[ -n "$BE_TYPE" && "$BE_FOR" == "$(registry)" ]] || be_detect; "be_${BE_TYPE}_$op" "$@"; }
 
 be_static_can_publish() { return 1; }
 be_c3pkg_can_publish()  { return 0; }
@@ -1043,12 +1076,15 @@ pub_exclude() { grep -v -e '^c3l\.lock$' -e '^[^/]*\.c3l$' -e '^lib/[^/]*\.c3l$'
 # vendor.c3l.requires from the library's own c3l.lock: its direct dependencies, with the
 # locked version as the minimum. Empty output if there is no lock or nothing direct.
 pub_requires_json() { # dir
-	local lock="$1/c3l.lock" out="" name kind source version role
+	local lock="$1/c3l.lock" out="" name kind origin id version role src reg
 	[[ -f "$lock" ]] || return 0
-	while IFS=$'\t' read -r name kind source version _ _ role _; do
+	lock_check "$lock"
+	while IFS=$'\t' read -r name kind origin id version _ _ role _; do
 		[[ "$role" == direct && "$kind" != path ]] || continue
 		[[ "$kind" == git && "$version" == HEAD ]] && version=""
-		out+="${out:+, }{ \"name\": \"$name\", \"source\": \"$source\"${version:+, \"version\": \"$version\"} }"
+		src="$origin"; reg=""
+		if [[ "$kind" == registry ]]; then src="$id"; reg=", \"registry\": \"$origin\""; fi
+		out+="${out:+, }{ \"name\": \"$name\", \"source\": \"$src\"$reg${version:+, \"version\": \"$version\"} }"
 	done < <(LOCK="$lock" lock_entries)
 	[[ -n "$out" ]] && printf '[ %s ]' "$out"
 	return 0
@@ -1135,12 +1171,13 @@ pub_check() {
 		grep -q "\"name\": \"$dn\"" <<< "$reqs" || warn "'$dn' is in the manifest's dependencies but nothing says where to get it; run 'c3l add' for it in this library so consumers can install it automatically"
 	done < <(manifest_reqs <<< "$flat")
 	if [[ -f "$dir/c3l.lock" ]]; then
+		lock_check "$dir/c3l.lock"
 		while IFS=$'\t' read -r dn ds; do
 			[[ -n "$dn" ]] || continue
 			if [[ "$ds" == path ]]; then
 				perr "dependency '$dn' is a local directory, which consumers cannot fetch; add it from a registry or a git URL before publishing"
 			fi
-		done < <(LOCK="$dir/c3l.lock" lock_entries | awk -F'\t' '$7 == "direct" { print $1 "\t" ($2 == "git" ? $3 : $2) }')
+		done < <(LOCK="$dir/c3l.lock" lock_entries | awk -F'\t' '$8 == "direct" { print $1 "\t" $2 }')
 	fi
 
 	if command -v git >/dev/null 2>&1 && git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -1193,7 +1230,7 @@ pub_check() {
 	(( ERRS == 0 )) && info "$PUB_NAME $PUB_VERSION (from $PUB_VSRC, C3 $PUB_C3V) passes all checks"
 	return 0
 }
-be_type_name() { [[ -n "$BE_TYPE" ]] || be_detect; printf '%s\n' "$BE_TYPE"; }
+be_type_name() { [[ -n "$BE_TYPE" && "$BE_FOR" == "$(registry)" ]] || be_detect; printf '%s\n' "$BE_TYPE"; }
 
 #
 # Commands
@@ -1227,7 +1264,9 @@ cmd_usage() {
 	  publish [dir]             check, pack and upload to the registry (token: --token-file, \$C3L_TOKEN)
 	  help | version
 
-	Registry: --registry URL > \$C3L_REGISTRY > '@registry' in c3l.lock > $DEFAULT_REGISTRY
+	Registry for new installs: --registry URL > \$C3L_REGISTRY > $DEFAULT_REGISTRY
+	(base URL as c3c --fetch-url takes it, e.g. https://example.org/c3/v1). c3l.lock records the
+	registry of every library, so sync/update/verify go back to the right one.
 	See c3l(1).
 	_EOF
 }
@@ -1239,8 +1278,8 @@ cmd_init() {
 	fi
 	find_project
 	if [[ -f "$LOCK" ]]; then info "$LOCK already exists"; return 0; fi
-	: | lock_write "$(registry)"
-	info "created $LOCK (registry $(registry))"
+	: | lock_write
+	info "created $LOCK"
 	info "commit $LOCK; restore libraries on a fresh checkout with 'c3l sync'"
 }
 
@@ -1257,8 +1296,8 @@ cmd_add() {
 		TRUSTED_HOSTS+=" $(url_host "$url") "
 		install_git "$url" "${ref:-$2}" ""
 	elif is_registry_id "${arg%%@*}"; then
-		if [[ "$arg" == *@* ]]; then install_registry "${arg%%@*}" "${arg#*@}" ""
-		else install_registry "$arg" "" ""; fi
+		if [[ "$arg" == *@* ]]; then install_registry "$(default_registry)" "${arg%%@*}" "${arg#*@}" ""
+		else install_registry "$(default_registry)" "$arg" "" ""; fi
 	else
 		die "'$arg' is neither <namespace>/<name>[@version] nor a git URL"
 	fi
@@ -1319,7 +1358,7 @@ cmd_why() {
 	local name="${1%.c3l}" rec role
 	rec="$(lock_get "$name")"
 	[[ -n "$rec" ]] || die "'$name' is not in $LOCK"
-	IFS=$'\t' read -r _ _ _ _ _ _ role _ <<< "$rec"
+	IFS=$'\t' read -r _ _ _ _ _ _ _ role _ <<< "$rec"
 	[[ "$role" == direct ]] && info "$name is a direct dependency of the project"
 	why_walk "$name" "" "$name"
 	return 0
@@ -1328,19 +1367,19 @@ cmd_why() {
 tree_walk() { # name indent path
 	local n="$1" ind="$2" path="$3" rec reqs r v
 	rec="$(lock_get "$n")"
-	IFS=$'\t' read -r _ _ _ _ _ _ _ reqs <<< "$rec"
+	IFS=$'\t' read -r _ _ _ _ _ _ _ _ reqs <<< "$rec"
 	[[ -z "$reqs" || "$reqs" == - ]] && return 0
 	for r in ${reqs//,/ }; do
 		rec="$(lock_get "$r")"
-		if [[ -n "$rec" ]]; then v="$(cut -f4 <<< "$rec")"; else v="(not installed)"; fi
+		if [[ -n "$rec" ]]; then v="$(cut -f5 <<< "$rec")"; else v="(not installed)"; fi
 		if [[ "$path" == *" $r "* ]]; then printf '%s%s %s (cycle)\n' "$ind" "$r" "$v"; continue; fi
 		printf '%s%s %s\n' "$ind" "$r" "$v"
 		tree_walk "$r" "$ind  " "$path$r "
 	done
 }
 list_tree() {
-	local name kind source version pin hash role reqs
-	while IFS=$'\t' read -r name kind source version pin hash role reqs; do
+	local name kind origin id version pin hash role reqs
+	while IFS=$'\t' read -r name kind origin id version pin hash role reqs; do
 		[[ "$role" == direct ]] || continue
 		printf '%s %s\n' "$name" "$version"
 		tree_walk "$name" "  " " $name "
@@ -1350,15 +1389,16 @@ list_tree() {
 cmd_list() {
 	find_project
 	(( TREE )) && { list_tree; return 0; }
-	local dir deps name kind source version pin hash role reqs st n=0
+	local dir deps name kind origin id version pin hash role reqs st n=0 where
 	dir="$(lib_dir)" || exit 1; deps="$(deps_list)"
-	while IFS=$'\t' read -r name kind source version pin hash role reqs; do
+	while IFS=$'\t' read -r name kind origin id version pin hash role reqs; do
 		[[ -n "$name" ]] || continue
+		where="$origin"; [[ "$kind" == registry ]] && where="$id ($origin)"
 		n=$((n+1))
 		st="$(lib_status "$name" "$hash" "$dir" "$kind" "$pin")"
 		grep -qx -- "$name" <<< "$deps" || { (( LIBMODE )) && [[ "$role" == dep ]]; } || st="$st,not-in-project"
 		[[ "$role" == dep ]] && st="$st,dep"
-		printf '%-20s %-8s %-12s %-10s %s\n' "$name" "$kind" "$version" "$st" "$source"
+		printf '%-20s %-8s %-12s %-10s %s\n' "$name" "$kind" "$version" "$st" "$where"
 	done < <(lock_entries)
 	while read -r name; do
 		[[ -n "$name" ]] || continue
@@ -1372,10 +1412,10 @@ cmd_list() {
 
 cmd_verify() {
 	find_project
-	local dir name kind source version pin hash role reqs st bad=0 n=0 d r
+	local dir name kind origin id version pin hash role reqs st bad=0 n=0 d r
 	dir="$(lib_dir)" || exit 1
 	[[ -f "$LOCK" ]] || die "$LOCK not found"
-	while IFS=$'\t' read -r name kind source version pin hash role reqs; do
+	while IFS=$'\t' read -r name kind origin id version pin hash role reqs; do
 		n=$((n+1))
 		st="$(lib_status "$name" "$hash" "$dir" "$kind" "$pin")"
 		if [[ "$st" != ok ]]; then printf '%s: %s\n' "$name" "$st" >&2; bad=1; fi
@@ -1393,9 +1433,9 @@ cmd_verify() {
 
 cmd_outdated() {
 	find_project
-	local name kind source version pin hash role reqs latest n=0
-	while IFS=$'\t' read -r name kind source version pin hash role reqs; do
-		latest="$(latest_for "$kind" "$source" "$version" "$pin")"
+	local name kind origin id version pin hash role reqs latest n=0
+	while IFS=$'\t' read -r name kind origin id version pin hash role reqs; do
+		latest="$(latest_for "$kind" "$origin" "$id" "$version" "$pin")"
 		[[ -n "$latest" ]] || continue
 		if [[ "$latest" == HEAD@* ]] || semver_gt "$latest" "$version"; then
 			printf '%-20s %-12s -> %s\n' "$name" "$version" "$latest"; n=$((n+1))
@@ -1406,15 +1446,15 @@ cmd_outdated() {
 }
 
 # one library: its own transaction; unless --fail-fast, a failure is recorded and the next one goes on
-update_run() { # name kind source ref
-	if (( FAILFAST )); then install_kind "$1" "$2" "$3" "$4" ""; return 0; fi
-	( install_kind "$1" "$2" "$3" "$4" "" ) || { failed+=("$1"); return 1; }
+update_run() { # name kind origin id ref
+	if (( FAILFAST )); then install_kind "$1" "$2" "$3" "$4" "$5" ""; return 0; fi
+	( install_kind "$1" "$2" "$3" "$4" "$5" "" ) || { failed+=("$1"); return 1; }
 }
 
 cmd_update() {
 	find_project
 	local -a names=("$@") failed=()
-	local name kind source version pin hash role reqs latest rec want ref n=0
+	local name kind origin id version pin hash role reqs latest rec want ref n=0
 	INSTALL_ROLE=keep   # updating never changes whether a library is direct
 	if (( ${#names[@]} == 0 )); then while IFS=$'\t' read -r name _; do names+=("$name"); done < <(lock_entries); fi
 	for name in ${names[@]+"${names[@]}"}; do
@@ -1422,20 +1462,20 @@ cmd_update() {
 		if [[ "$name" == *@* ]]; then want="${name#*@}"; name="${name%%@*}"; [[ -n "$want" ]] || die "empty version in '$name@'"; fi
 		rec="$(lock_get "${name%.c3l}")"
 		[[ -n "$rec" ]] || { warn "$name is not in $LOCK"; continue; }
-		IFS=$'\t' read -r name kind source version pin hash role reqs <<< "$rec"
+		IFS=$'\t' read -r name kind origin id version pin hash role reqs <<< "$rec"
 		[[ "$kind" == path ]] && continue   # a linked directory is always current
-		[[ "$kind" == git ]] && TRUSTED_HOSTS+=" $(url_host "$source") "
+		[[ "$kind" == git ]] && TRUSTED_HOSTS+=" $(url_host "$origin") "
 		if [[ -n "$want" ]]; then # explicit target: switch to that version/ref
 			if (( DRY_RUN )); then printf '%s: %s -> %s (dry run)\n' "$name" "$version" "$want"; n=$((n+1)); continue; fi
-			update_run "$name" "$kind" "$source" "$want" && n=$((n+1))
+			update_run "$name" "$kind" "$origin" "$id" "$want" && n=$((n+1))
 			continue
 		fi
-		latest="$(latest_for "$kind" "$source" "$version" "$pin")"
+		latest="$(latest_for "$kind" "$origin" "$id" "$version" "$pin")"
 		[[ -n "$latest" ]] || { warn "$name: cannot determine the newest version"; continue; }
 		if [[ "$latest" == HEAD@* ]] || semver_gt "$latest" "$version"; then
 			if (( DRY_RUN )); then printf '%s: %s -> %s (dry run)\n' "$name" "$version" "$latest"; n=$((n+1)); continue; fi
 			ref="$latest"; [[ "$latest" == HEAD@* ]] && ref="$version"
-			update_run "$name" "$kind" "$source" "$ref" && n=$((n+1))
+			update_run "$name" "$kind" "$origin" "$id" "$ref" && n=$((n+1))
 		fi
 	done
 	if (( ${#failed[@]} )); then
@@ -1445,11 +1485,11 @@ cmd_update() {
 	return 0
 }
 
-install_kind() { # name kind source version pin ("" = fresh install, not a restore)
+install_kind() { # name kind origin id version pin ("" = fresh install, not a restore)
 	case "$2" in
-		registry) install_registry "$3" "$4" "$5" ;;
-		git) install_git "$3" "$4" "$5" ;;
-		path) [[ -d "$3" ]] || die "path dependency $1: $3 does not exist here"; install_path "$3" "$5" ;;
+		registry) install_registry "$3" "$4" "$5" "$6" ;;
+		git) install_git "$3" "$5" "$6" ;;
+		path) [[ -d "$3" ]] || die "path dependency $1: $3 does not exist here"; install_path "$3" "$6" ;;
 		*) die "unknown source kind '$2' for $1" ;;
 	esac
 }
@@ -1457,21 +1497,21 @@ install_kind() { # name kind source version pin ("" = fresh install, not a resto
 cmd_sync() {
 	find_project
 	[[ -f "$LOCK" ]] || die "$LOCK not found (nothing to sync; try '$PROGRAM migrate' or '$PROGRAM add')"
-	local dir name kind source version pin hash role reqs st d drift=0
+	local dir name kind origin id version pin hash role reqs st d drift=0
 	local -a failed=()
 	dir="$(lib_dir create)" || exit 1
 	if (( FROZEN )); then
 		while read -r d; do
 			[[ -n "$d" && -z "$(lock_get "$d")" ]] && { printf 'drift: %s is in %s but not in %s\n' "$d" "$PROJECT" "$LOCK" >&2; drift=1; }
 		done < <(deps_list)
-		while IFS=$'\t' read -r name _ _ _ _ _ role _; do
+		while IFS=$'\t' read -r name _ _ _ _ _ _ role _; do
 			(( LIBMODE )) && [[ "$role" == dep ]] && continue   # a library lists only its direct dependencies
 			in_deps "$name" || { printf 'drift: %s is in %s but not in %s\n' "$name" "$LOCK" "$PROJECT" >&2; drift=1; }
 		done < <(lock_entries)
 		(( drift )) && die "project and lockfile disagree (--frozen)"
 		NOLOCKWRITE=1
 	fi
-	while IFS=$'\t' read -r name kind source version pin hash role reqs; do
+	while IFS=$'\t' read -r name kind origin id version pin hash role reqs; do
 		st="$(lib_status "$name" "$hash" "$dir" "$kind" "$pin")"
 		if [[ "$st" == ok ]]; then
 			if ! in_deps "$name" && ! { (( LIBMODE )) && [[ "$role" == dep ]]; }; then
@@ -1480,8 +1520,8 @@ cmd_sync() {
 			continue
 		fi
 		[[ "$st" == modified ]] && warn "$name differs from the lockfile; restoring"
-		if (( FAILFAST )); then install_kind "$name" "$kind" "$source" "$version" "$pin"
-		else ( install_kind "$name" "$kind" "$source" "$version" "$pin" ) || { failed+=("$name"); continue; }
+		if (( FAILFAST )); then install_kind "$name" "$kind" "$origin" "$id" "$version" "$pin"
+		else ( install_kind "$name" "$kind" "$origin" "$id" "$version" "$pin" ) || { failed+=("$name"); continue; }
 		fi
 	done < <(lock_entries)
 	if (( ${#failed[@]} )); then
@@ -1563,7 +1603,7 @@ cmd_publish() {
 migrate_c3po() {
 	local dir name repo origin ref commit url label file hash
 	dir="$(lib_dir)" || exit 1
-	: | lock_write ""
+	: | lock_write
 	while IFS=$'\t' read -r name repo origin ref commit; do
 		[[ -n "$name" && "$commit" =~ ^[0-9a-fA-F]{40}$ ]] || { warn "skipping a c3po entry without name or commit"; continue; }
 		case "$origin" in
@@ -1574,8 +1614,8 @@ migrate_c3po() {
 		[[ "$ref" == - ]] && label=HEAD || label="$ref"
 		hash="commit:$commit"
 		file="$dir/$name.c3l"; [[ -e "$file" ]] || file="$dir/${repo##*/}"
-		lock_put "$name" git "$url" "$label" "commit:$commit" "$hash" direct
-		if [[ -e "$file" ]]; then read_reqs "$name" "$file"; lock_put "$name" git "$url" "$label" "commit:$commit" "$hash" keep "$REQ_NAMES"; fi
+		lock_put "$name" git "$url" - "$label" "commit:$commit" "$hash" direct
+		if [[ -e "$file" ]]; then read_reqs "$name" "$file"; lock_put "$name" git "$url" - "$label" "commit:$commit" "$hash" keep "$REQ_NAMES"; fi
 		info "imported $name ($label, commit ${commit:0:12}) from project.lock.json"
 	done < <(json_flatten < project.lock.json | awk -F'\t' '
 		$1 ~ /^packages\[[0-9]+\]\.(name|repo|origin|ref|commit)$/ { i = $1; sub(/^packages\[/, "", i); sub(/\].*/, "", i); k = $1; sub(/.*\./, "", k); r[i, k] = $2; if (!(i in s)) { s[i] = 1; o[++n] = i } }

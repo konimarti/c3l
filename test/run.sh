@@ -60,7 +60,7 @@ done
 section "init, add, list, verify"
 newproj p1
 check "init creates lock" c3l init
-has "lock header" "@registry" "$(cat c3l.lock)"
+eq "fresh lock has no entries" "$(awk -F'\t' '$0 !~ /^#/' c3l.lock | wc -l)" "0"
 publish acme/alpha 1.0.0 >/dev/null
 out="$(c3l add acme/alpha 2>&1)"; eq "add rc" $? 0
 has "add output" "installed alpha 1.0.0" "$out"
@@ -68,6 +68,8 @@ check "file installed" test -f lib/alpha.c3l
 has "project registered" '"alpha"' "$(cat project.json)"
 SUM="$(sha lib/alpha.c3l)"
 has "lock has hash" "sha256:$SUM" "$(cat c3l.lock)"
+has "lock records origin and id" "^alpha	registry	$C3L_REGISTRY	acme/alpha	1.0.0" "$(cat c3l.lock)"
+eq "lock has no @registry header" "$(grep -c '^@' c3l.lock)" "0"
 has "list ok" "alpha .*ok" "$(c3l list)"
 check "verify ok" c3l verify
 
@@ -213,8 +215,8 @@ section "registry under a base path, with trailing slash"
 mkdir -p "$REG/c3/v1"; python3 "$HERE/fakereg.py" "$REG/c3/v1" publish acme/zed 1.0.0 >/dev/null
 newproj p7
 out="$(c3l --registry "$C3L_REGISTRY/c3/v1/" add acme/zed 2>&1)"; eq "base path rc" $? 0
-has "registry stored without trailing slash" "@registry	$C3L_REGISTRY/c3/v1$" "$(cat c3l.lock)"
-check "later commands use the locked registry" env -u C3L_REGISTRY "$C3L" outdated
+has "origin stored without trailing slash" "^zed	registry	$C3L_REGISTRY/c3/v1	acme/zed	" "$(cat c3l.lock)"
+check "later commands use the registry of the library" env -u C3L_REGISTRY "$C3L" outdated
 check "verify" c3l verify
 
 section "git source"
@@ -302,10 +304,10 @@ has "dependency installed" "dcb installed for dca" "$out"
 has "transitive installed" "dcc installed for dcb" "$out"
 for n in dca dcb dcc; do check "$n file" test -f lib/$n.c3l; has "$n in project.json" "\"$n\"" "$(cat project.json)"; done
 eq "lock header stays v1" "$(head -n 1 c3l.lock | cut -d' ' -f1-3)" "# c3l.lock v1"
-eq "dca is direct" "$(awk -F'\t' '$1=="dca"{print $7}' c3l.lock)" "direct"
-eq "dcb is dep" "$(awk -F'\t' '$1=="dcb"{print $7}' c3l.lock)" "dep"
-eq "dcb requires dcc" "$(awk -F'\t' '$1=="dcb"{print $8}' c3l.lock)" "dcc"
-eq "lock has 8 columns" "$(awk -F'\t' '$1=="dca"{print NF}' c3l.lock)" "8"
+eq "dca is direct" "$(awk -F'\t' '$1=="dca"{print $8}' c3l.lock)" "direct"
+eq "dcb is dep" "$(awk -F'\t' '$1=="dcb"{print $8}' c3l.lock)" "dep"
+eq "dcb requires dcc" "$(awk -F'\t' '$1=="dcb"{print $9}' c3l.lock)" "dcc"
+eq "lock has 9 columns" "$(awk -F'\t' '$1=="dca"{print NF}' c3l.lock)" "9"
 check "verify ok" c3l verify
 has "list shows dep" "dcb .*ok,dep" "$(c3l list)"
 tree="$(c3l list --tree)"; has "tree root" "^dca 1.0.0" "$tree"; has "tree nested" "    dcc 1.0.0" "$tree"
@@ -314,7 +316,7 @@ out="$(c3l remove dcb 2>&1)"; eq "remove needed dep refused" $? 1
 has "refusal names dependent" "required by: dca" "$out"
 check "dcb still there" test -f lib/dcb.c3l
 c3l update dcb >/dev/null 2>&1
-eq "update keeps role dep" "$(awk -F'\t' '$1=="dcb"{print $7}' c3l.lock)" "dep"
+eq "update keeps role dep" "$(awk -F'\t' '$1=="dcb"{print $8}' c3l.lock)" "dep"
 rm -f lib/dcb.c3l lib/dcc.c3l
 c3l sync --frozen >/dev/null 2>&1; eq "frozen sync restores the graph" $? 0
 check "dcc restored" test -f lib/dcc.c3l
@@ -337,7 +339,7 @@ publish acme/dm 1.0.0 --requires=acme/dl:1.2.0 >/dev/null
 publish acme/dtop 1.0.0 --requires=acme/dl:1.0.0,acme/dm >/dev/null
 out="$(c3l add acme/dtop 2>&1)"; eq "diamond rc" $? 0
 has "dl raised to the highest minimum" "dl 1.0.0 -> 1.2.0" "$out"
-eq "dl is at 1.2.0" "$(awk -F'\t' '$1=="dl"{print $4}' c3l.lock)" "1.2.0"
+eq "dl is at 1.2.0" "$(awk -F'\t' '$1=="dl"{print $5}' c3l.lock)" "1.2.0"
 check "diamond verify" c3l verify
 newproj pd3
 c3l init >/dev/null 2>&1; c3l add acme/dl@1.0.0 >/dev/null 2>&1
@@ -401,7 +403,7 @@ has "refusal explains --allow-host" "allow-host file" "$out"
 check_not "nothing left behind" test -e lib/viapo.c3l
 out="$(c3l --allow-host file add acme/viapo 2>&1)"; eq "trusted host rc" $? 0
 has "c3po source followed" "gitlib installed for viapo" "$out"
-eq "gitlib is a dep, git kind" "$(awk -F'\t' '$1=="gitlib"{print $2 "/" $7}' c3l.lock)" "git/dep"
+eq "gitlib is a dep, git kind" "$(awk -F'\t' '$1=="gitlib"{print $2 "/" $8}' c3l.lock)" "git/dep"
 check "c3po verify" c3l verify
 
 
@@ -428,12 +430,12 @@ cat > project.lock.json <<JSON
 JSON
 rm -f c3l.lock
 out="$(c3l migrate 2>&1)"; eq "c3po migrate rc" $? 0
-has "seali locked at HEAD" "^seali	git	https://github.com/Ecoral360/seali.c3l	HEAD	commit:$SHA40" "$(cat c3l.lock)"
-has "codeberg mapped, tag kept" "^other	git	https://codeberg.org/o/other	v1.0.0	commit:$SHA40" "$(cat c3l.lock)"
+has "seali locked at HEAD" "^seali	git	https://github.com/Ecoral360/seali.c3l	-	HEAD	commit:$SHA40" "$(cat c3l.lock)"
+has "codeberg mapped, tag kept" "^other	git	https://codeberg.org/o/other	-	v1.0.0	commit:$SHA40" "$(cat c3l.lock)"
 newproj pd10
-printf '# c3l.lock v1\nold\tregistry\tacme/old\t1.0.0\tsha256:aa\tsha256:aa\n' > c3l.lock
-out="$(c3l list 2>&1)"; has "6-column line is readable" "old " "$out"
-eq "6-column line defaults to direct" "$(source "$C3L"; LOCK=c3l.lock lock_entries | cut -f7)" "direct"
+printf '# c3l.lock v1\nold\tregistry\tacme/old\t1.0.0\tsha256:aa\tsha256:aa\tdirect\t-\n' > c3l.lock
+out="$(c3l list 2>&1)"; eq "an old 8-column lock is refused rc" $? 1
+has "old lock explained" "does not have 9 columns" "$out"
 
 section "publish: check, pack, publish (fake c3pkg server)"
 PKG=$((PORT + 1)); PKG429=$((PORT + 2))
@@ -471,7 +473,7 @@ check "--allow-dirty passes" pc --offline --allow-dirty check
 git checkout -q README.md
 
 # review fixes: unpacked junk is not "dirty"; modes do not depend on umask; nested .c3l is kept
-mkdir -p obj tests; echo x > obj/a.o; echo x > c3l.lock
+mkdir -p obj tests; echo x > obj/a.o; printf '# c3l.lock v1\n' > c3l.lock
 check "untracked obj/ and c3l.lock are not dirt" pc --offline --no-build check
 echo x > tests/fixture.c3l; echo y > newfile.c3
 check_not "untracked packaged file is dirt" pc --offline --no-build check
@@ -486,10 +488,10 @@ out="$(pc --offline check --version 2>&1)"; eq "--version without value rc" $? 1
 has "--version message" "needs a value" "$out"
 
 # publishing a library that has dependencies: vendor.c3l.requires comes from its own c3l.lock
-printf '# c3l.lock v1\n@registry\thttp://example.invalid\ndcb\tregistry\tacme/dcb\t1.2.0\tsha256:aa\tsha256:aa\tdirect\t-\ndcc\tregistry\tacme/dcc\t1.0.0\tsha256:bb\tsha256:bb\tdep\t-\ngl\tgit\thttps://github.com/o/gl\tv0.3.0\tcommit:x\tcommit:x\tdirect\t-\n' > c3l.lock
+printf '# c3l.lock v1\ndcb\tregistry\thttp://example.invalid/v1\tacme/dcb\t1.2.0\tsha256:aa\tsha256:aa\tdirect\t-\ndcc\tregistry\thttp://example.invalid/v1\tacme/dcc\t1.0.0\tsha256:bb\tsha256:bb\tdep\t-\ngl\tgit\thttps://github.com/o/gl\t-\tv0.3.0\tcommit:x\tcommit:x\tdirect\t-\n' > c3l.lock
 c3l pack --no-build --output "$WORK/withdeps.c3l" >/dev/null 2>&1; eq "pack with a lockfile rc" $? 0
 man="$(unzip -p "$WORK/withdeps.c3l" manifest.json)"
-has "requires has the registry dependency" '"source": "acme/dcb", "version": "1.2.0"' "$man"
+has "requires has the registry dependency and its registry" '"source": "acme/dcb", "registry": "http://example.invalid/v1", "version": "1.2.0"' "$man"
 has "requires has the git dependency" '"source": "https://github.com/o/gl", "version": "v0.3.0"' "$man"
 check_not "transitive-only libs are not listed" grep -q acme/dcc <<< "$man"
 check_not "c3l.lock itself is not packed" bash -c "unzip -l '$WORK/withdeps.c3l' | grep -q c3l.lock"
@@ -503,7 +505,7 @@ has "warns about self dependency" "demo lists itself as a dependency" "$out"
 git checkout -q manifest.json
 
 # vendor block goes to the top level even if a nested "version" comes first
-printf '# c3l.lock v1\ndcb\tregistry\tacme/dcb\t1.2.0\tsha256:aa\tsha256:aa\tdirect\t-\n' > c3l.lock
+printf '# c3l.lock v1\ndcb\tregistry\thttp://example.invalid\tacme/dcb\t1.2.0\tsha256:aa\tsha256:aa\tdirect\t-\n' > c3l.lock
 sed -i 's|"provides" : "demo",|"targets-note" : { "version" : "9" },\n  "provides" : "demo",|' manifest.json
 c3l pack --no-build --allow-dirty --output "$WORK/nested.c3l" >/dev/null 2>&1; eq "pack with a nested version rc" $? 0
 flat="$(unzip -p "$WORK/nested.c3l" manifest.json | ( source "$C3L"; json_flatten ))"
@@ -628,7 +630,7 @@ out="$(c3l add ../pl 2>&1)"; eq "add ../pl rc" $? 0
 check "linked, not copied" test -L lib/pl.c3l
 check "dependencies of the linked library are installed" test -f lib/lmc.c3l
 eq "lock kind is path" "$(awk -F'\t' '$1=="pl"{print $2}' c3l.lock)" "path"
-eq "lmc is a dependency" "$(awk -F'\t' '$1=="lmc"{print $7}' c3l.lock)" "dep"
+eq "lmc is a dependency" "$(awk -F'\t' '$1=="lmc"{print $8}' c3l.lock)" "dep"
 check "verify with a path dependency" c3l verify
 has "list shows path" "pl .*path" "$(c3l list)"
 printf 'module pl;\nfn int one() => 1;\nfn int two() => 2;\n' > ../pl/src/pl.c3
@@ -675,9 +677,41 @@ check "both restored" test -f lib/ka.c3l -a -f lib/kb.c3l
 publish acme/ka 1.1.0 --badsum >/dev/null; publish acme/kb 1.1.0 >/dev/null
 out="$(c3l update 2>&1)"; eq "update with one failure rc" $? 1
 has "update summary" "could not update 1 library: ka" "$out"
-eq "kb was updated anyway" "$(awk -F'\t' '$1=="kb"{print $4}' c3l.lock)" "1.1.0"
-eq "ka stayed" "$(awk -F'\t' '$1=="ka"{print $4}' c3l.lock)" "1.0.0"
+eq "kb was updated anyway" "$(awk -F'\t' '$1=="kb"{print $5}' c3l.lock)" "1.1.0"
+eq "ka stayed" "$(awk -F'\t' '$1=="ka"{print $5}' c3l.lock)" "1.0.0"
 check "ka intact after its rollback" c3l verify
+
+section "several registries in one lock"
+mkdir -p "$REG/c3/v2"; python3 "$HERE/fakereg.py" "$REG/c3/v2" publish acme/mr2 1.0.0 >/dev/null
+publish acme/mr1 1.0.0 >/dev/null
+newproj mr
+c3l init >/dev/null 2>&1
+c3l add acme/mr1 >/dev/null 2>&1; eq "add from the default registry rc" $? 0
+c3l --registry "$C3L_REGISTRY/c3/v2" add acme/mr2 >/dev/null 2>&1; eq "add from a second registry rc" $? 0
+eq "mr1 origin" "$(awk -F'\t' '$1=="mr1"{print $3 " " $4}' c3l.lock)" "$C3L_REGISTRY acme/mr1"
+eq "mr2 origin" "$(awk -F'\t' '$1=="mr2"{print $3 " " $4}' c3l.lock)" "$C3L_REGISTRY/c3/v2 acme/mr2"
+rm -f lib/mr1.c3l lib/mr2.c3l
+out="$(env -u C3L_REGISTRY "$C3L" sync 2>&1)"; eq "sync restores from both registries rc" $? 0
+check "both restored" test -f lib/mr1.c3l -a -f lib/mr2.c3l
+publish acme/mr1 1.1.0 >/dev/null; python3 "$HERE/fakereg.py" "$REG/c3/v2" publish acme/mr2 1.2.0 >/dev/null
+out="$(env -u C3L_REGISTRY "$C3L" outdated 2>&1)"
+has "outdated asks the first registry" "mr1 .*1.1.0" "$out"
+has "outdated asks the second registry" "mr2 .*1.2.0" "$out"
+env -u C3L_REGISTRY "$C3L" update >/dev/null 2>&1; eq "update rc" $? 0
+eq "mr1 updated" "$(awk -F'\t' '$1=="mr1"{print $5}' c3l.lock)" "1.1.0"
+eq "mr2 updated" "$(awk -F'\t' '$1=="mr2"{print $5}' c3l.lock)" "1.2.0"
+eq "mr2 keeps its origin" "$(awk -F'\t' '$1=="mr2"{print $3}' c3l.lock)" "$C3L_REGISTRY/c3/v2"
+out="$(c3l --registry "$C3L_REGISTRY/c3/v2" add acme/mr1 2>&1)"; eq "same name from another registry rc" $? 1
+has "name clash explained" "already installed from registry:$C3L_REGISTRY acme/mr1" "$out"
+# a dependency can name its registry; a registry nobody trusts yet is refused
+python3 "$HERE/fakereg.py" "$REG/c3/v2" publish acme/mr3 1.0.0 >/dev/null
+publish acme/mr4 1.0.0 --requires=acme/mr3:1.0.0 --reqreg="$C3L_REGISTRY/c3/v2" >/dev/null
+newproj mr4p
+c3l init >/dev/null 2>&1
+out="$(c3l add acme/mr4 2>&1 </dev/null)"; eq "dependency from an unknown registry is refused rc" $? 1
+has "refusal names the host" "not trusted" "$out"
+out="$(c3l --allow-host 127.0.0.1 add acme/mr4 2>&1 </dev/null)"; eq "allowed registry rc" $? 0
+eq "dependency came from its registry" "$(awk -F'\t' '$1=="mr3"{print $3}' c3l.lock)" "$C3L_REGISTRY/c3/v2"
 
 section "cli"
 has "help" "reproducible dependencies" "$(c3l help)"

@@ -14,10 +14,10 @@ c3l update                          # update, rolled back on any failure
 c3l sync --frozen                   # CI: restore exactly what c3l.lock says
 ```
 
-- `c3l.lock` has one line per library. Commit it.
+- `c3l.lock` has one line per library, including where it came from (registry URL or git URL). Commit it.
 - Checksum mismatch means rollback, not a warning.
 - Every install is transactional: on failure the library file and `project.json` are restored.
-- Default registry is [www.c3pkg.eu](https://www.c3pkg.eu). Change it with `--registry`, `$C3L_REGISTRY` or `@registry` in the lockfile.
+- Default registry is [www.c3pkg.eu](https://www.c3pkg.eu). Pick another for `add` with `--registry URL` or `$C3L_REGISTRY`. `URL` is the base URL as `c3c --fetch-url` takes it, path included (`https://example.org/c3/v1`). Libraries from different registries can live in one project: `sync`, `update` and `outdated` go back to the registry each library came from.
 
 ## Why not just `c3c fetch`?
 
@@ -63,7 +63,7 @@ Options (before or after the command):
 
 | | |
 |---|---|
-| `--registry URL` | registry for this command |
+| `--registry URL` | registry base URL for new installs and `search`/`info`/`publish` |
 | `--dry-run` | with `update`/`prune`: show what would change |
 | `--frozen` | with `sync`: fail if lock and project disagree, never write the lock |
 | `--fail-fast` | with `sync`/`update`: stop at the first failure |
@@ -103,7 +103,8 @@ A library declares its dependencies in `manifest.json`:
 ```
 
 `source` is a registry id or git URL. `version` is a minimum (registry) or a
-tag, branch or commit (git). `c3l publish` writes this block for you.
+tag, branch or commit (git). A registry dependency may add `"registry": "<base URL>"`;
+without it the default registry is used. `c3l publish` writes this block for you.
 
 Rules:
 

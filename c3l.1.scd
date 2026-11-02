@@ -29,8 +29,10 @@ commands need more: *git* (git libraries, *check*, *pack*, *publish*), *unzip*
 Options may appear before or after the command.
 
 *--registry* _URL_, *--registry=*_URL_
-	Use this registry for the command. Overrides *C3L_REGISTRY* and the registry
-	recorded in _c3l.lock_. Only matters for registry libraries and for *search*.
+	Use this registry base URL for the command (as *c3c --fetch-url* takes it, path
+	included). Overrides *C3L_REGISTRY*. It picks the registry for *add*, *search*, *info*
+	and *publish*; libraries already in _c3l.lock_ are always fetched from the registry
+	recorded for them.
 
 *--dry-run*
 	Only print what *update* would change. Has no effect on other commands.
@@ -233,8 +235,10 @@ A library declares them in its _manifest.json_ (c3c ignores the _vendor_ key):
     { "name": "vk", "source": "tonis2/vk", "version": "1.0.1" } ] } }
 ```
 
-_source_ is a registry id or a git URL. _version_ is the minimum for registry
-libraries, a tag, branch or commit for git libraries. *publish* writes this block
+_source_ is a registry id or a git URL. A registry source may add _registry_, the
+registry base URL; without it the default registry is used, and a registry that no
+installed library comes from yet needs *--allow-host*. _version_ is the minimum for
+registry libraries, a tag, branch or commit for git libraries. *publish* writes this block
 from the library's own _c3l.lock_. c3l also reads c3po's _vendor.c3po.sources_ and
 c3c's plain _dependencies_ names (no source: a warning, and *verify* fails until
 the library is added).
@@ -252,21 +256,25 @@ Tab separated, one library per line, sorted by name:
 
 ```
 # c3l.lock v1
-@registry	https://www.c3pkg.eu
-box2d	registry	jecokef902/box2d	1.0.0	sha256:4945...	sha256:4945...
-hex	git	https://github.com/konimarti/hex.c3l	v0.1.1	commit:3fa9...	commit:3fa9...
+box2d	registry	https://www.c3pkg.eu	jecokef902/box2d	1.0.0	sha256:4945...	sha256:4945...	direct	-
+hex	git	https://github.com/konimarti/hex.c3l	-	v0.1.1	commit:3fa9...	commit:3fa9...	direct	-
 ```
 
-Columns: name, kind (_registry_ or _git_), source, version, pin (checksum or
-commit), SHA-256 of the installed file (registry) or the commit again (git), role
+Columns: name, kind (_registry_, _git_ or _path_), origin, id, version, pin (checksum
+or commit), SHA-256 of the installed file (registry) or the commit again (git), role
 (_direct_: added by you; _dep_: required by another library) and the comma
-separated names the library requires (_-_ for none). The format is still version 1;
-lines with only six columns are read as _direct_.
+separated names the library requires (_-_ for none).
+
+The origin is where the library is fetched from: the registry base URL (what
+*c3c --fetch-url* gets, no trailing slash), the git repository URL, or the directory.
+The id is _namespace/name_ for a registry and _-_ otherwise. Every line names its own
+origin, so one project can mix registries. Library names stay unique: the same name
+from two origins is an error. A file with another number of columns is refused.
 
 # ENVIRONMENT VARIABLES
 
 _C3L_REGISTRY_
-	Registry base URL. Overridden by *--registry*, overrides the lockfile.
+	Registry base URL for new installs. Overridden by *--registry*.
 	Default: https://www.c3pkg.eu
 
 _C3L_ALLOWED_HOSTS_

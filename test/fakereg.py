@@ -2,13 +2,14 @@
 """Build a static c3c-fetch registry tree (see the c3c fetch protocol) for tests.
 
   fakereg.py ROOT publish ns/name VERSION [--badsum] [--no-checksum] [--not-latest]
-                 [--requires=ns/x:1.0.0,ns/y] [--deps=a,b] [--c3po=name|url,...]
+                 [--requires=ns/x:1.0.0,ns/y] [--reqreg=URL] [--deps=a,b] [--c3po=name|url,...]
 
 Writes download/ns/name@VERSION (a zip with manifest.json) and info/ns/name.
 --badsum    info record advertises a wrong checksum
 --no-checksum  info record has no checksum field
 --not-latest   do not move 'latest' to this version
 --requires     vendor.c3l.requires entries (id[:min version])
+--reqreg       registry URL written on every --requires entry
 --deps         c3c "dependencies" names (no source)
 --c3po         vendor.c3po.sources entries (name|git url)
 """
@@ -38,6 +39,8 @@ def main():
                 r = {"name": rid.split("/")[-1], "source": rid}
                 if rver:
                     r["version"] = rver
+                if "reqreg" in opts:
+                    r["registry"] = opts["reqreg"]
                 reqs.append(r)
             man.setdefault("vendor", {}).setdefault("c3l", {})["requires"] = reqs
         if "c3po" in opts:
