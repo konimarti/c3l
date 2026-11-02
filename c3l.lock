@@ -1,0 +1,3 @@
+# c3l.lock v1 - written by c3l, do not edit by hand
+curl	vendor	https://github.com/c3lang/vendor/releases/download/latest	curl	latest	sha256:5d8d9bcc7465fe09c365ffca5da2609be80002002f7a7b28018a16c2e9bd05b7	sha256:5d8d9bcc7465fe09c365ffca5da2609be80002002f7a7b28018a16c2e9bd05b7	direct	-
+serp	git	https://github.com/konimarti/serp.c3l	-	v0.8.0	commit:603f195392768de8c1dce548b11a13a132b39c2e	commit:603f195392768de8c1dce548b11a13a132b39c2e	direct	-

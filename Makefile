@@ -1,10 +1,14 @@
 PREFIX?=/usr/local
 BINDIR?=$(PREFIX)/bin
 MANDIR?=$(PREFIX)/share/man
+C3C?=c3c
 SCDOC=scdoc
 .DEFAULT_GOAL=all
 
-all: c3l
+all: c3l build/c3l
+
+build/c3l: project.json c3l.lock $(wildcard src/*.c3 src/*/*.c3) $(wildcard vendor/*.c3l)
+	$(C3C) build c3l
 
 c3l.1: c3l.1.scd
 	$(SCDOC) < $< > $@
@@ -18,7 +22,7 @@ gitconfig:
 	ln -s ../../contrib/pre-commit .git/hooks/pre-commit
 
 clean:
-	rm -f c3l.1
+	rm -rf build c3l.1
 
 install: all
 	mkdir -p $(BINDIR) $(MANDIR)/man1

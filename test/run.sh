@@ -9,7 +9,7 @@
 #   LIVE=1 test/run.sh     additionally smoke-test against www.c3pkg.eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-C3L="$HERE/../c3l"
+C3L="${C3L:-$HERE/../c3l}"
 export C3C="${C3C:-c3c}"
 command -v "$C3C" >/dev/null || { echo "SKIP: c3c not found"; exit 0; }
 "$C3C" --help 2>&1 | grep -q fetch-info || { echo "SKIP: c3c has no fetch support"; exit 0; }

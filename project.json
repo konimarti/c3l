@@ -1,0 +1,18 @@
+{
+  "langrev": "1",
+  "warnings": [ "no-unused" ],
+  "dependency-search-paths": [ "vendor" ],
+  "dependencies": [ "serp", "curl" ],
+  "authors": [ "Koni Marti <koni.marti@gmail.com>" ],
+  "version": "1.1.0",
+  "sources": [ "src/**" ],
+  "test-sources": [ "test/unit/**" ],
+  "build-dir": "build",
+  "output": "build",
+  "targets": {
+    "c3l": {
+      "type": "executable"
+    }
+  },
+  "opt": "O2"
+}
