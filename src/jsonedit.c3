@@ -1,7 +1,7 @@
 <*
- Edit one top-level string array of a JSON5 file (project.json "dependencies")
- without touching anything else: comments, layout and the other keys stay as
- they are, only the array itself is rewritten.
+ Edit top-level members of a JSON5 file (project.json, manifest.json) without
+ touching anything else: comments, layout and the other keys stay as they are,
+ only the one value is rewritten.
 *>
 module c3l::project;
 
@@ -13,49 +13,22 @@ import std::collections::list;
 *>
 fn String edit_array(String text, String key, String name, bool add)
 {
-	Scanner sc = { .s = text };
 	List{String} items;
 	items.tinit();
-	sz start, end;
-	bool found;
-	int depth;
-	while (sc.p < text.len)
+	sz? start = find_value(text, key);
+	Scanner sc = { .s = text, .p = start ?? 0 };
+	bool found = @ok(start) && sc.peek() == '[';
+	if (found)
 	{
-		char c = text[sc.p];
-		switch
+		for (sc.p++, sc.skip_space(); sc.p < text.len && text[sc.p] != ']'; sc.skip_space())
 		{
-			case c == '/' && sc.p + 1 < text.len && (text[sc.p + 1] == '/' || text[sc.p + 1] == '*'):
-				sc.skip_space();
-			case c == '"' || c == '\'':
-				String k = sc.read_string();
-				if (depth != 1 || k != key) break;
-				sc.skip_space();
-				if (sc.peek() != ':') break;
-				sc.p++;
-				sc.skip_space();
-				if (sc.peek() != '[') break;
-				start = sc.p++;
-				for (sc.skip_space(); sc.p < text.len && text[sc.p] != ']'; sc.skip_space())
-				{
-					if (sc.peek() == '"' || sc.peek() == '\'')
-					{
-						items.push(sc.read_string());
-						continue;
-					}
-					sc.p++;
-				}
-				end = sc.p + 1;
-				found = true;
-			case c == '{' || c == '[':
-				depth++;
-				sc.p++;
-			case c == '}' || c == ']':
-				depth--;
-				sc.p++;
-			default:
-				sc.p++;
+			if (sc.peek() == '"' || sc.peek() == '\'')
+			{
+				items.push(sc.read_string());
+				continue;
+			}
+			sc.p++;
 		}
-		if (found) break;
 	}
 
 	DString list = dstring::temp("[");
@@ -72,10 +45,60 @@ fn String edit_array(String text, String key, String name, bool add)
 	if (add && !present) list.appendf("%s\"%s\"", list.len() > 1 ? ", " : " ", name);
 	list.append(list.len() > 1 ? " ]" : "]");
 
-	if (found) return string::tformat("%s%s%s", text[:start], list, text[end..]);
+	if (found) return string::tformat("%s%s%s", text[:start!!], list, text[sc.p + 1..]);
 	if (!add) return text;
+	return insert_first(text, string::tformat("\"%s\": %s", key, list));
+}
+
+// `text` with the top-level string `key` set to `value` (added first if missing).
+fn String set_string(String text, String key, String value)
+{
+	sz? at = find_value(text, key);
+	Scanner sc = { .s = text, .p = at ?? 0 };
+	if (catch at) return insert_first(text, string::tformat("\"%s\" : \"%s\"", key, value));
+	if (sc.peek() != '"' && sc.peek() != '\'') return text;
+	sc.read_string();
+	return string::tformat("%s\"%s\"%s", text[:at], value, text[sc.p..]);
+}
+
+// `member` (`"key": value`) as the first member of the top-level object.
+fn String insert_first(String text, String member)
+{
 	sz brace = text.index_of_char('{') ?? 0;
-	return string::tformat("%s\n  \"%s\": %s,%s", text[:brace + 1], key, list, text[brace + 1..]);
+	return string::tformat("%s\n  %s,%s", text[:brace + 1], member, text[brace + 1..]);
+}
+
+// Where the value of the top-level member `key` starts.
+fn sz? find_value(String text, String key) @private
+{
+	Scanner sc = { .s = text };
+	int depth;
+	while (sc.p < text.len)
+	{
+		char c = text[sc.p];
+		switch
+		{
+			case c == '/' && sc.p + 1 < text.len && (text[sc.p + 1] == '/' || text[sc.p + 1] == '*'):
+				sc.skip_space();
+			case c == '"' || c == '\'':
+				String k = sc.read_string();
+				if (depth != 1 || k != key) break;
+				sc.skip_space();
+				if (sc.peek() != ':') break;
+				sc.p++;
+				sc.skip_space();
+				return sc.p;
+			case c == '{' || c == '[':
+				depth++;
+				sc.p++;
+			case c == '}' || c == ']':
+				depth--;
+				sc.p++;
+			default:
+				sc.p++;
+		}
+	}
+	return NOT_FOUND~;
 }
 
 struct Scanner @private

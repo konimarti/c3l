@@ -142,6 +142,10 @@ fn Installed? Op.install_registry(&self, Want w)
 	String version = w.ref.len ? w.ref : info.latest;
 	if (!version.len) return log::fail("registry returned no latest version for %s", w.id)~;
 	if (!info.has(version)) return log::fail("no such version '%s' for %s", version, w.id)~;
+	if (!w.pin.len && !registry::compatible(w.origin, w.id, version) && self.opts.strict)
+	{
+		return log::fail("%s@%s is not compatible with this toolchain (--strict)", w.id, version)~;
+	}
 	String sum = info.checksum(version);
 	if (w.pin.len && sum.len && w.pin != sum)
 	{

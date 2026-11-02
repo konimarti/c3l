@@ -42,3 +42,16 @@ fn void other_key_and_single_quotes() @test
 	String s = project::edit_array(`{ 'dependency-search-paths': [], "x": "dependency-search-paths" }`, "dependency-search-paths", "lib", true);
 	assert(s == `{ 'dependency-search-paths': [ "lib" ], "x": "dependency-search-paths" }`, "%s", s);
 }
+
+fn void set_top_level_string() @test
+{
+	String m = `{
+  "targets-note" : { "version" : "9" },
+  // "version": "0"
+  "provides" : "demo",
+  "version" : "0.1.0"
+}`;
+	String s = project::set_string(m, "version", "1.2.0");
+	assert(s.contains(`"version" : "1.2.0"`) && s.contains(`{ "version" : "9" }`) && s.contains(`// "version": "0"`), "%s", s);
+	assert(project::set_string(`{ "provides": "x" }`, "version", "1.0.0") == "{\n  \"version\" : \"1.0.0\", \"provides\": \"x\" }");
+}

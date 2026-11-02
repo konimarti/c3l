@@ -19,7 +19,9 @@ fn int main(String[] args)
 		.persistent_flag({ .name = "dry-run", .desc = "with update, prune, publish: show what would change" })
 		.persistent_flag({ .name = "frozen", .desc = "with sync: fail if lock and project disagree, never write the lock" })
 		.persistent_flag({ .name = "fail-fast", .desc = "with sync, update: stop at the first failure" })
-		.persistent_flag({ .name = "force", .desc = "with remove: remove even if another library requires it" });
+		.persistent_flag({ .name = "force", .desc = "with remove: remove even if another library requires it" })
+		.persistent_flag({ .name = "registry-type", .kind = STRING, .env = "C3L_REGISTRY_TYPE", .choices = { "static", "c3pkg" },
+			.desc = "the registry's API (default: detected)" });
 	defer app.free();
 
 	app.add(serp::cmd("init", "create c3l.lock (and a project with 'c3c init name')", &init_run)
@@ -58,6 +60,15 @@ fn int main(String[] args)
 	app.add(serp::cmd("info", "show the registry record of a library", &info_run)
 		.usage_args("<namespace>/<name>")
 		.accepts(serp::exact_args(1)));
+	app.add(publish_flags(serp::cmd("check", "verify a library is ready to publish (no upload)", &check_run)));
+	app.add(publish_flags(serp::cmd("pack", "build the deterministic <name>-<version>.c3l", &pack_run))
+		.flag({ .name = "output", .kind = STRING, .value_name = "FILE", .desc = "where to write the package" }));
+	app.add(publish_flags(serp::cmd("publish", "check, pack and upload to the registry", &publish_run))
+		.flag({ .name = "token-file", .kind = STRING, .value_name = "FILE", .desc = "API token (or $C3L_TOKEN, $C3PKG_TOKEN)" })
+		.flag({ .name = "license", .kind = STRING })
+		.flag({ .name = "tags", .kind = STRING, .desc = "comma separated" })
+		.flag({ .name = "docs-url", .kind = STRING })
+		.flag({ .name = "git-url", .kind = STRING }));
 	app.add(serp::cmd("version", "print the version", &version_run).accepts(serp::no_args()));
 	return app.execute(args);
 }

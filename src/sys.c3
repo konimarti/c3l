@@ -119,3 +119,26 @@ fn bool exists(String p) => path::is_link((Path)p) || file::exists(p);
 
 extern fn ZString mkdtemp(ZString template) @private;
 extern fn CInt symlink(ZString target, ZString link) @private;
+
+// The C3 version of the local compiler ("0.8.6"), empty if unknown.
+fn String c3_version()
+{
+	String out = (run({ c3c(), "--version" }, MERGE) ?? (Output){}).out;
+	foreach (line : out.tsplit("\n"))
+	{
+		if (!line.starts_with("C3 Compiler Version:")) continue;
+		String v = line["C3 Compiler Version:".len..].trim();
+		sz end;
+		while (end < v.len && (v[end].is_digit() || v[end] == '.')) end++;
+		return v[:end];
+	}
+	return "";
+}
+
+// This platform as registries name targets ("linux-x64"), empty if unknown.
+fn String host_target()
+{
+	String os = env::LINUX ? "linux" : env::DARWIN ? "macos" : env::WIN32 ? "windows" : env::FREEBSD ? "freebsd" : "";
+	String arch = env::X86_64 ? "x64" : env::AARCH64 ? "aarch64" : "";
+	return os.len && arch.len ? os.tconcat("-").tconcat(arch) : "";
+}

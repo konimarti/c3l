@@ -164,6 +164,7 @@ fn void? info_run(Ctx* ctx)
 	String base = registry_url(ctx);
 	Info info = registry::info(base, ctx.arg(0)) ?? log::fail("%s: not found or registry not reachable (%s)", ctx.arg(0), base)~!;
 	info.print();
+	if (info.latest.len) registry::compatible(base, ctx.arg(0), info.latest);
 }
 
 // The registry for new installs and lookups: --registry > $C3L_REGISTRY > www.c3pkg.eu
