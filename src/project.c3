@@ -63,7 +63,7 @@ fn String[]? Project.deps(&self)
 	}
 	else
 	{
-		self.dep_names = view_list("dependencies")!;
+		self.dep_names = view_list("dependencies", targets: true)!;
 	}
 	self.deps_read = true;
 	return self.dep_names;
@@ -102,23 +102,28 @@ fn void? Project.edit(&self, String key, String name, bool add)
 // The file of library `name` in the library directory `dir`.
 fn String lib_file(String dir, String name) => string::tformat("%s/%s.c3l", dir, name);
 
-// One comma separated "c3l library <what>:" line of `c3c project view`.
-fn String[]? view_list(String what) @private
+<*
+ The comma separated values of `c3c project view` for "c3l library <what>":
+ the project's line, then (with `targets`) each target's "Additional ..." line.
+*>
+fn String[]? view_list(String what, bool targets = false) @private
 {
 	Output o = sys::run({ sys::c3c(), "project", "view" })!;
 	String prefix = string::tformat("c3l library %s:", what);
-	foreach (line : o.out.tsplit("\n"))
+	String extra = string::tformat("Additional %s", prefix);
+	List{String} out;
+	out.tinit();
+	foreach (raw : o.out.tsplit("\n"))
 	{
+		String line = raw.trim();
+		if (targets && line.starts_with(extra)) line = line["Additional ".len..];
 		if (!line.starts_with(prefix)) continue;
 		String value = line[prefix.len..].trim();
-		if (value == "*none*") return {};
-		List{String} out;
-		out.tinit();
+		if (value == "*none*") continue;
 		foreach (v : value.tsplit(","))
 		{
-			if (v.trim().len) out.push(v.trim());
+			if (v.trim().len && !out.contains(v.trim())) out.push(v.trim());
 		}
-		return out.array_view();
 	}
-	return {};
+	return out.array_view();
 }

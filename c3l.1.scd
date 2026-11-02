@@ -233,15 +233,17 @@ with *--strict*).
 
 A library directory (a _manifest.json_ and no _project.json_) works too: *add* installs
 into _./lib_ (keep it out of git; it is never packed), lists only the dependencies you
-asked for in the manifest's _dependencies_, and writes _c3l.lock_, from which *publish*
-fills in _vendor.c3l.requires_.
+asked for in the manifest's _dependencies_, and writes _c3l.lock_. Commit the lock: it is
+how the library declares its dependencies to whoever installs it from git, and
+*publish* turns it into _vendor.c3l.requires_ for the registry.
 
 c3c lists a library's dependencies by name only and does not install them
 transitively: every one must be in _project.json_. *add* and *update* therefore
 follow the dependencies a library declares and add them all, flat, to _lib_ and
 _project.json_, as one transaction.
 
-A library declares them in its _manifest.json_ (c3c ignores the _vendor_ key):
+A library declares them in its committed _c3l.lock_ (its direct entries: source and
+locked version), or in its _manifest.json_ (c3c ignores the _vendor_ key):
 
 ```
 "vendor": { "c3l": { "requires": [
@@ -253,9 +255,12 @@ registry base URL; without it the default registry is used, and a registry that 
 installed library comes from yet needs *--allow-host*. _version_ is the minimum for
 registry libraries, a tag, branch or commit for git libraries (*update* moves a tag
 like any other version). *publish* writes this block
-from the library's own _c3l.lock_. c3l also reads c3po's _vendor.c3po.sources_ and
-c3c's plain _dependencies_ names (no source: a warning, and *verify* fails until
-the library is added).
+from the library's own _c3l.lock_, since registry packages carry no lockfile. c3l also
+reads c3po's _vendor.c3po.sources_ (_c3po-version_ 1) and c3c's plain _dependencies_
+names (no source: a warning, and *verify* fails until the library is added). For each
+name the first wins, in this order: _vendor.c3l.requires_, _c3l.lock_,
+_vendor.c3po.sources_, _dependencies_. Dependencies that _project.json_ lists for a
+single target are part of the project too (*list*, *verify*, *sync --frozen*).
 
 Versions are chosen as in Go (minimum version selection): the highest of all
 requested minimums, never newer. Different major versions are an error. A cycle,

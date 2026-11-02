@@ -1,8 +1,10 @@
 <*
- A library's manifest.json, read from a directory or from inside a .c3l archive.
+ A library's manifest.json, read from a directory or from inside a .c3l archive,
+ together with the library's own c3l.lock when it has one.
 
  What a library requires, per name, in this order of precedence:
-   vendor.c3l.requires   [{name, source, version, registry}]  c3l's own block
+   vendor.c3l.requires   [{name, source, version, registry}]  written by publish
+   c3l.lock              its direct entries                   a library shared through git
    vendor.c3po.sources   [{name, source}]                     read-only c3po compatibility
    dependencies          names only (top level and per target), no source
 *>
@@ -28,18 +30,23 @@ struct Manifest
 	bool has_vendor;        // there is a "vendor" block
 	bool has_c3l_requires;  // ... and it has vendor.c3l.requires
 	String invalid;         // a required name that is not a valid library name (not in `requires`)
+	String[] notes;         // what was not followed, and why: for the user
 }
 
 faultdef NO_MANIFEST, BAD_MANIFEST;
 
-// From a library directory, or a .c3l file (zip archive).
+// From a library directory, or a .c3l file (zip archive); with its c3l.lock, if any.
 fn Manifest? load(String path)
 {
-	if (file::is_dir(path)) return load_file(string::tformat("%s/manifest.json", path));
+	if (file::is_dir(path))
+	{
+		String lock_text = (String)file::load_temp(string::tformat("%s/c3l.lock", path)) ?? "";
+		return parse((String)file::load_temp(string::tformat("%s/manifest.json", path)) ?? NO_MANIFEST~!, lock_text);
+	}
 	ZipArchive archive = zip::open(tmem, path) ?? NO_MANIFEST~!;
 	defer (void)archive.close();
 	char[] data = archive.read_file_all(tmem, "manifest.json") ?? NO_MANIFEST~!;
-	return parse((String)data);
+	return parse((String)data, (String)archive.read_file_all(tmem, "c3l.lock") ?? "");
 }
 
 fn Manifest? load_file(String file)
@@ -48,7 +55,7 @@ fn Manifest? load_file(String file)
 	return parse((String)data);
 }
 
-fn Manifest? parse(String text)
+fn Manifest? parse(String text, String lock_text = "")
 {
 	Object* root = json::tparse(text) ?? BAD_MANIFEST~!;
 	if (!root.is_map()) return BAD_MANIFEST~;
@@ -76,12 +83,35 @@ fn Manifest? parse(String text)
 				});
 			}
 		}
-		if (try c3po = vendor.get("c3po"))
+	}
+	List{String} notes;
+	notes.tinit();
+	if (lock_text.len)
+	{
+		String why;
+		Lock? l = lock::parse(lock_text, "c3l.lock", &why);
+		if (try l)
 		{
-			foreach (r : objects(c3po, "sources"))
-			{
-				add(&m, &reqs, { .name = r.get_string("name") ?? "", .source = r.get_string("source") ?? "" });
-			}
+			foreach (r : from_lock(&l)) add(&m, &reqs, r);
+		}
+		else
+		{
+			notes.push(string::tformat("its %s; what it locks is not followed", why));
+		}
+	}
+	Object* c3po = m.has_vendor ? root.get("vendor").get("c3po") ?? null : null;
+	if (c3po && c3po.is_map())
+	{
+		long version = c3po.get_long("c3po-version") ?? 1;
+		Object*[] sources = objects(c3po, "sources");
+		if (version != 1 && sources.len)
+		{
+			notes.push(string::tformat("its vendor.c3po block has c3po-version %d (c3l reads 1); its sources are not followed", version));
+			sources = {};
+		}
+		foreach (r : sources)
+		{
+			add(&m, &reqs, { .name = r.get_string("name") ?? "", .source = r.get_string("source") ?? "" });
 		}
 	}
 	foreach (d : m.dependencies) add(&m, &reqs, { .name = d });
@@ -93,7 +123,39 @@ fn Manifest? parse(String text)
 		};
 	}
 	m.requires = reqs.array_view();
+	m.notes = notes.array_view();
 	return m;
+}
+
+<*
+ What a library's own lock says it requires: its direct entries, each from the
+ source it was installed from, at least at the locked version (registry), at
+ the locked tag, branch or commit (git). Local directories cannot be fetched by
+ anyone else and are left out.
+*>
+fn Requirement[] from_lock(Lock* l)
+{
+	List{Requirement} out;
+	out.tinit();
+	foreach (e : l.entries)
+	{
+		if (e.role != DIRECT) continue;
+		switch (e.kind)
+		{
+			case REGISTRY:
+				out.push({ .name = e.name, .source = e.id, .version = e.version, .registry = e.origin });
+			case VENDOR:
+				out.push({ .name = e.name, .source = string::tformat("vendor:%s", e.id) });
+			case GIT:
+				String version = e.version;
+				if (version == "HEAD") version = "";  // the tip, whatever it is then
+				if (version.starts_with("commit:")) version = e.pin;  // the label has 12 characters
+				out.push({ .name = e.name, .source = e.origin, .version = version });
+			case PATH:
+				break;
+		}
+	}
+	return out.array_view();
 }
 
 // The names `m` requires, without itself.

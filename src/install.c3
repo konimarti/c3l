@@ -315,6 +315,7 @@ fn Manifest? Op.place(&self, Entry e, String staged, Intent intent)
 	}
 	Manifest m = manifest::load(f) ?? (Manifest){};
 	if (m.invalid.len) return log::fail("manifest.json of %s requires '%s', which is not a valid library name", e.name, m.invalid)~;
+	foreach (note : m.notes) log::warn("%s: %s", e.name, note);
 	m.provides = e.name;
 	e.role = self.role_of(e.name, intent);
 	e.requires = m.require_names();

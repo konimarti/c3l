@@ -357,35 +357,18 @@ fn String[] packed(String[] files) @private
 }
 
 <*
- vendor.c3l.requires from the library's own c3l.lock: its direct dependencies,
- the locked version as the minimum. Empty if there is nothing to require.
+ vendor.c3l.requires from the library's own c3l.lock (see manifest::from_lock).
+ Empty if there is nothing to require.
 *>
 fn String requires_json(String dir)
 {
 	Lock l = lock::load(string::tformat("%s/c3l.lock", dir)) ?? (Lock){};
 	DString out = dstring::temp();
-	foreach (e : l.entries)
+	foreach (r : manifest::from_lock(&l))
 	{
-		if (e.role != DIRECT || e.kind == PATH) continue;
-		String source = e.origin;
-		String version = e.version;
-		String reg;
-		switch (e.kind)
-		{
-			case VENDOR:
-				source = string::tformat("vendor:%s", e.id);
-				version = "";
-			case REGISTRY:
-				source = e.id;
-				reg = string::tformat(", \"registry\": \"%s\"", e.origin);
-			case GIT:
-				if (version == "HEAD") version = "";
-				if (version.starts_with("commit:")) version = e.pin;  // consumers need the full commit
-			case PATH:
-				break;
-		}
-		out.appendf("%s{ \"name\": \"%s\", \"source\": \"%s\"%s", out.len() ? ", " : "", e.name, source, reg);
-		if (version.len) out.appendf(", \"version\": \"%s\"", version);
+		out.appendf("%s{ \"name\": \"%s\", \"source\": \"%s\"", out.len() ? ", " : "", r.name, r.source);
+		if (r.registry.len) out.appendf(", \"registry\": \"%s\"", r.registry);
+		if (r.version.len) out.appendf(", \"version\": \"%s\"", r.version);
 		out.append(" }");
 	}
 	return out.len() ? string::tformat("[ %s ]", out) : "";

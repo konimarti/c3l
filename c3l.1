@@ -316,15 +316,17 @@ with \fB--strict\fR).\&
 .P
 A library directory (a \fImanifest.\&json\fR and no \fIproject.\&json\fR) works too: \fBadd\fR installs
 into \fI.\&/lib\fR (keep it out of git; it is never packed), lists only the dependencies you
-asked for in the manifest'\&s \fIdependencies\fR, and writes \fIc3l.\&lock\fR, from which \fBpublish\fR
-fills in \fIvendor.\&c3l.\&requires\fR.\&
+asked for in the manifest'\&s \fIdependencies\fR, and writes \fIc3l.\&lock\fR.\& Commit the lock: it is
+how the library declares its dependencies to whoever installs it from git, and
+\fBpublish\fR turns it into \fIvendor.\&c3l.\&requires\fR for the registry.\&
 .P
 c3c lists a library'\&s dependencies by name only and does not install them
 transitively: every one must be in \fIproject.\&json\fR.\& \fBadd\fR and \fBupdate\fR therefore
 follow the dependencies a library declares and add them all, flat, to \fIlib\fR and
 \fIproject.\&json\fR, as one transaction.\&
 .P
-A library declares them in its \fImanifest.\&json\fR (c3c ignores the \fIvendor\fR key):
+A library declares them in its committed \fIc3l.\&lock\fR (its direct entries: source and
+locked version), or in its \fImanifest.\&json\fR (c3c ignores the \fIvendor\fR key):
 .P
 .nf
 .RS 4
@@ -338,9 +340,12 @@ registry base URL; without it the default registry is used, and a registry that 
 installed library comes from yet needs \fB--allow-host\fR.\& \fIversion\fR is the minimum for
 registry libraries, a tag, branch or commit for git libraries (\fBupdate\fR moves a tag
 like any other version).\& \fBpublish\fR writes this block
-from the library'\&s own \fIc3l.\&lock\fR.\& c3l also reads c3po'\&s \fIvendor.\&c3po.\&sources\fR and
-c3c'\&s plain \fIdependencies\fR names (no source: a warning, and \fBverify\fR fails until
-the library is added).\&
+from the library'\&s own \fIc3l.\&lock\fR, since registry packages carry no lockfile.\& c3l also
+reads c3po'\&s \fIvendor.\&c3po.\&sources\fR (\fIc3po-version\fR 1) and c3c'\&s plain \fIdependencies\fR
+names (no source: a warning, and \fBverify\fR fails until the library is added).\& For each
+name the first wins, in this order: \fIvendor.\&c3l.\&requires\fR, \fIc3l.\&lock\fR,
+\fIvendor.\&c3po.\&sources\fR, \fIdependencies\fR.\& Dependencies that \fIproject.\&json\fR lists for a
+single target are part of the project too (\fBlist\fR, \fBverify\fR, \fBsync --frozen\fR).\&
 .P
 Versions are chosen as in Go (minimum version selection): the highest of all
 requested minimums, never newer.\& Different major versions are an error.\& A cycle,

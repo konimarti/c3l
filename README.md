@@ -96,7 +96,13 @@ c3l why dcc           # who requires dcc?
 c3l remove app && c3l prune
 ```
 
-A library declares its dependencies in `manifest.json`:
+A library declares its dependencies by being managed with c3l: run `c3l add`
+in the library directory and commit its `c3l.lock`. Whoever installs the library
+from git (or as a local directory) gets what that lock lists as direct
+dependencies, from the same sources, at least at the locked versions.
+
+Packages on a registry carry no lockfile, so `c3l publish` writes the same
+information into the package's `manifest.json`, which you can also write by hand:
 
 ```json
 "vendor": { "c3l": { "requires": [
@@ -105,7 +111,11 @@ A library declares its dependencies in `manifest.json`:
 
 `source` is a registry id or git URL. `version` is a minimum (registry) or a
 tag, branch or commit (git; `update` moves a tag like any other version). A registry dependency may add `"registry": "<base URL>"`;
-without it the default registry is used. `c3l publish` writes this block for you.
+without it the default registry is used.
+
+For each name the first of these wins: `vendor.c3l.requires`, the library's
+`c3l.lock`, c3po's `vendor.c3po.sources`, plain `dependencies` (no source: a
+warning). Dependencies listed only for one target in `project.json` count too.
 
 Rules:
 

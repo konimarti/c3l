@@ -782,6 +782,30 @@ newproj gc3
 c3l init >/dev/null 2>&1; c3l add acme/tc >/dev/null 2>&1; c3l remove tc >/dev/null 2>&1
 has "the tree shows what nothing needs" "tp 1.0.0 (not needed" "$(c3l list --tree)"
 
+section "a library shared through git passes on what its c3l.lock requires"
+LG="$WORK/lockedlib"; mkdir -p "$LG/src"; cd "$LG" || exit 1
+printf '{ "provides": "lockedlib", "sources": ["src/**"] }\n' > manifest.json
+printf 'module lockedlib;\n' > src/lockedlib.c3
+printf 'lib/\n' > .gitignore
+publish acme/lup 1.0.0 >/dev/null
+c3l init >/dev/null 2>&1; c3l add acme/lup@1.0.0 >/dev/null 2>&1
+check "the library has its dependency" test -f lib/lup.c3l
+check_not "nothing is written into manifest.json but the name" grep -q vendor manifest.json
+git init -q . && git config commit.gpgsign false && git add -A && git commit -qm one && git tag v1.0.0
+newproj lg1
+c3l init >/dev/null 2>&1
+out="$(c3l --allow-host file add "file://$LG" 2>&1)"; eq "add a library with a lock rc" $? 0
+has "its locked dependency is installed" "lup installed for lockedlib" "$out"
+has "at least the locked version" "^lup	registry	.*	1.0.0	.*	dep	" "$(cat c3l.lock)"
+newproj tg1
+python3 - <<'PY'
+p = "project.json"; s = open(p).read()
+open(p, "w").write(s.replace('"type": "executable"', '"type": "executable", "dependencies": [ "targetonly" ]', 1))
+PY
+c3l init >/dev/null 2>&1
+has "a target's dependency is seen" "targetonly .*untracked" "$(c3l list)"
+check_not "and verify reports it" c3l verify
+
 section "update arguments, rollback, --force, limits, migrate errors"
 publish acme/up 1.0.0 >/dev/null; publish acme/up 1.1.0 >/dev/null
 newproj rv1

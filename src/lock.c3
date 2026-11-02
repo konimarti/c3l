@@ -66,6 +66,19 @@ fn Lock? load(String file)
 	lock.entries.tinit();
 	if (!file::exists(file)) return lock;
 	String text = (String)file::load_temp(file) ?? log::fail("cannot read %s", file)~!;
+	String why;
+	Lock? l = parse(text, file, &why);
+	if (catch l) return log::fail("%s", why)~;
+	return l;
+}
+
+faultdef INVALID;
+
+// Lockfile text; INVALID with `why` set to what is wrong where.
+fn Lock? parse(String text, String file, String* why)
+{
+	Lock lock = { .file = file };
+	lock.entries.tinit();
 	foreach (i, line : text.tsplit("\n"))
 	{
 		if (!line.len || line.starts_with("#")) continue;
@@ -74,7 +87,8 @@ fn Lock? load(String file)
 		Role? role = runtime::@enum_lookup(Role, "name", col.len == 9 ? col[7] : "");
 		if (catch kind, role)
 		{
-			return log::fail("%s line %d does not have 9 columns (written by an older c3l?). Delete it and run 'c3l add' again, or restore the libraries with an older c3l first.", file, i + 1)~;
+			*why = string::tformat("%s line %d does not have 9 columns (written by an older c3l?). Delete it and run 'c3l add' again, or restore the libraries with an older c3l first.", file, i + 1);
+			return INVALID~;
 		}
 		Entry e = {
 			.name = col[0], .kind = kind, .origin = col[2], .id = col[3], .version = col[4],
@@ -82,7 +96,11 @@ fn Lock? load(String file)
 			.requires = col[8] == "-" ? {} : col[8].tsplit(","),
 		};
 		String bad = e.problem();
-		if (bad.len) return log::fail("%s line %d: invalid %s; the lockfile is damaged or was edited by hand", file, i + 1, bad)~;
+		if (bad.len)
+		{
+			*why = string::tformat("%s line %d: invalid %s; the lockfile is damaged or was edited by hand", file, i + 1, bad);
+			return INVALID~;
+		}
 		lock.entries.push(e);
 	}
 	return lock;
