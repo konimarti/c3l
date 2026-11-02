@@ -44,6 +44,7 @@ fn int main(String[] args)
 	app.add(serp::cmd("sync", "restore exactly what c3l.lock says", &sync_run)
 		.aka("pull").aka("p")
 		.accepts(serp::no_args()));
+	app.add(serp::cmd("migrate", "convert a c3po project.lock.json to c3l.lock", &migrate_run).accepts(serp::no_args()));
 	app.add(serp::cmd("list", "show locked libraries and their state", &list_run)
 		.aka("ls").aka("l")
 		.accepts(serp::no_args())

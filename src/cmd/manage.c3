@@ -1,10 +1,10 @@
 <*
- Commands that change what is installed: add, remove, prune, update, sync.
+ Commands that change what is installed: add, remove, prune, update, sync, migrate.
 *>
 module c3l;
 
-import std::io, std::collections::list, serp;
-import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::install, c3l::registry, c3l::vendor;
+import std::io, std::collections::list, std::collections::object, std::encoding::json, serp;
+import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::manifest, c3l::install, c3l::registry, c3l::vendor, c3l::git;
 
 fn void? add_run(Ctx* ctx)
 {
@@ -220,6 +220,57 @@ fn void? sync_run(Ctx* ctx)
 		return log::fail("could not restore %d %s: %s (everything else was restored; run again once fixed)", failed.len(), libraries(failed.len()), string::join(tmem, failed.array_view(), " "))~;
 	}
 	log::info("in sync with %s", p.lock.file);
+}
+
+<*
+ c3po (Ecoral360/c3po) keeps project.lock.json: {"packages": [{name, repo, origin,
+ ref, commit}]}. Lock the same commits as git libraries; c3po's files are not touched.
+*>
+fn void? migrate_run(Ctx* ctx)
+{
+	Project p = project::find()!;
+	if (!file::exists("project.lock.json")) return log::fail("no project.lock.json (c3po) found")~;
+	if (p.lock.exists()) return log::fail("%s already exists", p.lock.file)~;
+	String dir = p.lib_dir()!;
+	String text = (String)file::load_temp("project.lock.json") ?? log::fail("cannot read project.lock.json")~!;
+	Object* root = json::tparse(text) ?? log::fail("project.lock.json is not valid JSON")~!;
+	Object* packages = root.is_map() ? root.get("packages") ?? null : null;
+	for (sz i = 0; packages && packages.is_array() && i < packages.get_len(); i++)
+	{
+		Object* pkg = packages.get_at(i);
+		if (!pkg.is_map()) continue;
+		String name = pkg.get_string("name") ?? "";
+		String repo = pkg.get_string("repo") ?? "";
+		String origin = pkg.get_string("origin") ?? "";
+		String commit = pkg.get_string("commit") ?? "";
+		String label = pkg.get_string("ref") ?? "";
+		if (!name.len || !git::is_commit(commit))
+		{
+			log::warn("skipping a c3po entry without name or commit");
+			continue;
+		}
+		String host;
+		switch (origin)
+		{
+			case "github": host = "https://github.com";
+			case "codeberg": host = "https://codeberg.org";
+			default:
+				log::warn("%s: unknown c3po origin '%s', skipping", name, origin);
+				continue;
+		}
+		if (!label.len) label = "HEAD";
+		String f = string::tformat("%s/%s.c3l", dir, name);
+		if (!sys::exists(f)) f = string::tformat("%s/%s", dir, repo[(repo.rindex_of_char('/') ?? -1) + 1..]);
+		String pin = string::tformat("commit:%s", commit);
+		p.lock.put({
+			.name = name, .kind = GIT, .origin = string::tformat("%s/%s", host, repo), .id = "-", .version = label,
+			.pin = pin, .hash = pin, .role = DIRECT,
+			.requires = sys::exists(f) ? (manifest::load(f) ?? (Manifest){ .provides = name }).require_names() : {},
+		});
+		log::info("imported %s (%s, commit %s) from project.lock.json", name, label, commit[:12]);
+	}
+	p.lock.save()!;
+	log::info("libraries restored by c3po have no commit stamp; run 'c3l sync' to rebuild them as verified archives");
 }
 
 <*
