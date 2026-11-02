@@ -31,10 +31,12 @@ fn void? list_run(Ctx* ctx)
 	Project p = project::find()!;
 	if (ctx.flag_bool("tree"))
 	{
+		String[] orphans = p.lock.orphans();
 		foreach (e : p.lock.entries)
 		{
-			if (e.role != DIRECT) continue;
-			io::printfn("%s %s", e.name, e.version);
+			bool orphan = has(orphans, e.name);
+			if (e.role != DIRECT && !orphan) continue;
+			io::printfn("%s %s%s", e.name, e.version, orphan ? " (not needed; 'c3l prune' removes it)" : "");
 			print_tree(&p.lock, e.name, "  ", { e.name });
 		}
 		return;

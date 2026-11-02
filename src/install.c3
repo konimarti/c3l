@@ -24,7 +24,8 @@ enum Intent
 
 <*
  A library to install. `ref`: version, tag, branch, HEAD, commit; empty = the newest.
- `pin` (from the lock) = restore exactly that, keep the role, follow nothing.
+ `pin` (from the lock) = restore exactly that, keep the role, follow nothing;
+ `hash` is then what the installed file must be (the lock's hash column).
 *>
 struct Want
 {
@@ -33,6 +34,7 @@ struct Want
 	String id;      // ns/name (registry), name (vendor)
 	String ref;
 	String pin;
+	String hash;
 }
 
 // For all operations of one command.
@@ -191,6 +193,10 @@ fn Manifest? Op.install_vendor(&self, Want w, Intent intent)
 	defer (void)file::delete(staged);
 	log::info("fetching vendor:%s from %s", name, w.origin);
 	if (!http::download(project::lib_file(w.origin, name), staged).ok()) return log::fail("download of vendor:%s failed", name)~;
+	if (w.pin.len && (sys::sha256_file(staged) ?? "") != w.pin)
+	{
+		return log::fail("vendor:%s changed upstream (the collection is one rolling release, it has no versions); 'c3l update %s' takes the new file", name, name)~;
+	}
 	String got = verify(staged, expected, string::tformat("vendor:%s", name))!;
 	warn_provides(staged, name, string::tformat("vendor:%s", name));
 	Manifest m = self.place({ .name = name, .kind = VENDOR, .origin = w.origin, .id = name, .version = "latest", .pin = got, .hash = got }, staged, w.pin.len > 0 ? KEEP : intent)!;
@@ -199,7 +205,7 @@ fn Manifest? Op.install_vendor(&self, Want w, Intent intent)
 }
 
 <*
- ref: empty (highest semver tag, else HEAD), HEAD, a tag, a branch, a full commit,
+ ref: empty (highest release tag, else HEAD), HEAD, a tag, a branch, a full commit,
  or a lock label (branch:NAME, commit:SHA12). pin: commit:<sha>.
  The lock label is the tag, HEAD, branch:NAME or commit:SHA12.
 *>
@@ -218,8 +224,13 @@ fn Manifest? Op.install_git(&self, Want w, Intent intent)
 	String staged = self.staging(name);
 	defer (void)file::delete(staged);
 	git::archive(src, staged)!;
+	String contents = sys::content_hash(staged) ?? log::fail("git archive of %s is not a readable zip", url)~!;
+	if (w.hash.starts_with("content:") && contents != w.hash)
+	{
+		return log::fail("the files of %s at commit %s differ from c3l.lock (expected %s, got %s)", url, rev.commit, w.hash, contents)~;
+	}
 	String pin = string::tformat("commit:%s", rev.commit);
-	Manifest m = self.place({ .name = name, .kind = GIT, .origin = url, .id = "-", .version = rev.label, .pin = pin, .hash = pin }, staged, w.pin.len > 0 ? KEEP : intent)!;
+	Manifest m = self.place({ .name = name, .kind = GIT, .origin = url, .id = "-", .version = rev.label, .pin = pin, .hash = contents }, staged, w.pin.len > 0 ? KEEP : intent)!;
 	log::info("installed %s %s (commit %s)", name, rev.label, rev.commit[:12]);
 	return m;
 }
@@ -233,7 +244,8 @@ fn Manifest? Op.install_path(&self, Want w, Intent intent)
 	check_name(name, src)!;
 	self.check_collision(name, PATH, src, "-")!;
 	self.set_aside(name)!;
-	sys::link(abs, self.file_of(name))!;
+	String dir = (String)self.dir.to_absolute_path(tmem) ?? log::fail("cannot enter %s", self.dir)~!;
+	sys::link(sys::relative(dir, abs), self.file_of(name))!;  // relative: the project can move
 	Manifest m = self.place({ .name = name, .kind = PATH, .origin = src, .id = "-", .version = "-", .pin = "-", .hash = "-" }, "", w.pin.len > 0 ? KEEP : intent)!;
 	log::info("linked %s -> %s", name, abs);
 	return m;
@@ -244,9 +256,9 @@ fn void? Op.check_collision(&self, String name, Kind kind, String origin, String
 {
 	Entry*? e = self.proj.lock.get(name);
 	if (catch e) return;
-	if (e.kind == kind && e.origin == origin && e.id == id) return;
-	String from = e.id == "-" ? e.origin : string::tformat("%s %s", e.origin, e.id);
-	return log::fail("'%s' is already installed from %s:%s. Library names are global in a project; run 'c3l remove %s' first.", name, e.kind.name, from, name)~;
+	bool same_origin = kind == GIT ? git::canonical(e.origin) == git::canonical(origin) : e.origin == origin;
+	if (e.kind == kind && same_origin && e.id == id) return;
+	return log::fail("'%s' is already installed from %s. Library names are global in a project; run 'c3l remove %s' first.", name, e.source(), name)~;
 }
 
 // "provides" of a library's manifest becomes a file name and a lock key.
@@ -378,11 +390,19 @@ fn Rev? resolve_rev(String url, String ref, String pin) @private
 			if (r.commit.len) return r;
 			r = { .kind = BRANCH, .name = ref, .commit = git::branch_commit(url, ref)!, .label = string::tformat("branch:%s", ref) };
 			if (r.commit.len) return r;
+			if (is_short_commit(ref)) return log::fail("'%s' is not a tag or branch in %s; give a commit as its full 40-character hash", ref, url)~;
 			if (!git::is_commit(ref)) return log::fail("'%s' is not a tag, branch or full commit hash in %s", ref, url)~;
 			r = { .kind = COMMIT, .commit = ref, .label = short_commit(ref) };
 	}
 	if (r.kind == COMMIT && !git::is_commit(r.commit)) return log::fail("a commit must be given as the full 40-character hash")~;
 	return r;
+}
+
+fn bool is_short_commit(String s) @private
+{
+	if (s.len < 7 || s.len >= 40) return false;
+	foreach (c : s) if (!c.is_xdigit()) return false;
+	return true;
 }
 
 fn String short_commit(String commit) @private => string::tformat("commit:%s", commit[:commit.len < 12 ? commit.len : 12]);

@@ -41,9 +41,9 @@ the project) and `git` (git libraries and publishing).
 |---|---|
 | `init [name]` | create `c3l.lock` (and a project with `c3c init name`) |
 | `add <ns/name[@ver]>` | install from the registry |
-| `add <git-url>[@ref]` | install from git. No ref: highest semver tag, else HEAD. Tags and commits stay pinned; branches and `HEAD` follow the tip on `update` |
+| `add <git-url>[@ref]` | install from git. No ref: highest release tag, else HEAD. The lock pins the commit and a hash of the files; `update` moves tags to the newest release tag and follows branches and `HEAD` |
 | `add vendor:<name>` | install from c3c's vendor collection (raylib, sdl3, sqlite3, …); `add vendor` lists it |
-| `add ./dir` | symlink a local library into `lib/` (never publishable) |
+| `add ./dir` | link a local library into `lib/` with a relative symlink (never publishable) |
 | `remove <name>` | remove a library; refuses if another needs it (`--force`) |
 | `prune` | remove dependencies nothing needs any more (`--dry-run`) |
 | `why <name>` | which libraries require `<name>` |
@@ -104,7 +104,7 @@ A library declares its dependencies in `manifest.json`:
 ```
 
 `source` is a registry id or git URL. `version` is a minimum (registry) or a
-tag, branch or commit (git). A registry dependency may add `"registry": "<base URL>"`;
+tag, branch or commit (git; `update` moves a tag like any other version). A registry dependency may add `"registry": "<base URL>"`;
 without it the default registry is used. `c3l publish` writes this block for you.
 
 Rules:

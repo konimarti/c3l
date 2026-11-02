@@ -117,7 +117,9 @@ command. The publishing options, from *--version* to *--offline*, follow *check*
 
 *add* _./dir_
 	Link a local library directory (_./dir_, _../dir_ or an absolute path with a
-	_manifest.json_) into _lib/_ with a symlink, so edits show up in the next build.
+	_manifest.json_) into _lib/_ with a relative symlink, so edits show up in the next
+	build and the project and the directory can move together. *verify* checks where
+	the link points.
 	Recorded in the lockfile as kind _path_; *sync* re-creates the link, *update* skips
 	it, and its own dependencies are followed. A library that depends on a local
 	directory cannot be published.
@@ -125,17 +127,17 @@ command. The publishing options, from *--version* to *--offline*, follow *check*
 *add* _git-url_[@_ref_]
 	Install from a git repository. _ref_ is a tag, a branch, *HEAD*, or a full
 	40-character commit hash; it can also be given as a separate argument. Without
-	a _ref_ the highest semantic version tag is used, or HEAD if there are none.
-	The ref is resolved to a commit, which is what the lockfile pins. *outdated*
-	and *update* follow the tip of *HEAD* and of branches; tags and commits stay
+	a _ref_ the highest release tag is used (prerelease tags such as _v1.0.0-rc.1_ only
+	when asked for), or HEAD if there are none. The ref is resolved to a commit,
+	which is what the lockfile pins. *outdated* and *update* move a tag to the
+	highest release tag and follow the tip of *HEAD* and of branches; commits stay
 	put. In scp-style URLs (_git@host:path_) the *@* only starts a ref after the
 	last */*. The library is built with *git archive*, so no _.git_ is included, and without
-	line-ending conversion. A git library is identified by its commit: the lockfile
-	pins it, and *verify* and *sync* check that the installed file is an archive of
-	that commit (*git archive* stores the commit id in the zip comment). Edits made
-	inside the installed file are therefore not detected for git libraries, unlike
-	for registry libraries, which are checked against their SHA-256. This needs
-	*git*. The repository needs a _manifest.json_ at its root.
+	line-ending conversion. A git library is identified by its commit and its files:
+	the lockfile pins the commit and records a hash of the files in the archive, and
+	*verify* and *sync* check both (*git archive* stores the commit id in the zip
+	comment). The hash covers names and contents only, so it does not depend on the
+	git version that built the archive. This needs *git*. The repository needs a _manifest.json_ at its root.
 
 *remove* _name_
 	Delete the library file, its _dependencies_ entry and its lock line. Refuses if
@@ -249,7 +251,8 @@ A library declares them in its _manifest.json_ (c3c ignores the _vendor_ key):
 _source_ is a registry id or a git URL. A registry source may add _registry_, the
 registry base URL; without it the default registry is used, and a registry that no
 installed library comes from yet needs *--allow-host*. _version_ is the minimum for
-registry libraries, a tag, branch or commit for git libraries. *publish* writes this block
+registry libraries, a tag, branch or commit for git libraries (*update* moves a tag
+like any other version). *publish* writes this block
 from the library's own _c3l.lock_. c3l also reads c3po's _vendor.c3po.sources_ and
 c3c's plain _dependencies_ names (no source: a warning, and *verify* fails until
 the library is added).
@@ -272,7 +275,9 @@ hex	git	https://github.com/konimarti/hex.c3l	-	v0.1.1	commit:3fa9...	commit:3fa9
 ```
 
 Columns: name, kind (_registry_, _git_, _vendor_ or _path_), origin, id, version, pin (checksum
-or commit), SHA-256 of the installed file (registry) or the commit again (git), role
+or commit), what the installed file is checked against (the SHA-256 again for registry and
+vendor libraries; for git _content:_ and a SHA-256 over the names and contents of the
+files in the archive, or the commit again in locks written by c3l 1.1), role
 (_direct_: added by you; _dep_: required by another library) and the comma
 separated names the library requires (_-_ for none).
 
@@ -280,7 +285,10 @@ The origin is where the library is fetched from: the registry base URL (what
 *c3c --fetch-url* gets, no trailing slash), the git repository URL, or the directory.
 The id is _namespace/name_ for a registry and _-_ otherwise. Every line names its own
 origin, so one project can mix registries. Library names stay unique: the same name
-from two origins is an error. A file with another number of columns is refused.
+from two origins is an error (git URLs that differ only in a trailing _/_ or _.git_, or
+in case on github.com and codeberg.org, are the same origin). A file with another number
+of columns is refused, and so is a line with an invalid name, checksum or commit: a
+lockfile can come from someone else's repository.
 
 # ENVIRONMENT VARIABLES
 

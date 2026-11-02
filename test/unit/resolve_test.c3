@@ -1,6 +1,6 @@
 module c3l::resolve_test;
 
-import c3l::install;
+import c3l::install, c3l::git;
 
 fn void constraint_operators() @test
 {
@@ -29,4 +29,11 @@ fn void host_tricks() @test
 	assert(install::host_of("https://GitHub.com/o/r") == "github.com");
 	assert(install::host_of("https://evil.org\\@github.com/x") == "", "not a plain host name");
 	assert(install::host_of("ns/name") == "");
+}
+
+fn void same_git_source() @test
+{
+	assert(git::canonical("https://GitHub.com/Ecoral360/dessert.c3l.git/") == git::canonical("https://github.com/ecoral360/dessert.c3l"));
+	assert(git::canonical("https://example.org/A/b") != git::canonical("https://example.org/a/b"), "case matters elsewhere");
+	assert(git::canonical("HTTPS://Example.org/A/b") == "https://example.org/A/b");
 }

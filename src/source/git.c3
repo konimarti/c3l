@@ -33,13 +33,13 @@ fn Ref[]? tags(String url)
 	return out.array_view();
 }
 
-// The highest semver tag, empty if there is none.
-fn String highest(Ref[] tags)
+// The highest semver tag, empty if there is none; prereleases only if asked for.
+fn String highest(Ref[] tags, bool prereleases = false)
 {
 	String best;
 	foreach (t : tags)
 	{
-		if (!semver::valid(t.name)) continue;
+		if (!semver::valid(t.name) || (!prereleases && semver::prerelease(t.name))) continue;
 		if (!best.len || semver::compare(t.name, best) > 0) best = t.name;
 	}
 	return best;
@@ -104,6 +104,23 @@ fn void? archive(String dir, String out)
 	{
 		return log::fail("git archive failed")~;
 	}
+}
+
+<*
+ A git URL for comparing: scheme and host lowercased (the whole URL on
+ github.com and codeberg.org, which ignore case), no trailing "/" or ".git".
+*>
+fn String canonical(String url)
+{
+	String u = url.strip_suffix("/").strip_suffix(".git");
+	sz? scheme = u.index_of("://");
+	if (catch scheme) return u;  // git@host:path, local paths
+	String rest = u[scheme + 3..];
+	sz end = rest.index_of_char('/') ?? rest.len;
+	String host = rest[:end].to_lower_tcopy();
+	String path = rest[end..];
+	if (host == "github.com" || host == "codeberg.org") path = path.to_lower_tcopy();
+	return string::tformat("%s://%s%s", u[:scheme].to_lower_tcopy(), host, path);
 }
 
 fn bool is_repo(String dir) => run(dir, { "rev-parse", "--is-inside-work-tree" });

@@ -85,8 +85,8 @@ fn void damaged_lines_refused() @test
 		assert(@catch(lock::load(f)), "accepted: %s", line);
 		file::delete(f);
 	}
-	String good = string::tformat("%sx\tgit\thttps://h/x\t-\tHEAD\tcommit:%s\tsha256:%s\tdirect\t-\n", lock::HEADER, c40, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+	String good = string::tformat("%sx\tgit\thttps://h/x\t-\tHEAD\tcommit:%s\tcontent:%s\tdirect\t-\n", lock::HEADER, c40, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
 	String f = tmp_lock(good);
-	assert(@ok(lock::load(f)), "a git entry with the archive's sha256 as hash is valid");
+	assert(@ok(lock::load(f)), "a git entry with the archive's content hash is valid");
 	file::delete(f);
 }

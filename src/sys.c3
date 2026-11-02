@@ -3,7 +3,8 @@
 *>
 module c3l::sys;
 
-import std::io, std::os, std::hash::sha256, std::encoding::hex, libc, c3l::log;
+import std::io, std::os, std::sort, std::collections::list, std::hash::sha256, std::encoding::hex;
+import std::compression::zip, libc, c3l::log;
 
 // The compiler to call: $C3C or c3c on PATH.
 fn String c3c() => env::tget_var("C3C") ?? "c3c";
@@ -85,6 +86,66 @@ fn String? sha256_file(String path)
 		h.update(buf[:n]);
 	}
 	return string::tformat("sha256:%s", hex::encode(tmem, &&h.final()));
+}
+
+<*
+ "content:<hex>": sha256 over the files of a zip, sorted by name (per file: the
+ name, a 0 byte, the size as 8 bytes little endian, the bytes). Unlike the sha256
+ of the zip itself it does not depend on how the zip was written, only on what
+ is in it.
+*>
+fn String? content_hash(String path)
+{
+	ZipArchive z = zip::open(tmem, path)!;
+	defer (void)z.close();
+	List{String} names;
+	names.tinit();
+	for (sz i = 0; i < z.count(); i++)
+	{
+		ZipEntry e = z.stat_at(i)!;
+		if (!e.is_directory) names.push(e.name);
+	}
+	sort::quicksort(&names, fn int(String a, String b) => a.compare_to(b));
+	Sha256 h;
+	h.init();
+	foreach (name : names)
+	{
+		char[] data = z.read_file_all(tmem, name)!;
+		h.update(name);
+		h.update({ 0 });
+		ulong size = data.len;
+		char[8] le;
+		for (int i = 0; i < 8; i++) le[i] = (char)(size >> (8 * i));
+		h.update(&le);
+		h.update(data);
+	}
+	return string::tformat("content:%s", hex::encode(tmem, &&h.final()));
+}
+
+// Where a symbolic link points, as stored in it.
+fn String? read_link(String link)
+{
+	char[4096] buf;
+	sz n = libc::readlink(link.zstr_tcopy(), &buf, buf.len);
+	if (n < 0 || n >= buf.len) return NOT_FOUND~;
+	return ((String)buf[:n]).tcopy();
+}
+
+// The path of `to` relative to the directory `from`; both absolute and normalized.
+fn String relative(String from, String to)
+{
+	String[] a = from.tsplit("/", skip_empty: true);
+	String[] b = to.tsplit("/", skip_empty: true);
+	sz common;
+	while (common < a.len && common < b.len && a[common] == b[common]) common++;
+	DString out = dstring::temp();
+	for (sz i = common; i < a.len; i++) out.append(out.len() ? "/.." : "..");
+	for (sz i = common; i < b.len; i++)
+	{
+		if (out.len()) out.append_char('/');
+		out.append(b[i]);
+	}
+	return out.len() ? out.str_view() : ".";
 }
 
 // A new private directory in `base` (default: the system temp directory); the caller removes it.

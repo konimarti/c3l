@@ -167,7 +167,9 @@ require one with \fI"source": "vendor:name"\fR.\&
 \fBadd\fR \fI.\&/dir\fR
 .RS 4
 Link a local library directory (\fI.\&/dir\fR, \fI.\&.\&/dir\fR or an absolute path with a
-\fImanifest.\&json\fR) into \fIlib/\fR with a symlink, so edits show up in the next build.\&
+\fImanifest.\&json\fR) into \fIlib/\fR with a relative symlink, so edits show up in the next
+build and the project and the directory can move together.\& \fBverify\fR checks where
+the link points.\&
 Recorded in the lockfile as kind \fIpath\fR; \fBsync\fR re-creates the link, \fBupdate\fR skips
 it, and its own dependencies are followed.\& A library that depends on a local
 directory cannot be published.\&
@@ -177,17 +179,17 @@ directory cannot be published.\&
 .RS 4
 Install from a git repository.\& \fIref\fR is a tag, a branch, \fBHEAD\fR, or a full
 40-character commit hash; it can also be given as a separate argument.\& Without
-a \fIref\fR the highest semantic version tag is used, or HEAD if there are none.\&
-The ref is resolved to a commit, which is what the lockfile pins.\& \fBoutdated\fR
-and \fBupdate\fR follow the tip of \fBHEAD\fR and of branches; tags and commits stay
+a \fIref\fR the highest release tag is used (prerelease tags such as \fIv1.\&0.\&0-rc.\&1\fR only
+when asked for), or HEAD if there are none.\& The ref is resolved to a commit,
+which is what the lockfile pins.\& \fBoutdated\fR and \fBupdate\fR move a tag to the
+highest release tag and follow the tip of \fBHEAD\fR and of branches; commits stay
 put.\& In scp-style URLs (\fIgit@host:path\fR) the \fB@\fR only starts a ref after the
 last \fB/\fR.\& The library is built with \fBgit archive\fR, so no \fI.\&git\fR is included, and without
-line-ending conversion.\& A git library is identified by its commit: the lockfile
-pins it, and \fBverify\fR and \fBsync\fR check that the installed file is an archive of
-that commit (\fBgit archive\fR stores the commit id in the zip comment).\& Edits made
-inside the installed file are therefore not detected for git libraries, unlike
-for registry libraries, which are checked against their SHA-256.\& This needs
-\fBgit\fR.\& The repository needs a \fImanifest.\&json\fR at its root.\&
+line-ending conversion.\& A git library is identified by its commit and its files:
+the lockfile pins the commit and records a hash of the files in the archive, and
+\fBverify\fR and \fBsync\fR check both (\fBgit archive\fR stores the commit id in the zip
+comment).\& The hash covers names and contents only, so it does not depend on the
+git version that built the archive.\& This needs \fBgit\fR.\& The repository needs a \fImanifest.\&json\fR at its root.\&
 .P
 .RE
 \fBremove\fR \fIname\fR
@@ -334,7 +336,8 @@ A library declares them in its \fImanifest.\&json\fR (c3c ignores the \fIvendor\
 \fIsource\fR is a registry id or a git URL.\& A registry source may add \fIregistry\fR, the
 registry base URL; without it the default registry is used, and a registry that no
 installed library comes from yet needs \fB--allow-host\fR.\& \fIversion\fR is the minimum for
-registry libraries, a tag, branch or commit for git libraries.\& \fBpublish\fR writes this block
+registry libraries, a tag, branch or commit for git libraries (\fBupdate\fR moves a tag
+like any other version).\& \fBpublish\fR writes this block
 from the library'\&s own \fIc3l.\&lock\fR.\& c3l also reads c3po'\&s \fIvendor.\&c3po.\&sources\fR and
 c3c'\&s plain \fIdependencies\fR names (no source: a warning, and \fBverify\fR fails until
 the library is added).\&
@@ -359,7 +362,9 @@ hex	git	https://github\&.com/konimarti/hex\&.c3l	-	v0\&.1\&.1	commit:3fa9\&.\&.\
 .RE
 .P
 Columns: name, kind (\fIregistry\fR, \fIgit\fR, \fIvendor\fR or \fIpath\fR), origin, id, version, pin (checksum
-or commit), SHA-256 of the installed file (registry) or the commit again (git), role
+or commit), what the installed file is checked against (the SHA-256 again for registry and
+vendor libraries; for git \fIcontent:\fR and a SHA-256 over the names and contents of the
+files in the archive, or the commit again in locks written by c3l 1.\&1), role
 (\fIdirect\fR: added by you; \fIdep\fR: required by another library) and the comma
 separated names the library requires (\fI-\fR for none).\&
 .P
@@ -367,7 +372,10 @@ The origin is where the library is fetched from: the registry base URL (what
 \fBc3c --fetch-url\fR gets, no trailing slash), the git repository URL, or the directory.\&
 The id is \fInamespace/name\fR for a registry and \fI-\fR otherwise.\& Every line names its own
 origin, so one project can mix registries.\& Library names stay unique: the same name
-from two origins is an error.\& A file with another number of columns is refused.\&
+from two origins is an error (git URLs that differ only in a trailing \fI/\fR or \fI.\&git\fR, or
+in case on github.\&com and codeberg.\&org, are the same origin).\& A file with another number
+of columns is refused, and so is a line with an invalid name, checksum or commit: a
+lockfile can come from someone else'\&s repository.\&
 .P
 .SH ENVIRONMENT VARIABLES
 .P

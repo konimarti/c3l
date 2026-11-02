@@ -8,7 +8,9 @@
  id      <namespace>/<name> (registry), the library name (vendor), "-" otherwise
  version 1.2.3 | tag | HEAD | branch:NAME | commit:SHA12 | latest (vendor) | - (path)
  pin     sha256:<hex> (registry, vendor), commit:<sha> (git), - (path)
- hash    the same as pin, kept as its own column for older readers
+ hash    what the installed file is checked against: the pin again (registry,
+         vendor), content:<hex> of the archive (git, see sys::content_hash;
+         commit:<sha> in locks of c3l 1.1), - (path)
  role    direct (asked for by the project) | dep (pulled in by another library)
  requires comma separated names this library requires, "-" if none
 *>
@@ -86,6 +88,17 @@ fn Lock? load(String file)
 	return lock;
 }
 
+// Where an entry comes from, for messages: registry:<url> <id>, vendor:<name>, git:<url>, path:<dir>
+fn String Entry.source(&self)
+{
+	switch (self.kind)
+	{
+		case REGISTRY: return string::tformat("registry:%s %s", self.origin, self.id);
+		case VENDOR: return string::tformat("vendor:%s", self.id);
+		default: return string::tformat("%s:%s", self.kind.name, self.origin);
+	}
+}
+
 // What is wrong with an entry, empty if nothing.
 fn String Entry.problem(&self)
 {
@@ -99,7 +112,7 @@ fn String Entry.problem(&self)
 			if (!is_digest(self.pin) || !is_digest(self.hash)) return "checksum";
 			if (self.kind == REGISTRY ? !valid_id(self.id) : !valid_name(self.id)) return "id";
 		case GIT:
-			if (!is_commit_pin(self.pin) || !(is_commit_pin(self.hash) || is_digest(self.hash))) return "commit";
+			if (!is_commit_pin(self.pin) || !(is_commit_pin(self.hash) || is_content(self.hash))) return "commit";
 		case PATH:
 			break;
 	}
@@ -127,6 +140,8 @@ fn bool is_commit(String s) => is_hex(s, 40);
 fn bool is_commit_pin(String s) @private => s.starts_with("commit:") && is_commit(s["commit:".len..]);
 
 fn bool is_digest(String s) @private => s.starts_with("sha256:") && is_hex(s["sha256:".len..], 64);
+
+fn bool is_content(String s) @private => s.starts_with("content:") && is_hex(s["content:".len..], 64);
 
 fn bool is_hex(String s, sz len) @private
 {

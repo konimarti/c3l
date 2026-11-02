@@ -193,6 +193,13 @@ fn void? sync_run(Ctx* ctx)
 		if (drift) return log::fail("project and lockfile disagree (--frozen)")~;
 		p.lock.frozen = true;
 	}
+	else
+	{
+		foreach (d : p.deps()!)
+		{
+			if (!p.lock.has(d)) log::warn("%s is in %s but not in %s ('c3l add' it to lock it)", d, p.file, p.lock.file);
+		}
+	}
 	Options opts = options(ctx);
 	List{Entry} entries;
 	entries.tinit_with_array(p.lock.entries.array_view());
@@ -222,7 +229,7 @@ fn void? sync_run(Ctx* ctx)
 			failed.push(e.name);
 			continue;
 		}
-		Want w = { .kind = e.kind, .origin = e.origin, .id = e.id, .ref = e.version, .pin = e.pin };
+		Want w = { .kind = e.kind, .origin = e.origin, .id = e.id, .ref = e.version, .pin = e.pin, .hash = e.hash };
 		if (!apply(&p, &opts, w, ctx.flag_bool("fail-fast"))!) failed.push(e.name);
 	}
 	if (failed.len())

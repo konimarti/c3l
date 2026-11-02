@@ -16,7 +16,8 @@ enum Status : char (String name)
 
 <*
  Compare the library file in `dir` with its lock entry. A git library is an
- archive of the locked commit: `git archive` stores the commit in the zip comment.
+ archive of the locked commit (`git archive` stores the commit in the zip
+ comment) with the locked contents. A path library is a link to its directory.
 *>
 fn Status status(Entry* e, String dir)
 {
@@ -24,8 +25,13 @@ fn Status status(Entry* e, String dir)
 	bool link = path::is_link((Path)f);
 	if (e.kind == PATH)
 	{
-		if (link && file::is_dir(f)) return OK;
-		return link || file::exists(f) ? MODIFIED : MISSING;
+		if (!link) return file::exists(f) ? MODIFIED : MISSING;
+		String target = sys::read_link(f) ?? "";
+		if (!target.starts_with("/")) target = string::tformat("%s/%s", dir, target);
+		String want = (String)e.origin.to_absolute_path(tmem) ?? e.origin;
+		String points_to = (String)target.to_absolute_path(tmem) ?? target;
+		if (points_to != want) return MODIFIED;
+		return file::is_dir(f) ? OK : MISSING;
 	}
 	if (file::is_dir(f)) return UNPACKED;
 	if (!file::is_file(f)) return MISSING;
@@ -34,7 +40,9 @@ fn Status status(Entry* e, String dir)
 		ZipArchive? z = zip::open(tmem, f);
 		if (catch z) return MODIFIED;
 		defer (void)z.close();
-		return string::tformat("commit:%s", z.comment.trim()) == e.pin ? OK : MODIFIED;
+		if (string::tformat("commit:%s", z.comment.trim()) != e.pin) return MODIFIED;
+		if (!e.hash.starts_with("content:")) return OK;  // a lock of c3l 1.1 has no content hash
+		return (sys::content_hash(f) ?? "") == e.hash ? OK : MODIFIED;
 	}
 	return (sys::sha256_file(f) ?? "") == e.hash ? OK : MODIFIED;
 }
@@ -54,6 +62,7 @@ fn String? newer(Entry* e)
 	{
 		case REGISTRY:
 			latest = registry::info(e.origin, e.id).latest ?? UNKNOWN~!;
+			if (!latest.len) return UNKNOWN~;
 		case VENDOR:
 			String digest = vendor::find(e.id).digest ?? UNKNOWN~!;
 			if (!digest.len) return UNKNOWN~;
@@ -65,7 +74,7 @@ fn String? newer(Entry* e)
 				case e.version == "HEAD": tip = git::head(e.origin)!;
 				case e.version.starts_with("branch:"): tip = git::branch_commit(e.origin, e.version["branch:".len..])!;
 				case e.version.starts_with("commit:"): return "";
-				default: latest = git::highest(git::tags(e.origin)!);
+				default: latest = git::highest(git::tags(e.origin)!, semver::prerelease(e.version));
 			}
 			if (!latest.len && !tip.len) return UNKNOWN~;
 			if (tip.len) return string::tformat("commit:%s", tip) == e.pin ? "" : string::tformat("HEAD@%s", tip[:12]);

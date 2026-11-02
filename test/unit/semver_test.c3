@@ -47,4 +47,5 @@ fn void newer_and_major()
 	assert(!semver::newer("main", "1.0.0"));
 	assert(semver::major("v12.3.4") == "12");
 	assert(semver::major("3") == "3");
+	assert(semver::prerelease("v1.0.0-rc.1") && !semver::prerelease("1.0.0+b1") && !semver::prerelease("main"));
 }

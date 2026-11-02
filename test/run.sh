@@ -215,9 +215,9 @@ check "restored" test -f lib/gitlib.c3l
 c3l update >/dev/null 2>&1; eq "git update rc" $? 0
 has "updated to v0.2.0" "v0.2.0" "$(grep '^gitlib' c3l.lock)"
 check_not "no such tag fails" c3l add "file://$GR" v9.9.9
-# a git library is identified by its commit: the lock pins it, verify checks the
-# commit id that `git archive` stores in the zip
-check "lock records the commit as hash" grep -q '^gitlib.*commit:\([0-9a-f]*\).*commit:' c3l.lock
+# a git library is identified by its commit and its files: the lock pins the commit,
+# verify checks the commit id that `git archive` stores in the zip and the contents
+check "lock records the commit and the contents" grep -qE '^gitlib.*	commit:[0-9a-f]{40}	content:[0-9a-f]{64}	' c3l.lock
 check "verify ok" c3l verify
 git -C "$GR" archive --format=zip -o "$PWD/lib/gitlib.c3l" "$C1"
 out="$(c3l verify 2>&1)"; eq "verify rejects an archive of another commit" $? 1
@@ -719,7 +719,7 @@ check "sync --frozen is clean" c3l sync --frozen
 vendor_make vz two
 rm -f lib/vz.c3l
 out="$(c3l sync 2>&1)"; eq "changed upstream: sync fails rc" $? 1
-has "mismatch explained" "checksum mismatch for vendor:vz" "$out"
+has "mismatch explained" "vendor:vz changed upstream" "$out"
 check_not "nothing left behind" test -e lib/vz.c3l
 out="$(c3l outdated 2>&1)"; has "outdated sees the change" "vz .*latest.*-> HEAD@" "$out"
 c3l update >/dev/null 2>&1; eq "update rc" $? 0
@@ -737,6 +737,50 @@ out="$(c3l --allow-host 127.0.0.1 add acme/vuser 2>&1 </dev/null)"; eq "dependen
 eq "vz came in as a dep" "$(awk -F'\t' '$1=="vz"{print $2 "/" $8}' c3l.lock)" "vendor/dep"
 eq "vuser requires vz" "$(awk -F'\t' '$1=="vuser"{print $9}' c3l.lock)" "vz"
 unset C3L_VENDOR_URL C3L_VENDOR_API
+
+section "git contents, path links, URL spellings, release tags"
+newproj gc1
+c3l init >/dev/null 2>&1
+c3l add "file://$GR" >/dev/null 2>&1
+python3 - lib/gitlib.c3l <<'PY'
+import sys, zipfile
+f = sys.argv[1]; z = zipfile.ZipFile(f); comment = z.comment
+items = [(i, z.read(i)) for i in z.infolist()]; z.close()
+w = zipfile.ZipFile(f, "w"); w.comment = comment
+for i, d in items: w.writestr(i, b"module evil;\n" if i.filename.endswith(".c3") else d)
+w.close()
+PY
+out="$(c3l verify 2>&1)"; eq "a file changed inside a git archive is found rc" $? 1
+has "reported as modified" "gitlib: modified" "$out"
+c3l sync >/dev/null 2>&1; check "sync restores it" c3l verify
+out="$(c3l add "file://$GR/" 2>&1)"; eq "same repository, other spelling rc" $? 0
+out="$(c3l add "file://$GR" "$(git -C "$GR" rev-parse HEAD | cut -c1-12)" 2>&1)"; eq "short commit rc" $? 1
+has "short commit explained" "full 40-character hash" "$out"
+publish acme/nm 1.0.0 --c3po="other|file://$GR" >/dev/null
+out="$(c3l --allow-host file add acme/nm 2>&1)"; eq "required name differs from the library rc" $? 1
+has "name mismatch explained" "but that library is 'gitlib'" "$out"
+check "the installed gitlib is untouched" c3l verify
+PR1="$WORK/prerel"; mkdir -p "$PR1"; cd "$PR1" || exit 1
+git init -q . && git config commit.gpgsign false
+echo '{ "provides": "prerel" }' > manifest.json; git add -A && git commit -qm a && git tag v0.2.0
+echo '// next' >> manifest.json; git commit -qam b && git tag v0.10.0-rc.1
+newproj gc2
+c3l init >/dev/null 2>&1
+out="$(c3l add "file://$PR1" 2>&1)"; has "release tag preferred over a prerelease" "installed prerel v0.2.0" "$out"
+check_not "a prerelease is not offered as an update" bash -c "$C3L outdated | grep -q prerel"
+mkdir -p "$WORK/mv/pathlib/src" "$WORK/mv/app"
+printf '{ "provides": "pathlib", "sources": ["src/**"] }\n' > "$WORK/mv/pathlib/manifest.json"
+cd "$WORK/mv/app" && "$C3C" init proj >/dev/null && cd proj || exit 1
+c3l init >/dev/null 2>&1; c3l add ../../pathlib >/dev/null 2>&1
+check_not "the link is relative" bash -c "readlink lib/pathlib.c3l | grep -q '^/'"
+cp -a "$WORK/mv" "$WORK/mv2"; cd "$WORK/mv2/app/proj" || exit 1
+check "a moved project with its local library verifies" c3l verify
+rm -rf "$WORK/mv2/pathlib"
+has "a missing local library is missing" "pathlib: missing" "$(c3l verify 2>&1)"
+publish acme/tp 1.0.0 >/dev/null; publish acme/tc 1.0.0 --requires=acme/tp:1.0.0 >/dev/null
+newproj gc3
+c3l init >/dev/null 2>&1; c3l add acme/tc >/dev/null 2>&1; c3l remove tc >/dev/null 2>&1
+has "the tree shows what nothing needs" "tp 1.0.0 (not needed" "$(c3l list --tree)"
 
 section "update arguments, rollback, --force, limits, migrate errors"
 publish acme/up 1.0.0 >/dev/null; publish acme/up 1.1.0 >/dev/null

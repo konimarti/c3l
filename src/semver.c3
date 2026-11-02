@@ -68,6 +68,13 @@ fn int compare(String a, String b)
 	return sign((long)ap.len - (long)bp.len);
 }
 
+// "1.0.0-rc.1": a version before its release.
+fn bool prerelease(String v)
+{
+	String core, pre, build;
+	return split(v.strip_prefix("v"), &core, &pre, &build) && pre.len > 0;
+}
+
 // a > b, both valid versions.
 fn bool newer(String a, String b) => valid(a) && valid(b) && compare(a, b) > 0;
 

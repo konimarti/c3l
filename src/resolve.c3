@@ -7,7 +7,7 @@
 module c3l::install;
 
 import std::io, std::os, libc;
-import c3l::log, c3l::sys, c3l::lock, c3l::manifest, c3l::semver, c3l::registry, c3l::vendor;
+import c3l::log, c3l::sys, c3l::lock, c3l::manifest, c3l::semver, c3l::registry, c3l::vendor, c3l::git;
 
 const String[] BUILTIN_HOSTS = { "github.com", "codeberg.org" };
 
@@ -61,6 +61,10 @@ fn void? Op.resolve(&self, String parent, Requirement r)
 			return log::fail("%s requires '%s' from '%s', which is neither <namespace>/<name> nor a git URL", parent, r.name, r.source)~;
 	}
 	Manifest m = self.install(w, DEP)!;
+	if (m.provides != r.name)
+	{
+		return log::fail("%s requires '%s' from %s, but that library is '%s'", parent, r.name, r.source, m.provides)~;
+	}
 	log::info("  %s installed for %s", m.provides, parent);
 	self.follow(m.provides, m.requires)!;
 }
@@ -73,11 +77,8 @@ fn void? Op.satisfy(&self, String parent, Entry e, Requirement r)
 {
 	if (r.source.len && !self.same_source(e, r))
 	{
-		String from = e.origin;
-		if (e.kind == REGISTRY) from = string::tformat("%s %s", e.origin, e.id);
-		if (e.kind == VENDOR) from = e.id;
 		String reg = r.registry.len ? string::tformat("%s ", r.registry) : "";
-		return log::fail("'%s' is installed from %s:%s but %s requires it from %s%s. Library names are global in a project; remove one of them", e.name, e.kind.name, from, parent, reg, r.source)~;
+		return log::fail("'%s' is installed from %s but %s requires it from %s%s. Library names are global in a project; remove one of them", e.name, e.source(), parent, reg, r.source)~;
 	}
 	if (!r.version.len) return;
 	if (e.kind != REGISTRY)
@@ -104,7 +105,7 @@ fn bool Op.same_source(&self, Entry e, Requirement r)
 	{
 		case REGISTRY: return registry::is_id(r.source) && r.source == e.id && self.registry_of(r) == e.origin;
 		case VENDOR: return r.source == string::tformat("vendor:%s", e.id);
-		default: return trim_source(r.source) == trim_source(e.origin);
+		default: return git::canonical(r.source) == git::canonical(e.origin);
 	}
 }
 
@@ -210,7 +211,5 @@ fn String git_ref(String v)
 }
 
 fn String plain_version(String v) => git_ref(v).strip_prefix("v");
-
-fn String trim_source(String s) @private => s.strip_suffix("/").strip_suffix(".git");
 
 fn int max_deps() @private => (env::tget_var("C3L_MAX_DEPS") ?? "200").to_int() ?? 200;
