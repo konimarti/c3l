@@ -16,6 +16,7 @@ c3l.1: c3l.1.scd
 doc: c3l.1
 
 test:
+	$(C3C) test
 	./test/run.sh
 
 gitconfig:

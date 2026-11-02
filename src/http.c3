@@ -1,0 +1,147 @@
+<*
+ HTTP(S) and file:// over libcurl. Redirects are followed (GitHub release
+ downloads redirect). A failed transfer is not a fault: `Response.error` says why,
+ and the caller words the message, it knows what was being fetched.
+*>
+module c3l::http;
+
+import std::io, curl;
+
+const usz MAX_BODY = 64 * 1024 * 1024;
+
+struct Response
+{
+	int status;          // HTTP status; 0 for file:// or when the transfer failed
+	String body;         // empty when downloaded to a file
+	String error;        // why the transfer failed, empty otherwise
+	String retry_after;  // the Retry-After header, if any
+}
+
+// The transfer worked and the server did not answer with an error status.
+fn bool Response.ok(&self) => !self.error.len && self.status < 400;
+
+// A multipart form field: `value`, or the contents of `file` when that is set.
+struct Part
+{
+	String name;
+	String value;
+	String file;
+}
+
+struct Request
+{
+	String method;
+	String url;
+	String[] headers;
+	Part[] form;
+	String out_file;  // write the body here instead of into Response.body
+	long timeout;     // seconds
+}
+
+fn Response get(String url, long timeout = 30) => request({ .method = "GET", .url = url, .timeout = timeout });
+
+fn Response download(String url, String file, long timeout = 300)
+{
+	return request({ .method = "GET", .url = url, .out_file = file, .timeout = timeout });
+}
+
+fn Response request(Request req)
+{
+	Curl* h = curl::easy_init();
+	if (!h) return { .error = "cannot initialise curl" };
+	defer curl::easy_cleanup(h);
+
+	Sink sink;
+	sink.buf.tinit();
+	if (req.out_file.len)
+	{
+		File? f = file::open(req.out_file, "wb");
+		if (catch f) return { .error = string::tformat("cannot write %s", req.out_file) };
+		sink.file = f;
+		sink.to_file = true;
+	}
+	defer if (sink.to_file) (void)sink.file.close();
+
+	CurlSlist* headers;
+	defer if (headers) curl::slist_free_all(headers);
+	foreach (hdr : req.headers) headers = curl::slist_append(headers, hdr.zstr_tcopy());
+
+	char[256] err;
+	curl::easy_setopt(h, CurlOption.URL, req.url.zstr_tcopy());
+	curl::easy_setopt(h, CurlOption.CUSTOMREQUEST, req.method.zstr_tcopy());
+	curl::easy_setopt(h, CurlOption.USERAGENT, "c3l");
+	curl::easy_setopt(h, CurlOption.HTTPHEADER, headers);
+	curl::easy_setopt(h, CurlOption.FOLLOWLOCATION, 1L);
+	curl::easy_setopt(h, CurlOption.WRITEFUNCTION, &on_write);
+	curl::easy_setopt(h, CurlOption.WRITEDATA, &sink);
+	curl::easy_setopt(h, CurlOption.ERRORBUFFER, &err);
+	curl::easy_setopt(h, CurlOption.NOSIGNAL, 1L);
+	curl::easy_setopt(h, CurlOption.CONNECTTIMEOUT, 15L);
+	curl::easy_setopt(h, CurlOption.TIMEOUT, req.timeout);
+
+	CurlMime* mime;
+	defer if (mime) curl::mime_free(mime);
+	if (req.form.len)
+	{
+		mime = curl::mime_init(h);
+		foreach (part : req.form)
+		{
+			CurlMimePart* p = curl::mime_addpart(mime);
+			curl::mime_name(p, part.name.zstr_tcopy());
+			if (!part.file.len)
+			{
+				curl::mime_data(p, part.value.ptr, part.value.len);
+				continue;
+			}
+			if (curl::mime_filedata(p, part.file.zstr_tcopy()) != CurlResult.OK)
+			{
+				return { .error = string::tformat("cannot read %s", part.file) };
+			}
+			curl::mime_type(p, "application/zip");
+		}
+		curl::easy_setopt(h, CurlOption.MIMEPOST, mime);
+	}
+
+	CurlResult res = curl::easy_perform(h);
+	if (sink.failed) return { .error = sink.to_file ? string::tformat("cannot write %s", req.out_file) : "response too large" };
+	if (res != CurlResult.OK)
+	{
+		String why = ((ZString)&err).str_view();
+		return { .error = why.len ? why.tcopy() : ((ZString)curl::easy_strerror(res)).str_view().tcopy() };
+	}
+	CLong status;
+	curl::easy_getinfo(h, CurlInfoType.RESPONSE_CODE, &status);
+	Response r = { .status = (int)status, .body = sink.buf.str_view() };
+	CurlHeader* retry;
+	if (curl::easy_header(h, "retry-after", 0, 1, -1, &retry) == CurlHResult.OK)
+	{
+		r.retry_after = retry.value.str_view().tcopy();
+	}
+	return r;
+}
+
+struct Sink @private
+{
+	DString buf;
+	File file;
+	bool to_file;
+	bool failed;
+}
+
+fn usz on_write(char* ptr, usz size, usz nmemb, void* userdata) @private
+{
+	Sink* sink = userdata;
+	usz n = size * nmemb;
+	if (sink.to_file)
+	{
+		if (catch sink.file.write(ptr[:n])) sink.failed = true;
+		return sink.failed ? 0 : n;
+	}
+	if ((usz)sink.buf.len() + n > MAX_BODY)
+	{
+		sink.failed = true;
+		return 0;
+	}
+	sink.buf.append(ptr[:n]);
+	return n;
+}
