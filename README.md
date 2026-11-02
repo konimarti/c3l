@@ -69,7 +69,7 @@ Options (before or after the command):
 | `--fail-fast` | with `sync`/`update`: stop at the first failure |
 | `--strict` | with `add`/`update`: C3 release or platform mismatch, or a dependency cycle, is an error |
 | `--force` | with `remove`: remove even if needed |
-| `--allow-host HOST` | trust a git host named by a dependency (`file` for local paths) |
+| `--allow-host HOST` | trust a git or registry host named by a dependency (`file` for local paths) |
 | `-h`, `-v` | help, version |
 
 Publishing options are listed under [Publishing](#publishing).
