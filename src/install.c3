@@ -50,8 +50,9 @@ struct Op
 	String dir;     // the library directory
 	// journal
 	String project_text;
-	String lock_text;  // empty: there was no lockfile
-	String backup;     // replaced library files are moved here
+	bool had_lock;
+	String lock_text;
+	String backup;     // replaced library files are moved here; created when first needed
 	List{Touched} touched;
 	// resolver (resolve.c3)
 	List{String} stack;
@@ -68,42 +69,52 @@ fn Op? begin(Project* p, Options* opts)
 {
 	Op op = { .proj = p, .opts = opts };
 	op.project_text = (String)file::load_temp(p.file) ?? log::fail("cannot read %s", p.file)~!;
-	op.lock_text = p.lock.exists() ? (String)file::load_temp(p.lock.file) ?? "" : "";
+	op.had_lock = p.lock.exists();
+	if (op.had_lock) op.lock_text = (String)file::load_temp(p.lock.file) ?? log::fail("cannot read %s", p.lock.file)~!;
 	op.touched.tinit();
 	op.stack.tinit();
 	op.dir = p.lib_dir(true)!;
-	op.backup = string::tformat("%s/.c3l-backup", op.dir);
 	return op;
 }
 
 fn void Op.commit(&self)
 {
-	sys::remove(self.backup);
+	if (self.backup.len) sys::remove(self.backup);
+	self.backup = "";
 	self.touched.clear();
 }
 
+<*
+ Put back the project file, the lockfile (never written with --frozen) and
+ every library file the operation replaced. If a library cannot be put back,
+ its previous file stays in the backup directory, and the user is told where.
+*>
 fn void Op.rollback(&self)
 {
-	(void)file::save(self.proj.file, self.project_text);
-	if (self.lock_text.len)
+	if (catch sys::write_atomic(self.proj.file, self.project_text)) log::error("%s could not be restored", self.proj.file);
+	self.proj.changed();
+	Lock* l = &self.proj.lock;
+	if (!l.frozen)
 	{
-		(void)file::save(self.proj.lock.file, self.lock_text);
+		if (self.had_lock && @catch(sys::write_atomic(l.file, self.lock_text))) log::error("%s could not be restored", l.file);
+		if (!self.had_lock) (void)file::delete(l.file);
 	}
-	else
-	{
-		(void)file::delete(self.proj.lock.file);
-	}
+	bool frozen = l.frozen;
+	*l = lock::load(l.file) ?? *l;
+	l.frozen = frozen;
+
+	bool restored = true;
 	foreach (t : self.touched)
 	{
 		String f = self.file_of(t.name);
 		sys::remove(f);
-		if (t.had_file) libc::rename(project::lib_file(self.backup, t.name).zstr_tcopy(), f.zstr_tcopy());
+		if (t.had_file && libc::rename(project::lib_file(self.backup, t.name).zstr_tcopy(), f.zstr_tcopy()))
+		{
+			log::error("could not restore %s; the previous file is in %s", f, self.backup);
+			restored = false;
+		}
 	}
-	self.commit();
-	self.proj.changed();
-	bool frozen = self.proj.lock.frozen;
-	self.proj.lock = lock::load(self.proj.lock.file) ?? self.proj.lock;
-	self.proj.lock.frozen = frozen;
+	if (restored) self.commit();
 }
 
 fn String Op.file_of(&self, String name) => project::lib_file(self.dir, name);
@@ -221,7 +232,7 @@ fn Manifest? Op.install_path(&self, Want w, Intent intent)
 	String abs = (String)src.to_absolute_path(tmem) ?? log::fail("cannot enter %s", src)~!;
 	check_name(name, src)!;
 	self.check_collision(name, PATH, src, "-")!;
-	self.set_aside(name);
+	self.set_aside(name)!;
 	sys::link(abs, self.file_of(name))!;
 	Manifest m = self.place({ .name = name, .kind = PATH, .origin = src, .id = "-", .version = "-", .pin = "-", .hash = "-" }, "", w.pin.len > 0 ? KEEP : intent)!;
 	log::info("linked %s -> %s", name, abs);
@@ -263,15 +274,16 @@ fn void warn_provides(String file, String name, String what) @private
 }
 
 // Move the current file of `name` out of the way (once per operation).
-fn void Op.set_aside(&self, String name)
+fn void? Op.set_aside(&self, String name)
 {
 	foreach (t : self.touched) if (t.name == name) return;
 	String f = self.file_of(name);
 	bool had = sys::exists(f);
 	if (had)
 	{
-		(void)path::mkdir(self.backup);
-		libc::rename(f.zstr_tcopy(), project::lib_file(self.backup, name).zstr_tcopy());
+		if (!self.backup.len) self.backup = sys::temp_dir(self.dir, ".c3l-backup")!;
+		String to = project::lib_file(self.backup, name);
+		if (libc::rename(f.zstr_tcopy(), to.zstr_tcopy())) return log::fail("cannot move %s to %s", f, to)~;
 	}
 	self.touched.push({ name, had });
 }
@@ -286,7 +298,7 @@ fn Manifest? Op.place(&self, Entry e, String staged, Intent intent)
 	String f = self.file_of(e.name);
 	if (staged.len)
 	{
-		self.set_aside(e.name);
+		self.set_aside(e.name)!;
 		if (libc::rename(staged.zstr_tcopy(), f.zstr_tcopy())) return log::fail("cannot write %s", f)~;
 	}
 	Manifest m = manifest::load(f) ?? (Manifest){};
@@ -296,7 +308,11 @@ fn Manifest? Op.place(&self, Entry e, String staged, Intent intent)
 	e.requires = m.require_names();
 	if (!(self.proj.libmode && e.role == DEP) && !self.proj.has_dep(e.name)!)
 	{
-		if (catch self.proj.set_dep(e.name, true)) return log::fail("could not register %s in %s", e.name, self.proj.file)~;
+		if (catch err = self.proj.set_dep(e.name, true))
+		{
+			if (err == project::NOT_UPDATED) return log::fail("could not register %s in %s", e.name, self.proj.file)~;
+			return err~;  // already reported
+		}
 	}
 	self.proj.lock.put(e);
 	self.proj.lock.save()!;

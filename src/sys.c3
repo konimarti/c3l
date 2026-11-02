@@ -87,11 +87,11 @@ fn String? sha256_file(String path)
 	return string::tformat("sha256:%s", hex::encode(tmem, &&h.final()));
 }
 
-// A new private directory under the system temp directory; the caller removes it.
-fn String? temp_dir()
+// A new private directory in `base` (default: the system temp directory); the caller removes it.
+fn String? temp_dir(String base = "", String prefix = "c3l")
 {
-	String base = (String)path::temp_directory(tmem) ?? "/tmp";
-	ZString dir = mkdtemp(string::tformat("%s/c3l.XXXXXXXX", base).zstr_tcopy());
+	if (!base.len) base = (String)path::temp_directory(tmem) ?? "/tmp";
+	ZString dir = mkdtemp(string::tformat("%s/%s.XXXXXXXX", base, prefix).zstr_tcopy());
 	if (!dir) return log::fail("cannot create a temporary directory")~;
 	return dir.str_view();
 }

@@ -738,6 +738,44 @@ eq "vz came in as a dep" "$(awk -F'\t' '$1=="vz"{print $2 "/" $8}' c3l.lock)" "v
 eq "vuser requires vz" "$(awk -F'\t' '$1=="vuser"{print $9}' c3l.lock)" "vz"
 unset C3L_VENDOR_URL C3L_VENDOR_API
 
+section "update arguments, rollback, --force, limits, migrate errors"
+publish acme/up 1.0.0 >/dev/null; publish acme/up 1.1.0 >/dev/null
+newproj rv1
+c3l init >/dev/null 2>&1
+c3l add acme/up@1.0.0 >/dev/null 2>&1
+out="$(c3l update up.c3l@1.1.0 2>&1)"; eq "update name.c3l@version rc" $? 0
+has "switched" "^up	registry	.*	1.1.0	" "$(cat c3l.lock)"
+out="$(c3l update up@ 2>&1)"; eq "empty version rc" $? 1
+: > c3l.lock
+c3l add acme/nope >/dev/null 2>&1
+check "an empty lockfile is kept on rollback" test -e c3l.lock
+c3l add acme/up >/dev/null 2>&1
+BAD="$(printf 'a%.0s' $(seq 64))"
+sed -i "s/^\(up	.*	\)sha256:[0-9a-f]*	sha256:[0-9a-f]*/\1sha256:$BAD	sha256:$BAD/" c3l.lock
+rm -f lib/up.c3l; cp c3l.lock "$WORK/lock.bad"; touch -d 2001-01-01 c3l.lock
+out="$(c3l sync --frozen 2>&1)"; eq "frozen sync with a failing restore rc" $? 1
+check "--frozen leaves the lockfile alone" cmp -s c3l.lock "$WORK/lock.bad"
+eq "--frozen does not touch the lockfile" "$(date -r c3l.lock +%Y)" "2001"
+check_not "no backup debris" bash -c "ls -A lib | grep -q c3l-backup"
+publish acme/fa 1.0.0 >/dev/null; publish acme/fb 1.0.0 --requires=acme/fa:1.0.0 >/dev/null
+newproj rv2
+c3l init >/dev/null 2>&1
+out="$(C3L_MAX_DEPS=0 c3l add acme/fb 2>&1)"; eq "dependency limit rc" $? 1
+has "limit explained" "more than 0 transitive libraries" "$out"
+check_not "limit rolled back" test -e lib/fb.c3l
+c3l add acme/fb >/dev/null 2>&1
+out="$(c3l remove fa 2>&1)"; eq "required library rc" $? 1
+c3l remove --force fa >/dev/null 2>&1; eq "remove --force rc" $? 0
+check_not "removed with --force" test -e lib/fa.c3l
+newproj rv3
+printf '{"packages":[{"name":"a","repo":"o/a","origin":"gitlab","commit":"COMMIT"},{"name":"b","repo":"o/b","origin":"github"}]}\n' | sed "s/COMMIT/0123456789abcdef0123456789abcdef01234567/" > project.lock.json
+out="$(c3l migrate 2>&1)"; eq "migrate with bad entries rc" $? 0
+has "unknown origin skipped" "unknown c3po origin 'gitlab'" "$out"
+has "entry without commit skipped" "skipping a c3po entry" "$out"
+out="$(c3l migrate 2>&1)"; eq "migrate twice rc" $? 1
+rm -f project.lock.json c3l.lock
+out="$(c3l migrate 2>&1)"; eq "migrate without c3po lock rc" $? 1
+
 section "hostile names, pins and URLs are refused"
 # a git library whose "provides" escapes lib/
 EV="$WORK/evilrepo"; mkdir -p "$EV"; cd "$EV" || exit 1

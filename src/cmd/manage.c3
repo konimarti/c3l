@@ -94,7 +94,7 @@ fn void? prune_run(Ctx* ctx)
 	defer catch op.rollback();
 	foreach (name : orphans)
 	{
-		op.set_aside(name);
+		op.set_aside(name)!;
 		unregister(&p, name);
 		p.lock.del(name);
 		log::info("pruned %s", name);
@@ -107,61 +107,65 @@ fn void? update_run(Ctx* ctx)
 {
 	Project p = project::find()!;
 	Options opts = options(ctx);
-	bool dry = ctx.flag_bool("dry-run");
-	List{String} names;
-	names.tinit_with_array(ctx.args);
-	if (!names.len()) foreach (e : p.lock.entries) names.push(e.name);
-	List{String} failed;
-	failed.tinit();
-	sz n;
-	foreach (arg : names)
+	// every argument is checked before anything changes
+	List{Entry} todo;
+	List{String} wants;  // per entry: the ref asked for, empty for the newest
+	todo.tinit();
+	wants.tinit();
+	if (!ctx.args.len) todo.push_all(p.lock.entries.array_view());
+	foreach (arg : ctx.args)
 	{
-		String name = arg[:arg.index_of_char('@') ?? arg.len].strip_suffix(".c3l");
-		String want = name.len < arg.len ? arg[name.len + 1..] : "";
-		if (name.len < arg.len && !want.len) return log::fail("empty version in '%s@'", name)~;
-		Entry*? found = p.lock.get(name);
-		if (catch found)
+		sz at = arg.index_of_char('@') ?? arg.len;
+		String name = lib_name(arg[:at])!;
+		if (at + 1 == arg.len) return log::fail("empty version in '%s'", arg)~;
+		Entry*? e = p.lock.get(name);
+		if (catch e)
 		{
 			log::warn("%s is not in %s", name, p.lock.file);
 			continue;
 		}
-		Entry e = *found;
+		todo.push(*e);
+		wants.push(at < arg.len ? arg[at + 1..] : "");
+	}
+	List{String} failed;
+	failed.tinit();
+	sz n;
+	foreach (i, e : todo)
+	{
 		if (e.kind == PATH) continue;  // a linked directory is always current
 		if (e.kind == GIT) opts.hosts.push(install::host_of(e.origin));
+		String want = i < wants.len() ? wants[i] : "";
+		String shown = want;
 		if (!want.len)
 		{
 			String? newer = install::newer(&e);
 			if (catch newer)
 			{
-				log::warn("%s: cannot determine the newest version", name);
+				log::warn("%s: cannot determine the newest version", e.name);
 				continue;
 			}
 			if (!newer.len) continue;
+			shown = newer;
 			// a moving source (HEAD, branch, vendor) is fetched again at its locked label
 			want = newer.starts_with("HEAD@") ? e.version : newer;
-			if (dry)
-			{
-				io::printfn("%s: %s -> %s (dry run)", name, e.version, newer);
-				n++;
-				continue;
-			}
 		}
-		else if (dry)
+		if (ctx.flag_bool("dry-run"))
 		{
-			io::printfn("%s: %s -> %s (dry run)", name, e.version, want);
+			io::printfn("%s: %s -> %s (dry run)", e.name, e.version, shown);
 			n++;
 			continue;
 		}
 		if (!apply(&p, &opts, { .kind = e.kind, .origin = e.origin, .id = e.id, .ref = want }, ctx.flag_bool("fail-fast"))!)
 		{
-			failed.push(name);
+			failed.push(e.name);
 			continue;
 		}
 		n++;
 	}
 	if (failed.len())
 	{
-		return log::fail("could not update %d %s: %s (the others were updated)", failed.len(), libraries(failed.len()), string::join(tmem, failed.array_view(), " "))~;
+		String others = n ? " (the others were updated)" : "";
+		return log::fail("could not update %d %s: %s%s", failed.len(), libraries(failed.len()), string::join(tmem, failed.array_view(), " "), others)~;
 	}
 	if (!n) log::info("nothing to update");
 }
@@ -202,7 +206,11 @@ fn void? sync_run(Ctx* ctx)
 			if (listed(&p, *e) && !p.has_dep(e.name)!)
 			{
 				log::info("registering %s in %s", e.name, p.file);
-				if (catch p.set_dep(e.name, true)) return log::fail("could not register %s in %s", e.name, p.file)~;
+				if (catch err = p.set_dep(e.name, true))
+				{
+					if (err == project::NOT_UPDATED) return log::fail("could not register %s in %s", e.name, p.file)~;
+					return err~;  // already reported
+				}
 			}
 			continue;
 		}
