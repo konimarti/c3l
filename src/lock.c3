@@ -81,6 +81,14 @@ fn Lock? load(String file)
 	return lock;
 }
 
+// A library name: [A-Za-z0-9][A-Za-z0-9._-]*
+fn bool valid_name(String s)
+{
+	if (!s.len || !s[0].is_alnum()) return false;
+	foreach (c : s) if (!c.is_alnum() && c != '.' && c != '_' && c != '-') return false;
+	return true;
+}
+
 fn bool Lock.exists(&self) => file::exists(self.file);
 
 // Header and entries sorted by name, replaced atomically.

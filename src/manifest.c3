@@ -120,9 +120,7 @@ fn String name_of(String source) @private
 	while (s.ends_with("/")) s = s[:s.len - 1];
 	if (try i = s.rindex_of_char('/')) s = s[i + 1..];
 	if (try i = s.rindex_of_char(':')) s = s[i + 1..];
-	if (s.ends_with(".git")) s = s[:s.len - 4];
-	if (s.ends_with(".c3l")) s = s[:s.len - 4];
-	return s;
+	return s.strip_suffix(".git").strip_suffix(".c3l");
 }
 
 fn String[] strings(Object* o, String key) @private

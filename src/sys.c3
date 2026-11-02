@@ -3,7 +3,7 @@
 *>
 module c3l::sys;
 
-import std::io, std::os, libc, c3l::log;
+import std::io, std::os, std::hash::sha256, std::encoding::hex, libc, c3l::log;
 
 // The compiler to call: $C3C or c3c on PATH.
 fn String c3c() => env::tget_var("C3C") ?? "c3c";
@@ -71,4 +71,21 @@ fn void? write_atomic(String file, char[] data)
 		(void)file::delete(tmp);
 		return log::fail("cannot write %s", file)~;
 	}
+}
+
+// "sha256:<hex>" of a file's contents.
+fn String? sha256_file(String path)
+{
+	File f = file::open(path, "rb")!;
+	defer (void)f.close();
+	Sha256 h;
+	h.init();
+	char[65536] buf;
+	while (true)
+	{
+		sz n = f.read(&buf)!;
+		if (n <= 0) break;
+		h.update(buf[:n]);
+	}
+	return string::tformat("sha256:%s", hex::encode(tmem, &&h.final()));
 }

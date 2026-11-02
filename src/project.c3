@@ -6,21 +6,24 @@
 *>
 module c3l::project;
 
-import std::io, std::collections::list, c3l::log, c3l::sys, c3l::manifest;
+import std::io, std::os, std::collections::list, c3l::log, c3l::sys, c3l::manifest, c3l::lock;
 
 struct Project
 {
 	String file;
 	bool libmode;
+	Lock lock;
 }
 
+// The project in the current directory and its lockfile ($C3L_LOCK, default c3l.lock).
 fn Project? find()
 {
+	Lock lock = lock::load(env::tget_var("C3L_LOCK") ?? "c3l.lock")!;
 	foreach (f : (String[]){ "project.json", "project.json5" })
 	{
-		if (file::exists(f)) return { .file = f };
+		if (file::exists(f)) return { .file = f, .lock = lock };
 	}
-	if (file::exists("manifest.json")) return { .file = "manifest.json", .libmode = true };
+	if (file::exists("manifest.json")) return { .file = "manifest.json", .libmode = true, .lock = lock };
 	String cwd = (String)(path::tcwd() ?? (Path)".");
 	return log::fail("no project.json found in %s. Run c3l from the project root (create one with 'c3c init' or 'c3l init <name>').", cwd)~;
 }

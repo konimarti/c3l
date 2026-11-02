@@ -74,6 +74,8 @@ fn Response request(Request req)
 	curl::easy_setopt(h, CurlOption.FOLLOWLOCATION, 1L);
 	curl::easy_setopt(h, CurlOption.WRITEFUNCTION, &on_write);
 	curl::easy_setopt(h, CurlOption.WRITEDATA, &sink);
+	curl::easy_setopt(h, CurlOption.HEADERFUNCTION, &on_header);
+	curl::easy_setopt(h, CurlOption.HEADERDATA, &sink);
 	curl::easy_setopt(h, CurlOption.ERRORBUFFER, &err);
 	curl::easy_setopt(h, CurlOption.NOSIGNAL, 1L);
 	curl::easy_setopt(h, CurlOption.CONNECTTIMEOUT, 15L);
@@ -111,13 +113,7 @@ fn Response request(Request req)
 	}
 	CLong status;
 	curl::easy_getinfo(h, CurlInfoType.RESPONSE_CODE, &status);
-	Response r = { .status = (int)status, .body = sink.buf.str_view() };
-	CurlHeader* retry;
-	if (curl::easy_header(h, "retry-after", 0, 1, -1, &retry) == CurlHResult.OK)
-	{
-		r.retry_after = retry.value.str_view().tcopy();
-	}
-	return r;
+	return { .status = (int)status, .body = sink.buf.str_view(), .retry_after = sink.retry_after };
 }
 
 struct Sink @private
@@ -126,6 +122,18 @@ struct Sink @private
 	File file;
 	bool to_file;
 	bool failed;
+	String retry_after;
+}
+
+fn usz on_header(char* ptr, usz size, usz nmemb, void* userdata) @private
+{
+	Sink* sink = userdata;
+	String line = (String)ptr[:size * nmemb];
+	if (line.len > 12 && line[:12].to_lower_tcopy() == "retry-after:")
+	{
+		sink.retry_after = line[12..].trim().tcopy();
+	}
+	return size * nmemb;
 }
 
 fn usz on_write(char* ptr, usz size, usz nmemb, void* userdata) @private
