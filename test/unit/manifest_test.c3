@@ -32,3 +32,10 @@ fn void minimal() @test
 	assert(m.provides == "x" && !m.version.len && !m.requires.len && !m.has_vendor);
 	assert(@catch(manifest::parse("not json")));
 }
+
+fn void invalid_names_are_not_requirements() @test
+{
+	Manifest m = manifest::parse(`{ "provides": "x", "dependencies": [ "ok", "a\nevil\tgit", "../up" ] }`)!!;
+	assert(m.requires.len == 1 && m.requires[0].name == "ok");
+	assert(m.invalid == "a\nevil\tgit");
+}

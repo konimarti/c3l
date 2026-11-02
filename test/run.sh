@@ -452,7 +452,7 @@ out="$(pc check --offline --version 2>&1)"; eq "--version without value rc" $? 2
 has "--version message" "needs a value" "$out"
 
 # publishing a library that has dependencies: vendor.c3l.requires comes from its own c3l.lock
-printf '# c3l.lock v1\ndcb\tregistry\thttp://example.invalid/v1\tacme/dcb\t1.2.0\tsha256:aa\tsha256:aa\tdirect\t-\ndcc\tregistry\thttp://example.invalid/v1\tacme/dcc\t1.0.0\tsha256:bb\tsha256:bb\tdep\t-\ngl\tgit\thttps://github.com/o/gl\t-\tv0.3.0\tcommit:x\tcommit:x\tdirect\t-\n' > c3l.lock
+printf '# c3l.lock v1\ndcb\tregistry\thttp://example.invalid/v1\tacme/dcb\t1.2.0\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tdirect\t-\ndcc\tregistry\thttp://example.invalid/v1\tacme/dcc\t1.0.0\tsha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tsha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tdep\t-\ngl\tgit\thttps://github.com/o/gl\t-\tv0.3.0\tcommit:cccccccccccccccccccccccccccccccccccccccc\tcommit:cccccccccccccccccccccccccccccccccccccccc\tdirect\t-\n' > c3l.lock
 c3l pack --no-build --output "$WORK/withdeps.c3l" >/dev/null 2>&1; eq "pack with a lockfile rc" $? 0
 man="$(unzip -p "$WORK/withdeps.c3l" manifest.json)"
 has "requires has the registry dependency and its registry" '"source": "acme/dcb", "registry": "http://example.invalid/v1", "version": "1.2.0"' "$man"
@@ -469,7 +469,7 @@ has "warns about self dependency" "demo lists itself as a dependency" "$out"
 git checkout -q manifest.json
 
 # vendor block goes to the top level even if a nested "version" comes first
-printf '# c3l.lock v1\ndcb\tregistry\thttp://example.invalid\tacme/dcb\t1.2.0\tsha256:aa\tsha256:aa\tdirect\t-\n' > c3l.lock
+printf '# c3l.lock v1\ndcb\tregistry\thttp://example.invalid\tacme/dcb\t1.2.0\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tdirect\t-\n' > c3l.lock
 sed -i 's|"provides" : "demo",|"targets-note" : { "version" : "9" },\n  "provides" : "demo",|' manifest.json
 c3l pack --no-build --allow-dirty --output "$WORK/nested.c3l" >/dev/null 2>&1; eq "pack with a nested version rc" $? 0
 flat="$(unzip -p "$WORK/nested.c3l" manifest.json | flat)"
@@ -737,6 +737,37 @@ out="$(c3l --allow-host 127.0.0.1 add acme/vuser 2>&1 </dev/null)"; eq "dependen
 eq "vz came in as a dep" "$(awk -F'\t' '$1=="vz"{print $2 "/" $8}' c3l.lock)" "vendor/dep"
 eq "vuser requires vz" "$(awk -F'\t' '$1=="vuser"{print $9}' c3l.lock)" "vz"
 unset C3L_VENDOR_URL C3L_VENDOR_API
+
+section "hostile names, pins and URLs are refused"
+# a git library whose "provides" escapes lib/
+EV="$WORK/evilrepo"; mkdir -p "$EV"; cd "$EV" || exit 1
+git init -q . && git config commit.gpgsign false
+echo '{ "provides": "/../../escaped" }' > manifest.json
+git add -A && git commit -qm one
+newproj red1
+c3l init >/dev/null 2>&1
+out="$(c3l add "file://$EV" 2>&1)"; eq "provides with a path rc" $? 1
+has "provides explained" "not a valid library name" "$out"
+check_not "nothing written outside lib/" test -e ../escaped.c3l
+check_not "no staging debris" bash -c "ls -A lib | grep -v '^.gitkeep$' | grep -q ."
+# a dependency name that would forge lock lines
+publish acme/inj 1.0.0 --deps=$'ok,a\nevil\tgit\t/\t-\tHEAD' >/dev/null
+out="$(c3l add acme/inj 2>&1)"; eq "forged name rc" $? 1
+has "forged name explained" "not a valid library name" "$out"
+check_not "no forged lock line" grep -q "^evil" c3l.lock
+check_not "rolled back" test -e lib/inj.c3l
+# a lock whose pin is a git option
+printf '%s\nx\tgit\tfile://%s\t-\tHEAD\tcommit:--upload-pack=touch %s/PWNED;false\tcommit:x\tdirect\t-\n' "$(head -n1 c3l.lock)" "$GR" "$WORK" > c3l.lock
+out="$(c3l sync 2>&1)"; eq "option as pin rc" $? 1
+has "damaged lock explained" "invalid commit" "$out"
+check_not "no command ran" test -e "$WORK/PWNED"
+# a trusted-looking host that is not
+publish acme/hb 1.0.0 --c3po="hx|http://127.0.0.1:$PORT?@github.com/x" >/dev/null
+newproj red2
+c3l init >/dev/null 2>&1
+out="$(c3l add acme/hb </dev/null 2>&1)"; eq "disguised host rc" $? 1
+has "real host named" "host '127.0.0.1' is not trusted" "$out"
+out="$(c3l remove ../../etc 2>&1)"; eq "path as a name rc" $? 1
 
 section "cli"
 has "help" "reproducible dependencies" "$(c3l help)"

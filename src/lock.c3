@@ -54,7 +54,9 @@ struct Lock
 
 <*
  Read a lockfile; a missing file is an empty lock. Lines of an older format
- are refused, not guessed.
+ are refused, not guessed, and so is anything a lock written by c3l cannot
+ contain: the lock may come from someone else's repository, and its names,
+ pins and URLs end up in file names and git command lines.
 *>
 fn Lock? load(String file)
 {
@@ -72,13 +74,36 @@ fn Lock? load(String file)
 		{
 			return log::fail("%s line %d does not have 9 columns (written by an older c3l?). Delete it and run 'c3l add' again, or restore the libraries with an older c3l first.", file, i + 1)~;
 		}
-		lock.entries.push({
+		Entry e = {
 			.name = col[0], .kind = kind, .origin = col[2], .id = col[3], .version = col[4],
 			.pin = col[5], .hash = col[6], .role = role,
 			.requires = col[8] == "-" ? {} : col[8].tsplit(","),
-		});
+		};
+		String bad = e.problem();
+		if (bad.len) return log::fail("%s line %d: invalid %s; the lockfile is damaged or was edited by hand", file, i + 1, bad)~;
+		lock.entries.push(e);
 	}
 	return lock;
+}
+
+// What is wrong with an entry, empty if nothing.
+fn String Entry.problem(&self)
+{
+	if (!valid_name(self.name)) return "library name";
+	foreach (r : self.requires) if (!valid_name(r)) return "requires";
+	if (self.origin.starts_with("-")) return "origin";
+	switch (self.kind)
+	{
+		case REGISTRY:
+		case VENDOR:
+			if (!is_digest(self.pin) || !is_digest(self.hash)) return "checksum";
+			if (self.kind == REGISTRY ? !valid_id(self.id) : !valid_name(self.id)) return "id";
+		case GIT:
+			if (!is_commit_pin(self.pin) || !(is_commit_pin(self.hash) || is_digest(self.hash))) return "commit";
+		case PATH:
+			break;
+	}
+	return "";
 }
 
 // A library name: [A-Za-z0-9][A-Za-z0-9._-]*
@@ -86,6 +111,27 @@ fn bool valid_name(String s)
 {
 	if (!s.len || !s[0].is_alnum()) return false;
 	foreach (c : s) if (!c.is_alnum() && c != '.' && c != '_' && c != '-') return false;
+	return true;
+}
+
+// A registry id: <namespace>/<name>
+fn bool valid_id(String s)
+{
+	String[] parts = s.tsplit("/");
+	return parts.len == 2 && valid_name(parts[0]) && valid_name(parts[1]);
+}
+
+// A full git commit id: 40 hex digits.
+fn bool is_commit(String s) => is_hex(s, 40);
+
+fn bool is_commit_pin(String s) @private => s.starts_with("commit:") && is_commit(s["commit:".len..]);
+
+fn bool is_digest(String s) @private => s.starts_with("sha256:") && is_hex(s["sha256:".len..], 64);
+
+fn bool is_hex(String s, sz len) @private
+{
+	if (s.len != len) return false;
+	foreach (c : s) if (!c.is_xdigit()) return false;
 	return true;
 }
 

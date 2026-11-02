@@ -162,20 +162,39 @@ fn void? Op.trust(&self, String url)
 	return log::fail("refusing to fetch %s: host '%s' is not trusted. Allow it with --allow-host %s (or $C3L_ALLOWED_HOSTS)", url, host, host)~;
 }
 
+<*
+ The host a URL fetches from, lowercased: "file" for local paths, empty when
+ there is none or it is not a plain host name (so it is never trusted).
+*>
 fn String host_of(String url)
 {
 	if (url.starts_with("file://") || url.starts_with("/") || url.starts_with("./") || url.starts_with("../")) return "file";
+	String h;
 	if (url.starts_with("git@"))
 	{
-		String h = url["git@".len..];
-		return h[:h.index_of_char(':') ?? h.len];
+		h = url["git@".len..];
+		h = h[:h.index_of_char(':') ?? h.len];
 	}
-	sz scheme = url.index_of("://") ?? -1;
-	if (scheme < 0) return url;
-	String h = url[scheme + 3..];
-	h = h[:h.index_of_char('/') ?? h.len];
-	if (try at = h.rindex_of_char('@')) h = h[at + 1..];
-	return h[:h.index_of_char(':') ?? h.len];
+	else
+	{
+		sz scheme = url.index_of("://") ?? -1;
+		if (scheme < 0) return "";
+		h = url[scheme + 3..];
+		sz end = h.len;  // the authority ends at the path, query or fragment
+		foreach (i, c : h)
+		{
+			if (c != '/' && c != '?' && c != '#') continue;
+			end = i;
+			break;
+		}
+		h = h[:end];
+		if (h.contains("\\")) return "";  // some URL parsers take it for a '/'
+		if (try at = h.rindex_of_char('@')) h = h[at + 1..];
+		h = h[:h.index_of_char(':') ?? h.len];
+	}
+	if (!h.len) return "";
+	foreach (c : h) if (!c.is_alnum() && c != '.' && c != '-') return "";
+	return h.to_lower_tcopy();
 }
 
 fn bool is_git_url(String s)

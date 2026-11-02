@@ -112,7 +112,7 @@ fn void? verify_run(Ctx* ctx)
 fn void? why_run(Ctx* ctx)
 {
 	Project p = project::find()!;
-	String name = ctx.arg(0).strip_suffix(".c3l");
+	String name = lib_name(ctx.arg(0))!;
 	Entry* e = p.lock.get(name) ?? log::fail("'%s' is not in %s", name, p.lock.file)~!;
 	if (e.role == DIRECT) log::info("%s is a direct dependency of the project", name);
 	print_why(&p.lock, name, "", { name });

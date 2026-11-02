@@ -52,7 +52,7 @@ fn void? add_run(Ctx* ctx)
 fn void? remove_run(Ctx* ctx)
 {
 	Project p = project::find()!;
-	String name = ctx.arg(0).strip_suffix(".c3l");
+	String name = lib_name(ctx.arg(0))!;
 	String f = project::lib_file(p.lib_dir()!, name);
 	bool locked = p.lock.has(name);
 	if (!locked && !p.has_dep(name)! && !sys::exists(f)) return log::fail("'%s' is not installed", name)~;
@@ -246,9 +246,9 @@ fn void? migrate_run(Ctx* ctx)
 		String origin = pkg.get_string("origin") ?? "";
 		String commit = pkg.get_string("commit") ?? "";
 		String label = pkg.get_string("ref") ?? "";
-		if (!name.len || !git::is_commit(commit))
+		if (!lock::valid_name(name) || !git::is_commit(commit))
 		{
-			log::warn("skipping a c3po entry without name or commit");
+			log::warn("skipping a c3po entry without a valid name or commit");
 			continue;
 		}
 		String host;
@@ -316,3 +316,11 @@ fn bool is_path_dep(String s)
 }
 
 fn String libraries(sz n) => n == 1 ? "library" : "libraries";
+
+// A library name given on the command line, optionally as <name>.c3l.
+fn String? lib_name(String arg)
+{
+	String name = arg.strip_suffix(".c3l");
+	if (!lock::valid_name(name)) return log::fail("'%s' is not a library name", arg)~;
+	return name;
+}

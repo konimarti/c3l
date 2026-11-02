@@ -9,7 +9,7 @@
 module c3l::manifest;
 
 import std::io, std::collections::list, std::collections::object, std::encoding::json;
-import std::compression::zip;
+import std::compression::zip, c3l::lock;
 
 struct Requirement
 {
@@ -27,6 +27,7 @@ struct Manifest
 	Requirement[] requires;
 	bool has_vendor;        // there is a "vendor" block
 	bool has_c3l_requires;  // ... and it has vendor.c3l.requires
+	String invalid;         // a required name that is not a valid library name (not in `requires`)
 }
 
 faultdef NO_MANIFEST, BAD_MANIFEST;
@@ -67,7 +68,7 @@ fn Manifest? parse(String text)
 			m.has_c3l_requires = c3l.has_key("requires");
 			foreach (r : objects(c3l, "requires"))
 			{
-				add(&reqs, {
+				add(&m, &reqs, {
 					.name = r.get_string("name") ?? "",
 					.source = r.get_string("source") ?? "",
 					.version = r.get_string("version") ?? "",
@@ -79,16 +80,16 @@ fn Manifest? parse(String text)
 		{
 			foreach (r : objects(c3po, "sources"))
 			{
-				add(&reqs, { .name = r.get_string("name") ?? "", .source = r.get_string("source") ?? "" });
+				add(&m, &reqs, { .name = r.get_string("name") ?? "", .source = r.get_string("source") ?? "" });
 			}
 		}
 	}
-	foreach (d : m.dependencies) add(&reqs, { .name = d });
+	foreach (d : m.dependencies) add(&m, &reqs, { .name = d });
 	if (try targets = root.get("targets"))
 	{
 		targets.@each_entry(; String key, Object* target)
 		{
-			foreach (d : strings(target, "dependencies")) add(&reqs, { .name = d });
+			foreach (d : strings(target, "dependencies")) add(&m, &reqs, { .name = d });
 		};
 	}
 	m.requires = reqs.array_view();
@@ -105,10 +106,15 @@ fn String[] Manifest.require_names(&self)
 }
 
 // first one per name wins; a nameless entry is named after its source
-fn void add(List{Requirement}* reqs, Requirement r) @private
+fn void add(Manifest* m, List{Requirement}* reqs, Requirement r) @private
 {
 	if (!r.name.len) r.name = name_of(r.source);
 	if (!r.name.len) return;
+	if (!lock::valid_name(r.name))
+	{
+		if (!m.invalid.len) m.invalid = r.name;
+		return;
+	}
 	foreach (have : *reqs) if (have.name == r.name) return;
 	reqs.push(r);
 }

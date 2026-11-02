@@ -45,8 +45,7 @@ fn String base(String url)
 // <namespace>/<name>
 fn bool is_id(String s)
 {
-	String[] parts = s.tsplit("/");
-	return parts.len == 2 && lock::valid_name(parts[0]) && lock::valid_name(parts[1]);
+	return lock::valid_id(s);
 }
 
 // The library's record; UNREACHABLE when the registry has none or cannot be reached.

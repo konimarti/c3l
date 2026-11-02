@@ -3,9 +3,9 @@ module c3l::lock_test;
 import std::io, c3l::lock;
 
 const String SAMPLE = lock::HEADER +++
-	"app\tgit\thttps://h/app\t-\tv1.0.0\tcommit:abc\tcommit:abc\tdirect\tmid\n"
-	"mid\tregistry\thttps://r\tns/mid\t1.2.0\tsha256:x\tsha256:x\tdep\tleaf,app\n"
-	"leaf\tvendor\thttps://v\tleaf\tlatest\tsha256:y\tsha256:y\tdep\t-\n"
+	"app\tgit\thttps://h/app\t-\tv1.0.0\tcommit:0123456789abcdef0123456789abcdef01234567\tcommit:0123456789abcdef0123456789abcdef01234567\tdirect\tmid\n"
+	"mid\tregistry\thttps://r\tns/mid\t1.2.0\tsha256:1111111111111111111111111111111111111111111111111111111111111111\tsha256:1111111111111111111111111111111111111111111111111111111111111111\tdep\tleaf,app\n"
+	"leaf\tvendor\thttps://v\tleaf\tlatest\tsha256:2222222222222222222222222222222222222222222222222222222222222222\tsha256:2222222222222222222222222222222222222222222222222222222222222222\tdep\t-\n"
 	"lost\tpath\t../lost\t-\t-\t-\t-\tdep\t-\n";
 
 fn String tmp_lock(String content)
@@ -64,5 +64,29 @@ fn void graph() @test
 	assert(d.len == 1 && d[0] == "mid");
 	String[] o = l.orphans();
 	assert(o.len == 1 && o[0] == "lost");
+	file::delete(f);
+}
+
+// A lock may come from someone else's repository: what c3l cannot have written is refused.
+fn void damaged_lines_refused() @test
+{
+	String c40 = "0123456789abcdef0123456789abcdef01234567";
+	String[] bad = {
+		"../x\tgit\thttps://h/x\t-\tHEAD\tcommit:" +++ "0123456789abcdef0123456789abcdef01234567" +++ "\tcommit:0123456789abcdef0123456789abcdef01234567\tdirect\t-\n",
+		"x\tgit\thttps://h/x\t-\tHEAD\tcommit:--upload-pack=touch /tmp/p;false\tcommit:x\tdirect\t-\n",
+		"x\tgit\t-oProxyCommand=x\t-\tHEAD\tcommit:0123456789abcdef0123456789abcdef01234567\tcommit:0123456789abcdef0123456789abcdef01234567\tdirect\t-\n",
+		"x\tregistry\thttps://r\tns/x\t1.0.0\tsha256:zz\tsha256:zz\tdirect\t-\n",
+		"x\tregistry\thttps://r\t../x\t1.0.0\tsha256:" +++ "0000000000000000000000000000000000000000000000000000000000000000" +++ "\tsha256:0000000000000000000000000000000000000000000000000000000000000000\tdirect\t-\n",
+		"x\tpath\t../x\t-\t-\t-\t-\tdirect\tok,../evil\n",
+	};
+	foreach (line : bad)
+	{
+		String f = tmp_lock(string::tformat("%s%s", lock::HEADER, line));
+		assert(@catch(lock::load(f)), "accepted: %s", line);
+		file::delete(f);
+	}
+	String good = string::tformat("%sx\tgit\thttps://h/x\t-\tHEAD\tcommit:%s\tsha256:%s\tdirect\t-\n", lock::HEADER, c40, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+	String f = tmp_lock(good);
+	assert(@ok(lock::load(f)), "a git entry with the archive's sha256 as hash is valid");
 	file::delete(f);
 }

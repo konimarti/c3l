@@ -196,11 +196,11 @@ fn Manifest? Op.install_git(&self, Want w, Intent intent)
 {
 	String url = w.origin;
 	Rev rev = resolve_rev(url, w.ref, w.pin)!;
-	String src = sys::temp_dir()!;
-	defer sys::remove(src);
-	git::checkout(url, rev.commit, rev.kind == TAG || rev.kind == BRANCH ? rev.name : "", src)!;
+	String tmp = sys::temp_dir()!;
+	defer sys::remove(tmp);
+	String src = git::checkout(url, rev.commit, rev.kind == TAG || rev.kind == BRANCH ? rev.name : "", tmp)!;
 	String name = (manifest::load(src) ?? log::fail("%s has no manifest.json at its root (not a C3 library)", url)~!).provides;
-	if (!name.len) return log::fail("manifest.json of %s has no 'provides'", url)~;
+	check_name(name, url)!;
 	if (file::exists(string::tformat("%s/.gitmodules", src))) log::warn("%s uses submodules; they are not included in the library", url);
 	self.check_collision(name, GIT, url, "-")!;
 
@@ -219,7 +219,7 @@ fn Manifest? Op.install_path(&self, Want w, Intent intent)
 	String src = w.origin;
 	String name = (manifest::load_file(string::tformat("%s/manifest.json", src)) ?? log::fail("%s has no manifest.json (not a C3 library)", src)~!).provides;
 	String abs = (String)src.to_absolute_path(tmem) ?? log::fail("cannot enter %s", src)~!;
-	if (!name.len) return log::fail("manifest.json of %s has no 'provides'", src)~;
+	check_name(name, src)!;
 	self.check_collision(name, PATH, src, "-")!;
 	self.set_aside(name);
 	sys::link(abs, self.file_of(name))!;
@@ -236,6 +236,13 @@ fn void? Op.check_collision(&self, String name, Kind kind, String origin, String
 	if (e.kind == kind && e.origin == origin && e.id == id) return;
 	String from = e.id == "-" ? e.origin : string::tformat("%s %s", e.origin, e.id);
 	return log::fail("'%s' is already installed from %s:%s. Library names are global in a project; run 'c3l remove %s' first.", name, e.kind.name, from, name)~;
+}
+
+// "provides" of a library's manifest becomes a file name and a lock key.
+fn void? check_name(String name, String source) @private
+{
+	if (!name.len) return log::fail("manifest.json of %s has no 'provides'", source)~;
+	if (!lock::valid_name(name)) return log::fail("manifest.json of %s provides '%s', which is not a valid library name", source, name)~;
 }
 
 // Where a download is written before it is checked: next to its final place.
@@ -283,6 +290,7 @@ fn Manifest? Op.place(&self, Entry e, String staged, Intent intent)
 		if (libc::rename(staged.zstr_tcopy(), f.zstr_tcopy())) return log::fail("cannot write %s", f)~;
 	}
 	Manifest m = manifest::load(f) ?? (Manifest){};
+	if (m.invalid.len) return log::fail("manifest.json of %s requires '%s', which is not a valid library name", e.name, m.invalid)~;
 	m.provides = e.name;
 	e.role = self.role_of(e.name, intent);
 	e.requires = m.require_names();
@@ -335,6 +343,7 @@ fn Rev? resolve_rev(String url, String ref, String pin) @private
 	if (pin.len)
 	{
 		r.commit = pin.strip_prefix("commit:");
+		if (!git::is_commit(r.commit)) return log::fail("the lock pins %s to '%s', which is not a commit id", url, pin)~;
 		return r;
 	}
 	switch (r.kind)

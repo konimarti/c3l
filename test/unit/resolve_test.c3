@@ -18,3 +18,15 @@ fn void hosts() @test
 	assert(install::host_of("file:///srv/repo") == "file");
 	assert(install::is_git_url("https://h/x") && install::is_git_url("git@h:x") && !install::is_git_url("ns/name"));
 }
+
+fn void host_tricks() @test
+{
+	assert(install::host_of("http://127.0.0.1:2877?@github.com/x/y") == "127.0.0.1");
+	assert(install::host_of("http://127.0.0.1:2877#@github.com/x") == "127.0.0.1");
+	assert(install::host_of("https://github.com@evil.org/x") == "evil.org");
+	assert(install::host_of("https://github.com.evil.org/x") == "github.com.evil.org");
+	assert(install::host_of("https://evil.org/github.com") == "evil.org");
+	assert(install::host_of("https://GitHub.com/o/r") == "github.com");
+	assert(install::host_of("https://evil.org\\@github.com/x") == "", "not a plain host name");
+	assert(install::host_of("ns/name") == "");
+}
