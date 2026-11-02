@@ -2,7 +2,7 @@ C3L(1)
 
 # NAME
 
-*c3l* - reproducible dependencies for C3 projects, on top of *c3c fetch*.
+*c3l* - reproducible dependencies for C3 projects, for any *c3c fetch* registry.
 
 # SYNOPSIS
 
@@ -18,15 +18,16 @@ kept as _.c3l_ zip files in the first entry of _dependency-search-paths_. Run
 
 # REQUIREMENTS
 
-*bash* 3.2 or newer, *c3c* with *fetch*, and POSIX tools (*awk*, *sed*, *grep*, *cut*,
-*tr*, *sort*, *find*, *cp* and so on), with *sha256sum* or *shasum* and *mktemp*. Some
-commands need more: *git* (git libraries, *check*, *pack*, *publish*), *unzip*
-(*add*, *sync*, *update*, *list*, *verify*), *zip* (*pack*, *publish*), *curl*
-(*publish*, *search*) and, optionally, *jq* (*search*). No Python is needed.
+*c3l* is linked against *libcurl*. At run time it calls *c3c* (to read the project
+with *c3c project view*, for *init* and for the compile check of *check*) and *git*
+(git libraries, *check*, *pack*, *publish*). It talks to registries itself, with the
+protocol *c3c fetch* uses, so any *c3c* that can build the project will do.
 
 # OPTIONS
 
-Options may appear before or after the command.
+The options from *--registry* to *--registry-type* may appear before or after the
+command. The publishing options, from *--version* to *--offline*, follow *check*,
+*pack* or *publish*.
 
 *--registry* _URL_, *--registry=*_URL_
 	Use this registry base URL for the command (as *c3c --fetch-url* takes it, path
@@ -35,7 +36,8 @@ Options may appear before or after the command.
 	recorded for them.
 
 *--dry-run*
-	Only print what *update* would change. Has no effect on other commands.
+	Only print what *update* or *prune* would change, or stop *publish* before the
+	upload.
 
 *--frozen*
 	For *sync*, meant for CI. Fail if _project.json_ and _c3l.lock_ list different
@@ -55,16 +57,16 @@ Options may appear before or after the command.
 *--force*
 	With *remove*: remove the library even if another library requires it.
 
-*--tree*
-	With *list*: print the dependency graph instead of the table.
-
 *--allow-host* _HOST_
 	Trust _HOST_ for git dependencies named by a library's manifest. Local paths
-	and *file://* URLs are the host _file_. See *DEPENDENCIES*.
+	and *file://* URLs are the host _file_. Can be repeated. See *DEPENDENCIES*.
+
+*--registry-type* _static|c3pkg_
+	Override the detected registry type. See *PUBLISHING*.
 
 *--version* _X.Y.Z_, *--version=*_X.Y.Z_
-	For *check*, *pack* and *publish*: the version to publish. Without an argument
-	(or when the next word does not start with a digit), print the version.
+	After *check*, *pack* or *publish*: the version to publish. Before any command,
+	*--version* prints the version of *c3l*.
 
 *--token-file* _FILE_
 	File with the registry API token (first line). See *PUBLISHING*.
@@ -88,14 +90,11 @@ Options may appear before or after the command.
 *--offline*
 	Do not query the registry in *check* (the registry is always skipped by *pack*).
 
-*--registry-type* _static|c3pkg_
-	Override the detected registry type. See *PUBLISHING*.
+*--tree*
+	After *list*: print the dependency graph instead of the table.
 
 *-h*, *--help*
-	Print the usage text.
-
-*-v*, *--version*
-	Print the version.
+	Print the usage text, of *c3l* or of the command it follows.
 
 # COMMANDS
 
@@ -103,8 +102,8 @@ Options may appear before or after the command.
 	Create _c3l.lock_. With _name_ and outside a project, run *c3c init* first.
 
 *add* _namespace/name_[@_version_]
-	Install a library from the registry with *c3c fetch*, compare the SHA-256 of the
-	download with the registry's checksum, write the lock line. A mismatch or any
+	Install a library from the registry, compare the SHA-256 of the download with
+	the registry's checksum, write the lock line. A mismatch or any
 	failure restores the previous library file and _project.json_.
 
 *add* vendor:_name_, *add* vendor
@@ -114,7 +113,7 @@ Options may appear before or after the command.
 	_vendor_, version _latest_). *sync* fails if the file changed upstream; *outdated*
 	shows such a change and *update* re-pins it. If no digest is listed, c3l warns and
 	records the download. Plain *add vendor* lists the collection. A library may
-	require one with _"source": "vendor:name"_. Needs *curl*.
+	require one with _"source": "vendor:name"_.
 
 *add* _./dir_
 	Link a local library directory (_./dir_, _../dir_ or an absolute path with a
@@ -136,7 +135,7 @@ Options may appear before or after the command.
 	that commit (*git archive* stores the commit id in the zip comment). Edits made
 	inside the installed file are therefore not detected for git libraries, unlike
 	for registry libraries, which are checked against their SHA-256. This needs
-	*git* and *unzip*. The repository needs a _manifest.json_ at its root.
+	*git*. The repository needs a _manifest.json_ at its root.
 
 *remove* _name_
 	Delete the library file, its _dependencies_ entry and its lock line. Refuses if
@@ -179,10 +178,14 @@ Options may appear before or after the command.
 	atomically.
 
 *search* _text_ | *tag:*_name_
-	Search the registry (the _/search_ endpoint, else *c3c fetch-list*).
+	Search the registry (its _/search_ API, else its _index.json_).
 
 *info* _namespace/name_
-	Run *c3c fetch-info*.
+	Show the registry record of a library: its versions and their checksums, and
+	whether the latest one suits this C3 release and platform.
+
+*version*
+	Print the version.
 
 *migrate*
 	Convert a c3po _project.lock.json_ into _c3l.lock_. The same commits are locked
@@ -207,11 +210,10 @@ Options may appear before or after the command.
 
 *publish* needs a registry with an upload API. Registry types: _c3pkg_ (www.c3pkg.eu;
 detected by probing _/api/v1/packages_) and _static_ (read-only, anything else).
-A new type is one set of functions in the script.
 
 For c3pkg: create an API token under Settings, API tokens, and give it to c3l with
 *--token-file* _FILE_, *C3L_TOKEN* or *C3PKG_TOKEN*. It is sent as
-_Authorization: Bearer_ from a private temporary file, never on the command line.
+_Authorization: Bearer_ header and never appears on a command line.
 
 The package name is _provides_ in _manifest.json_ of the library directory (see
 *c3c init-lib*). The version is, in this order: *--version*, a semantic version tag on
@@ -287,7 +289,7 @@ _C3L_REGISTRY_
 	Default: https://www.c3pkg.eu
 
 _C3L_ALLOWED_HOSTS_
-	Space separated git hosts that dependencies may fetch from, in addition to
+	Comma or space separated git hosts that dependencies may fetch from, in addition to
 	github.com and codeberg.org.
 
 _C3L_MAX_DEPS_
@@ -300,13 +302,14 @@ _C3L_REGISTRY_TYPE_
 	Same as *--registry-type*.
 
 _C3C_
-	The c3c executable. It needs *fetch* support (0.8.6 or a nightly).
+	The c3c executable.
 
 _C3L_LOCK_
 	Lockfile name. Default: _c3l.lock_.
 
-_DEBUGC3L_
-	Trace all shell statements.
+_C3L_VENDOR_URL_, _C3L_VENDOR_API_
+	Where the vendor collection and its asset list are read from. Default: the
+	_latest_ release of _github.com/c3lang/vendor_.
 
 # SEE ALSO
 

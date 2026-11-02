@@ -66,10 +66,10 @@ fn int main(String[] args)
 		.flag({ .name = "output", .kind = STRING, .value_name = "FILE", .desc = "where to write the package" }));
 	app.add(publish_flags(serp::cmd("publish", "check, pack and upload to the registry", &publish_run))
 		.flag({ .name = "token-file", .kind = STRING, .value_name = "FILE", .desc = "API token (or $C3L_TOKEN, $C3PKG_TOKEN)" })
-		.flag({ .name = "license", .kind = STRING })
-		.flag({ .name = "tags", .kind = STRING, .desc = "comma separated" })
-		.flag({ .name = "docs-url", .kind = STRING })
-		.flag({ .name = "git-url", .kind = STRING }));
+		.flag({ .name = "license", .kind = STRING, .value_name = "ID", .desc = "SPDX license id" })
+		.flag({ .name = "tags", .kind = STRING, .value_name = "a,b", .desc = "comma separated tags" })
+		.flag({ .name = "docs-url", .kind = STRING, .value_name = "URL", .desc = "documentation URL" })
+		.flag({ .name = "git-url", .kind = STRING, .value_name = "URL", .desc = "repository URL" }));
 	app.add(serp::cmd("version", "print the version", &version_run).accepts(serp::no_args()));
 	return app.execute(args);
 }

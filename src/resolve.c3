@@ -142,14 +142,18 @@ fn String Op.path_to(&self, String name)
 
 <*
  A manifest from the internet can name any git URL: fetch only from trusted
- hosts (built-in, --allow-host, $C3L_ALLOWED_HOSTS, typed by the user), or ask.
+ hosts (built-in, --allow-host, $C3L_ALLOWED_HOSTS separated by commas or
+ spaces, typed by the user), or ask.
 *>
 fn void? Op.trust(&self, String url)
 {
 	String host = host_of(url);
 	if (!host.len) return log::fail("refusing to fetch %s: no host in the URL", url)~;
 	foreach (h : BUILTIN_HOSTS) if (h == host) return;
-	foreach (h : (env::tget_var("C3L_ALLOWED_HOSTS") ?? "").tsplit(",")) if (h.trim() == host) return;
+	foreach (list : (env::tget_var("C3L_ALLOWED_HOSTS") ?? "").tsplit(","))
+	{
+		foreach (h : list.tsplit(" ")) if (h == host) return;
+	}
 	if (self.hosts.contains(host)) return;
 	if (libc::isatty(0) && libc::isatty(2))
 	{

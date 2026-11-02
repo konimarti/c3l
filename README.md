@@ -28,12 +28,12 @@ sure it is the *same bytes* everywhere, and update on purpose.
 
 ```sh
 git clone https://github.com/konimarti/c3l && cd c3l
-make PREFIX=~/.local install        # or copy ./c3l into your PATH
+make PREFIX=~/.local install        # or copy build/c3l into your PATH
 ```
 
-c3l is one bash script (3.2+). It needs `c3c` (0.8.6+), `sha256sum` or
-`shasum`, and the usual POSIX tools. `git`, `unzip`, `zip` and `curl` are
-needed only by some commands; c3l tells you which one is missing.
+c3l is written in C3. Building needs `c3c` (0.8.6+) and libcurl; its own
+dependencies are vendored in `vendor/`. At run time it calls `c3c` (to read
+the project) and `git` (git libraries and publishing).
 
 ## Commands
 
@@ -71,7 +71,7 @@ Options (before or after the command):
 | `--strict` | with `add`/`update`: C3 release or platform mismatch, or a dependency cycle, is an error |
 | `--force` | with `remove`: remove even if needed |
 | `--allow-host HOST` | trust a git or registry host named by a dependency (`file` for local paths) |
-| `-h`, `-v` | help, version |
+| `-h`, `--version` | help, version |
 
 Publishing options are listed under [Publishing](#publishing).
 
@@ -143,10 +143,12 @@ c3l publish --description "My library" --license MIT --tags "gpu,vulkan"
 - **Token**: create it in the registry under Settings, API tokens. Never pass it as a command-line argument.
 - **Dependencies**: `c3l add` them inside the library directory. They go into `manifest.json` automatically. Local `./dir` dependencies are refused.
 
-Other options: `--license`, `--tags`, `--docs-url`, `--git-url`, `--c3-version`, `--output`, `--offline`, `--registry-type`.
+Other options, given after `check`, `pack` or `publish`: `--license`, `--tags`, `--docs-url`, `--git-url`, `--c3-version`, `--output`, `--offline`. Before or after the command: `--registry-type`.
 
 ## Tests
 
-`make test` runs an offline suite. `LIVE=1 make test` adds a smoke test against www.c3pkg.eu.
+`make test` builds c3l, runs the unit tests (`c3c test`), checks `vendor/`
+against `c3l.lock` and runs the offline suite `test/run.sh` against the binary.
+`LIVE=1 make test` adds a smoke test against www.c3pkg.eu.
 
 MIT. See LICENSE.
