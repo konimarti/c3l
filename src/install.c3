@@ -158,7 +158,7 @@ fn Installed? Op.install_registry(&self, Want w)
 	defer (void)file::delete(staged);
 	log::info("fetching %s@%s from %s", w.id, version, w.origin);
 	if (!registry::download(w.origin, w.id, version, staged)) return log::fail("download of %s@%s from %s failed", w.id, version, w.origin)~;
-	String got = self.verify(staged, expected, string::tformat("%s@%s", w.id, version))!;
+	String got = verify(staged, expected, string::tformat("%s@%s", w.id, version))!;
 	warn_provides(staged, name, w.id);
 	Installed i = self.place({ .name = name, .kind = REGISTRY, .origin = w.origin, .id = w.id, .version = version, .pin = got, .hash = got }, staged, w.pin.len > 0)!;
 	log::info("installed %s %s (%s)", name, version, got);
@@ -187,7 +187,7 @@ fn Installed? Op.install_vendor(&self, Want w)
 	defer (void)file::delete(staged);
 	log::info("fetching vendor:%s from %s", name, w.origin);
 	if (!http::download(string::tformat("%s/%s.c3l", w.origin, name), staged).ok()) return log::fail("download of vendor:%s failed", name)~;
-	String got = self.verify(staged, expected, string::tformat("vendor:%s", name))!;
+	String got = verify(staged, expected, string::tformat("vendor:%s", name))!;
 	warn_provides(staged, name, string::tformat("vendor:%s", name));
 	Installed i = self.place({ .name = name, .kind = VENDOR, .origin = w.origin, .id = name, .version = "latest", .pin = got, .hash = got }, staged, w.pin.len > 0)!;
 	log::info("installed %s (%s)", name, got);
@@ -251,7 +251,7 @@ fn void? Op.check_collision(&self, String name, Kind kind, String origin, String
 fn String Op.staging(&self, String name) => string::tformat("%s/.%s.c3l.part", self.dir, name);
 
 // "sha256:<hex>" of the file, which must be `expected` when that is known.
-fn String? Op.verify(&self, String file, String expected, String what)
+fn String? verify(String file, String expected, String what) @private
 {
 	String got = sys::sha256_file(file) ?? log::fail("cannot read %s", file)~!;
 	if (expected.len && got != expected) return log::fail("checksum mismatch for %s: expected %s, got %s", what, expected, got)~;

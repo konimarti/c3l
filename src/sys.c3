@@ -11,7 +11,6 @@ fn String c3c() => env::tget_var("C3C") ?? "c3c";
 enum Stderr
 {
 	DISCARD,
-	SHOW,
 	MERGE,  // into the captured output
 }
 
@@ -35,8 +34,6 @@ fn Output? run(String[] argv, Stderr err = DISCARD)
 		case DISCARD:
 			devnull = file::open("/dev/null", "w") ?? log::fail("cannot open /dev/null")~!;
 			stderr = process::bind(libc::fileno(devnull.file));
-		case SHOW:
-			break;
 		case MERGE:
 			options |= STDERR_TO_STDOUT;
 	}
