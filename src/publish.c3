@@ -54,9 +54,16 @@ fn Package check(String dir, Settings s)
 		return p;
 	}
 	Manifest? m = manifest::load_file(string::tformat("%s/manifest.json", dir));
-	if (catch m)
+	if (catch e = m)
 	{
-		p.error("no manifest.json in %s; publish a library directory (create one with 'c3c init-lib <name>')", dir);
+		if (e == manifest::NO_MANIFEST)
+		{
+			p.error("no manifest.json in %s; publish a library directory (create one with 'c3c init-lib <name>')", dir);
+		}
+		else
+		{
+			p.error("manifest.json in %s cannot be read as JSON (comments and trailing commas are fine)", dir);
+		}
 		return p;
 	}
 	p.name = m.provides;
@@ -192,11 +199,18 @@ fn void Package.check_clean(&self, bool allow_dirty)
 // Compile the staged package as a library, with the library's own dependencies.
 fn void Package.check_build(&self)
 {
-	String tmp = sys::temp_dir() ?? "";
-	if (!tmp.len) return;
+	String? tmp = sys::temp_dir();
+	if (catch tmp)
+	{
+		self.errors++;  // temp_dir said why
+		return;
+	}
 	defer sys::remove(tmp);
-	String staged = self.stage(tmp) ?? "";
-	if (!staged.len) return;
+	if (catch self.stage(tmp))
+	{
+		self.errors++;  // stage said why
+		return;
+	}
 	List{String} argv;
 	argv.tinit();
 	String empty = string::tformat("%s/cwd", tmp);
@@ -273,7 +287,8 @@ fn String? Package.stage(&self, String tmp)
 		file::save(dst, data) ?? log::fail("staging %s/%s failed", self.dir, f)~!;
 	}
 	String mfile = string::tformat("%s/manifest.json", to);
-	String text = jsonedit::set_string((String)file::load_temp(mfile)!, "version", self.version);
+	String text = (String)file::load_temp(mfile) ?? log::fail("manifest.json is not part of the package (is it ignored by git?)")~!;
+	text = jsonedit::set_string(text, "version", self.version);
 	String reqs = requires_json(self.dir);
 	if (reqs.len && !(manifest::parse(text) ?? (Manifest){}).has_vendor)
 	{
@@ -365,6 +380,7 @@ fn String requires_json(String dir)
 				reg = string::tformat(", \"registry\": \"%s\"", e.origin);
 			case GIT:
 				if (version == "HEAD") version = "";
+				if (version.starts_with("commit:")) version = e.pin;  // consumers need the full commit
 			case PATH:
 				break;
 		}

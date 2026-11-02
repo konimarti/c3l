@@ -201,5 +201,9 @@ fn bool compatible(String base, String id, String version)
 	return false;
 }
 
-// "0.7.1" -> "0.7"
-fn String minor(String v) @private => v[:v.rindex_of_char('.') ?? v.len];
+// "0.7.1" -> "0.7", "0.8" -> "0.8"
+fn String minor(String v) @private
+{
+	String[] parts = v.tsplit(".");
+	return parts.len < 2 ? v : string::tformat("%s.%s", parts[0], parts[1]);
+}
