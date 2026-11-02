@@ -60,12 +60,9 @@ fn void? Op.resolve(&self, String parent, Requirement r)
 		default:
 			return log::fail("%s requires '%s' from '%s', which is neither <namespace>/<name> nor a git URL", parent, r.name, r.source)~;
 	}
-	Intent saved = self.intent;
-	self.intent = DEP;
-	Installed? i = self.install(w);
-	self.intent = saved;
-	log::info("  %s installed for %s", i.entry.name!, parent);
-	self.follow(i.entry.name, i.manifest.requires)!;
+	Manifest m = self.install(w, DEP)!;
+	log::info("  %s installed for %s", m.provides, parent);
+	self.follow(m.provides, m.requires)!;
 }
 
 <*
@@ -97,11 +94,8 @@ fn void? Op.satisfy(&self, String parent, Entry e, Requirement r)
 	}
 	if (semver::compare(e.version, want) >= 0) return;
 	log::info("  %s %s -> %s (required by %s)", e.name, e.version, want, parent);
-	Intent saved = self.intent;
-	self.intent = KEEP;
-	Installed? i = self.install({ .kind = REGISTRY, .origin = e.origin, .id = e.id, .ref = want });
-	self.intent = saved;
-	self.follow(i.entry.name!, i.manifest.requires)!;
+	Manifest m = self.install({ .kind = REGISTRY, .origin = e.origin, .id = e.id, .ref = want }, KEEP)!;
+	self.follow(m.provides, m.requires)!;
 }
 
 fn bool Op.same_source(&self, Entry e, Requirement r)
@@ -154,14 +148,14 @@ fn void? Op.trust(&self, String url)
 	{
 		foreach (h : list.tsplit(" ")) if (h == host) return;
 	}
-	if (self.hosts.contains(host)) return;
+	if (self.opts.hosts.contains(host)) return;
 	if (libc::isatty(0) && libc::isatty(2))
 	{
 		io::eprintf("A dependency wants to fetch from '%s' (%s). Allow? [y/N] ", host, url);
 		String answer = io::treadline() ?? "";
 		if (answer.starts_with("y") || answer.starts_with("Y"))
 		{
-			self.hosts.push(host);
+			self.opts.hosts.push(host);
 			return;
 		}
 	}

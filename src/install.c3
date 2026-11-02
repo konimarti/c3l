@@ -3,9 +3,9 @@
  it pulls in is one operation (`Op`): on any failure the project file, the
  lockfile and the library files are restored.
 
-   Op op = install::begin(&project, opts)!;
+   Op op = install::begin(&project, &opts)!;
    defer catch op.rollback();
-   op.add(want)!;
+   op.add(want, DIRECT)!;
    op.commit();
 *>
 module c3l::install;
@@ -35,25 +35,19 @@ struct Want
 	String pin;
 }
 
+// For all operations of one command.
 struct Options
 {
 	bool strict;
-	String registry;  // the default registry (base URL)
-	String[] hosts;   // trusted hosts besides the built-in ones
-}
-
-struct Installed
-{
-	Entry entry;
-	Manifest manifest;
+	String registry;      // the default registry (base URL)
+	List{String} hosts;   // trusted hosts besides the built-in ones; grows when the user allows one
 }
 
 struct Op
 {
 	Project* proj;
-	Options opts;
+	Options* opts;
 	String dir;     // the library directory
-	Intent intent;
 	// journal
 	String project_text;
 	String lock_text;  // empty: there was no lockfile
@@ -61,7 +55,6 @@ struct Op
 	List{Touched} touched;
 	// resolver (resolve.c3)
 	List{String} stack;
-	List{String} hosts;
 	sz count;
 }
 
@@ -71,15 +64,13 @@ struct Touched
 	bool had_file;
 }
 
-fn Op? begin(Project* p, Options opts)
+fn Op? begin(Project* p, Options* opts)
 {
-	Op op = { .proj = p, .opts = opts, .intent = DIRECT };
+	Op op = { .proj = p, .opts = opts };
 	op.project_text = (String)file::load_temp(p.file) ?? log::fail("cannot read %s", p.file)~!;
 	op.lock_text = p.lock.exists() ? (String)file::load_temp(p.lock.file) ?? "" : "";
 	op.touched.tinit();
 	op.stack.tinit();
-	op.hosts.tinit();
-	op.hosts.push_all(opts.hosts);
 	op.dir = p.lib_dir(true)!;
 	op.backup = string::tformat("%s/.c3l-backup", op.dir);
 	return op;
@@ -106,35 +97,37 @@ fn void Op.rollback(&self)
 	{
 		String f = self.file_of(t.name);
 		sys::remove(f);
-		if (t.had_file) libc::rename(string::tformat("%s/%s.c3l", self.backup, t.name).zstr_tcopy(), f.zstr_tcopy());
+		if (t.had_file) libc::rename(project::lib_file(self.backup, t.name).zstr_tcopy(), f.zstr_tcopy());
 	}
 	self.commit();
+	self.proj.changed();
 	bool frozen = self.proj.lock.frozen;
 	self.proj.lock = lock::load(self.proj.lock.file) ?? self.proj.lock;
 	self.proj.lock.frozen = frozen;
 }
 
-fn String Op.file_of(&self, String name) => string::tformat("%s/%s.c3l", self.dir, name);
+fn String Op.file_of(&self, String name) => project::lib_file(self.dir, name);
 
 // Install one library and, unless it is a restore, what it requires.
-fn void? Op.add(&self, Want w)
+fn void? Op.add(&self, Want w, Intent intent)
 {
-	Installed i = self.install(w)!;
-	if (!w.pin.len) self.follow(i.entry.name, i.manifest.requires)!;
+	Manifest m = self.install(w, intent)!;
+	if (!w.pin.len) self.follow(m.provides, m.requires)!;
 }
 
-fn Installed? Op.install(&self, Want w)
+// Install one library; its manifest, with `provides` set to the name it was installed as.
+fn Manifest? Op.install(&self, Want w, Intent intent)
 {
 	switch (w.kind)
 	{
-		case REGISTRY: return self.install_registry(w);
-		case VENDOR: return self.install_vendor(w);
-		case GIT: return self.install_git(w);
-		case PATH: return self.install_path(w);
+		case REGISTRY: return self.install_registry(w, intent);
+		case VENDOR: return self.install_vendor(w, intent);
+		case GIT: return self.install_git(w, intent);
+		case PATH: return self.install_path(w, intent);
 	}
 }
 
-fn Installed? Op.install_registry(&self, Want w)
+fn Manifest? Op.install_registry(&self, Want w, Intent intent)
 {
 	String name = w.id[(w.id.rindex_of_char('/') ?? -1) + 1..];
 	self.check_collision(name, REGISTRY, w.origin, w.id)!;
@@ -160,12 +153,12 @@ fn Installed? Op.install_registry(&self, Want w)
 	if (!registry::download(w.origin, w.id, version, staged)) return log::fail("download of %s@%s from %s failed", w.id, version, w.origin)~;
 	String got = verify(staged, expected, string::tformat("%s@%s", w.id, version))!;
 	warn_provides(staged, name, w.id);
-	Installed i = self.place({ .name = name, .kind = REGISTRY, .origin = w.origin, .id = w.id, .version = version, .pin = got, .hash = got }, staged, w.pin.len > 0)!;
+	Manifest m = self.place({ .name = name, .kind = REGISTRY, .origin = w.origin, .id = w.id, .version = version, .pin = got, .hash = got }, staged, w.pin.len > 0 ? KEEP : intent)!;
 	log::info("installed %s %s (%s)", name, version, got);
-	return i;
+	return m;
 }
 
-fn Installed? Op.install_vendor(&self, Want w)
+fn Manifest? Op.install_vendor(&self, Want w, Intent intent)
 {
 	String name = w.id;
 	if (!lock::valid_name(name)) return log::fail("'%s' is not a vendor library name", name)~;
@@ -186,12 +179,12 @@ fn Installed? Op.install_vendor(&self, Want w)
 	String staged = self.staging(name);
 	defer (void)file::delete(staged);
 	log::info("fetching vendor:%s from %s", name, w.origin);
-	if (!http::download(string::tformat("%s/%s.c3l", w.origin, name), staged).ok()) return log::fail("download of vendor:%s failed", name)~;
+	if (!http::download(project::lib_file(w.origin, name), staged).ok()) return log::fail("download of vendor:%s failed", name)~;
 	String got = verify(staged, expected, string::tformat("vendor:%s", name))!;
 	warn_provides(staged, name, string::tformat("vendor:%s", name));
-	Installed i = self.place({ .name = name, .kind = VENDOR, .origin = w.origin, .id = name, .version = "latest", .pin = got, .hash = got }, staged, w.pin.len > 0)!;
+	Manifest m = self.place({ .name = name, .kind = VENDOR, .origin = w.origin, .id = name, .version = "latest", .pin = got, .hash = got }, staged, w.pin.len > 0 ? KEEP : intent)!;
 	log::info("installed %s (%s)", name, got);
-	return i;
+	return m;
 }
 
 <*
@@ -199,15 +192,14 @@ fn Installed? Op.install_vendor(&self, Want w)
  or a lock label (branch:NAME, commit:SHA12). pin: commit:<sha>.
  The lock label is the tag, HEAD, branch:NAME or commit:SHA12.
 *>
-fn Installed? Op.install_git(&self, Want w)
+fn Manifest? Op.install_git(&self, Want w, Intent intent)
 {
 	String url = w.origin;
 	Rev rev = resolve_rev(url, w.ref, w.pin)!;
 	String src = sys::temp_dir()!;
 	defer sys::remove(src);
 	git::checkout(url, rev.commit, rev.kind == TAG || rev.kind == BRANCH ? rev.name : "", src)!;
-	Manifest m = manifest::load(src) ?? log::fail("%s has no manifest.json at its root (not a C3 library)", url)~!;
-	String name = m.provides;
+	String name = (manifest::load(src) ?? log::fail("%s has no manifest.json at its root (not a C3 library)", url)~!).provides;
 	if (!name.len) return log::fail("manifest.json of %s has no 'provides'", url)~;
 	if (file::exists(string::tformat("%s/.gitmodules", src))) log::warn("%s uses submodules; they are not included in the library", url);
 	self.check_collision(name, GIT, url, "-")!;
@@ -216,25 +208,24 @@ fn Installed? Op.install_git(&self, Want w)
 	defer (void)file::delete(staged);
 	git::archive(src, staged)!;
 	String pin = string::tformat("commit:%s", rev.commit);
-	Installed i = self.place({ .name = name, .kind = GIT, .origin = url, .id = "-", .version = rev.label, .pin = pin, .hash = pin }, staged, w.pin.len > 0)!;
+	Manifest m = self.place({ .name = name, .kind = GIT, .origin = url, .id = "-", .version = rev.label, .pin = pin, .hash = pin }, staged, w.pin.len > 0 ? KEEP : intent)!;
 	log::info("installed %s %s (commit %s)", name, rev.label, rev.commit[:12]);
-	return i;
+	return m;
 }
 
 // A local directory, linked into the library directory so edits show up in the next build.
-fn Installed? Op.install_path(&self, Want w)
+fn Manifest? Op.install_path(&self, Want w, Intent intent)
 {
 	String src = w.origin;
-	Manifest m = manifest::load_file(string::tformat("%s/manifest.json", src)) ?? log::fail("%s has no manifest.json (not a C3 library)", src)~!;
+	String name = (manifest::load_file(string::tformat("%s/manifest.json", src)) ?? log::fail("%s has no manifest.json (not a C3 library)", src)~!).provides;
 	String abs = (String)src.to_absolute_path(tmem) ?? log::fail("cannot enter %s", src)~!;
-	String name = m.provides;
 	if (!name.len) return log::fail("manifest.json of %s has no 'provides'", src)~;
 	self.check_collision(name, PATH, src, "-")!;
 	self.set_aside(name);
 	sys::link(abs, self.file_of(name))!;
-	Installed i = self.place({ .name = name, .kind = PATH, .origin = src, .id = "-", .version = "-", .pin = "-", .hash = "-" }, "", w.pin.len > 0)!;
+	Manifest m = self.place({ .name = name, .kind = PATH, .origin = src, .id = "-", .version = "-", .pin = "-", .hash = "-" }, "", w.pin.len > 0 ? KEEP : intent)!;
 	log::info("linked %s -> %s", name, abs);
-	return i;
+	return m;
 }
 
 // Library names are global in a project: one name, one source.
@@ -273,7 +264,7 @@ fn void Op.set_aside(&self, String name)
 	if (had)
 	{
 		(void)path::mkdir(self.backup);
-		libc::rename(f.zstr_tcopy(), string::tformat("%s/%s.c3l", self.backup, name).zstr_tcopy());
+		libc::rename(f.zstr_tcopy(), project::lib_file(self.backup, name).zstr_tcopy());
 	}
 	self.touched.push({ name, had });
 }
@@ -283,7 +274,7 @@ fn void Op.set_aside(&self, String name)
  record it in the lock. A library's own manifest lists only its direct
  dependencies, so in a library directory a dependency is not registered.
 *>
-fn Installed? Op.place(&self, Entry e, String staged, bool restore)
+fn Manifest? Op.place(&self, Entry e, String staged, Intent intent)
 {
 	String f = self.file_of(e.name);
 	if (staged.len)
@@ -292,7 +283,8 @@ fn Installed? Op.place(&self, Entry e, String staged, bool restore)
 		if (libc::rename(staged.zstr_tcopy(), f.zstr_tcopy())) return log::fail("cannot write %s", f)~;
 	}
 	Manifest m = manifest::load(f) ?? (Manifest){};
-	e.role = self.role_of(e.name, restore ? KEEP : self.intent);
+	m.provides = e.name;
+	e.role = self.role_of(e.name, intent);
 	e.requires = m.require_names();
 	if (!(self.proj.libmode && e.role == DEP) && !self.proj.has_dep(e.name)!)
 	{
@@ -300,7 +292,7 @@ fn Installed? Op.place(&self, Entry e, String staged, bool restore)
 	}
 	self.proj.lock.put(e);
 	self.proj.lock.save()!;
-	return { e, m };
+	return m;
 }
 
 // A direct library stays direct; a new one is what was asked for.
@@ -329,9 +321,11 @@ struct Rev
 
 fn Rev? resolve_rev(String url, String ref, String pin) @private
 {
+	Ref[]? tags = NOT_FOUND~;  // fetched once, when needed
 	if (!ref.len && !pin.len)
 	{
-		ref = git::highest_tag(url)!;
+		tags = git::tags(url);
+		ref = git::highest(tags!);
 		if (!ref.len) ref = "HEAD";
 	}
 	Rev r = { .kind = TAG, .name = ref, .label = ref };
@@ -354,7 +348,8 @@ fn Rev? resolve_rev(String url, String ref, String pin) @private
 		case COMMIT:
 			break;
 		case TAG: // a plain name: a tag, else a branch, else a full commit
-			r.commit = git::tag_commit(url, ref)!;
+			if (catch tags) tags = git::tags(url);
+			r.commit = git::commit_of(tags!, ref);
 			if (r.commit.len) return r;
 			r = { .kind = BRANCH, .name = ref, .commit = git::branch_commit(url, ref)!, .label = string::tformat("branch:%s", ref) };
 			if (r.commit.len) return r;

@@ -6,13 +6,15 @@
 *>
 module c3l::project;
 
-import std::io, std::os, std::collections::list, c3l::log, c3l::sys, c3l::manifest, c3l::lock;
+import std::io, std::os, std::collections::list, c3l::log, c3l::sys, c3l::manifest, c3l::lock, c3l::jsonedit;
 
 struct Project
 {
 	String file;
 	bool libmode;
 	Lock lock;
+	String[] dep_names;  // deps(), read once, again after the file changed
+	bool deps_read;
 }
 
 // The project in the current directory and its lockfile ($C3L_LOCK, default c3l.lock).
@@ -54,10 +56,21 @@ fn String? Project.lib_dir(&self, bool create = false)
 // The names in the project's (or library manifest's) "dependencies".
 fn String[]? Project.deps(&self)
 {
-	if (!self.libmode) return view_list("dependencies");
-	Manifest m = manifest::load_file(self.file) ?? log::fail("cannot read %s", self.file)~!;
-	return m.dependencies;
+	if (self.deps_read) return self.dep_names;
+	if (self.libmode)
+	{
+		self.dep_names = (manifest::load_file(self.file) ?? log::fail("cannot read %s", self.file)~!).dependencies;
+	}
+	else
+	{
+		self.dep_names = view_list("dependencies")!;
+	}
+	self.deps_read = true;
+	return self.dep_names;
 }
+
+// The project file changed on disk: read the dependencies again when asked.
+fn void Project.changed(&self) => self.deps_read = false;
 
 fn bool? Project.has_dep(&self, String name)
 {
@@ -80,9 +93,14 @@ fn void? Project.set_dep(&self, String name, bool add)
 fn void? Project.edit(&self, String key, String name, bool add)
 {
 	String text = (String)file::load_temp(self.file) ?? log::fail("cannot read %s", self.file)~!;
-	String edited = edit_array(text, key, name, add);
-	if (edited != text) sys::write_atomic(self.file, edited)!;
+	String edited = jsonedit::edit_array(text, key, name, add);
+	if (edited == text) return;
+	sys::write_atomic(self.file, edited)!;
+	self.changed();
 }
+
+// The file of library `name` in the library directory `dir`.
+fn String lib_file(String dir, String name) => string::tformat("%s/%s.c3l", dir, name);
 
 // One comma separated "c3l library <what>:" line of `c3c project view`.
 fn String[]? view_list(String what) @private

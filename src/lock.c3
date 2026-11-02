@@ -95,9 +95,11 @@ fn bool Lock.exists(&self) => file::exists(self.file);
 fn void? Lock.save(&self)
 {
 	if (self.frozen) return;
-	sort::quicksort(&self.entries, fn int(Entry a, Entry b) => a.name.compare_to(b.name));
+	List{Entry} sorted;  // a copy: pointers from get() stay valid
+	sorted.tinit_with_array(self.entries.array_view());
+	sort::quicksort(&sorted, fn int(Entry a, Entry b) => a.name.compare_to(b.name));
 	DString out = dstring::temp(HEADER);
-	foreach (e : self.entries)
+	foreach (e : sorted)
 	{
 		String reqs = e.requires.len ? string::join(tmem, e.requires, ",") : "-";
 		out.appendf("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.name, e.kind.name, e.origin, e.id,

@@ -5,7 +5,7 @@
 module c3l::publish;
 
 import std::io, std::os, std::sort, std::collections::list, std::collections::object, std::encoding::json;
-import c3l::log, c3l::sys, c3l::lock, c3l::semver, c3l::manifest, c3l::project, c3l::http, c3l::registry;
+import c3l::log, c3l::sys, c3l::lock, c3l::semver, c3l::manifest, c3l::jsonedit, c3l::http, c3l::registry, c3l::git;
 
 // From the command line.
 struct Settings
@@ -104,9 +104,9 @@ fn bool Package.resolve_version(&self, String option, String in_manifest)
 	if (!file::exists(pfile)) pfile = string::tformat("%s/project.json5", self.dir);
 	String in_project = (manifest::load_file(pfile) ?? (Manifest){}).version;
 	String tag, tagged;
-	if (is_git(self.dir))
+	if (git::is_repo(self.dir))
 	{
-		foreach (t : git_lines(self.dir, { "tag", "--points-at", "HEAD" }))
+		foreach (t : git::lines(self.dir, { "tag", "--points-at", "HEAD" }))
 		{
 			String v = t.strip_prefix("v");
 			if (!semver::strict(v) || (tagged.len && semver::compare(v, tagged) <= 0)) continue;
@@ -151,6 +151,12 @@ fn void Package.check_dependencies(&self, Manifest m)
 	{
 		log::warn("manifest.json already has a \"vendor\" block, so c3l cannot add vendor.c3l.requires; add it by hand: \"requires\": %s", reqs);
 	}
+	Lock? l = lock::load(string::tformat("%s/c3l.lock", self.dir));
+	if (catch l)
+	{
+		self.errors++;  // load said why
+		return;
+	}
 	foreach (r : m.requires)
 	{
 		if (r.name == self.name)
@@ -158,10 +164,10 @@ fn void Package.check_dependencies(&self, Manifest m)
 			log::warn("%s lists itself as a dependency", self.name);
 			continue;
 		}
-		if (r.source.len || reqs.contains(string::tformat("\"name\": \"%s\"", r.name))) continue;
+		if (r.source.len) continue;
+		if (try e = l.get(r.name) && e.role == Role.DIRECT && e.kind != Kind.PATH) continue;
 		log::warn("'%s' is in the manifest's dependencies but nothing says where to get it; run 'c3l add' for it in this library so consumers can install it automatically", r.name);
 	}
-	Lock l = lock::load(string::tformat("%s/c3l.lock", self.dir)) ?? (Lock){};
 	foreach (e : l.entries)
 	{
 		if (e.role != DIRECT || e.kind != PATH) continue;
@@ -171,9 +177,9 @@ fn void Package.check_dependencies(&self, Manifest m)
 
 fn void Package.check_clean(&self, bool allow_dirty)
 {
-	if (!is_git(self.dir)) return;
-	bool dirty = git_lines(self.dir, { "status", "--porcelain", "--untracked-files=no", "--", "." }).len > 0
-		|| packed(git_lines(self.dir, { "ls-files", "-o", "--exclude-standard" })).len > 0;
+	if (!git::is_repo(self.dir)) return;
+	bool dirty = git::lines(self.dir, { "status", "--porcelain", "--untracked-files=no", "--", "." }).len > 0
+		|| packed(git::lines(self.dir, { "ls-files", "-o", "--exclude-standard" })).len > 0;
 	if (!dirty) return;
 	if (allow_dirty)
 	{
@@ -267,11 +273,11 @@ fn String? Package.stage(&self, String tmp)
 		file::save(dst, data) ?? log::fail("staging %s/%s failed", self.dir, f)~!;
 	}
 	String mfile = string::tformat("%s/manifest.json", to);
-	String text = project::set_string((String)file::load_temp(mfile)!, "version", self.version);
+	String text = jsonedit::set_string((String)file::load_temp(mfile)!, "version", self.version);
 	String reqs = requires_json(self.dir);
 	if (reqs.len && !(manifest::parse(text) ?? (Manifest){}).has_vendor)
 	{
-		text = project::insert_first(text, string::tformat("\"vendor\" : { \"c3l\" : { \"requires\" : %s } }", reqs));
+		text = jsonedit::insert_first(text, string::tformat("\"vendor\" : { \"c3l\" : { \"requires\" : %s } }", reqs));
 	}
 	file::save(mfile, text) ?? log::fail("cannot write %s", mfile)~!;
 	return to;
@@ -295,9 +301,9 @@ fn String? Package.pack(&self, String out)
 fn String[] Package.files(&self)
 {
 	String[] all;
-	if (is_git(self.dir))
+	if (git::is_repo(self.dir))
 	{
-		all = git_lines(self.dir, { "-c", "core.quotepath=off", "ls-files", "-co", "--exclude-standard" });
+		all = git::lines(self.dir, { "-c", "core.quotepath=off", "ls-files", "-co", "--exclude-standard" });
 	}
 	else
 	{
@@ -431,20 +437,4 @@ fn String? token(String file) @private
 	foreach (c : t) if (!c.is_space()) out.append_char(c);
 	if (!out.len()) return log::fail("no API token. Create one in the registry settings and pass it with --token-file FILE, $C3L_TOKEN or $C3PKG_TOKEN")~;
 	return out.str_view();
-}
-
-fn bool is_git(String dir) @private
-{
-	return (sys::run({ "git", "-C", dir, "rev-parse", "--is-inside-work-tree" }) ?? (Output){ .code = 1 }).code == 0;
-}
-
-// The non-empty output lines of `git -C dir args...`.
-fn String[] git_lines(String dir, String[] args) @private
-{
-	List{String} argv;
-	argv.tinit();
-	argv.push_all({ "git", "-C", dir });
-	argv.push_all(args);
-	Output o = sys::run(argv.array_view()) ?? (Output){};
-	return o.code ? {} : o.out.tsplit("\n", skip_empty: true);
 }

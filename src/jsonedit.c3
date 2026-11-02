@@ -3,7 +3,7 @@
  touching anything else: comments, layout and the other keys stay as they are,
  only the one value is rewritten.
 *>
-module c3l::project;
+module c3l::jsonedit;
 
 import std::collections::list;
 

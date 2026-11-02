@@ -3,7 +3,7 @@
 *>
 module c3l::install;
 
-import std::io, std::compression::zip, c3l::lock, c3l::sys, c3l::semver;
+import std::io, std::compression::zip, c3l::lock, c3l::sys, c3l::semver, c3l::project;
 import c3l::registry, c3l::vendor, c3l::git;
 
 enum Status : char (String name)
@@ -20,7 +20,7 @@ enum Status : char (String name)
 *>
 fn Status status(Entry* e, String dir)
 {
-	String f = string::tformat("%s/%s.c3l", dir, e.name);
+	String f = project::lib_file(dir, e.name);
 	bool link = path::is_link((Path)f);
 	if (e.kind == PATH)
 	{
@@ -65,7 +65,7 @@ fn String? newer(Entry* e)
 				case e.version == "HEAD": tip = git::head(e.origin)!;
 				case e.version.starts_with("branch:"): tip = git::branch_commit(e.origin, e.version["branch:".len..])!;
 				case e.version.starts_with("commit:"): return "";
-				default: latest = git::highest_tag(e.origin)!;
+				default: latest = git::highest(git::tags(e.origin)!);
 			}
 			if (!latest.len && !tip.len) return UNKNOWN~;
 			if (tip.len) return string::tformat("commit:%s", tip) == e.pin ? "" : string::tformat("HEAD@%s", tip[:12]);

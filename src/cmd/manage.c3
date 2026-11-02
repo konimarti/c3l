@@ -35,7 +35,7 @@ fn void? add_run(Ctx* ctx)
 			w = { .kind = PATH, .origin = arg };
 		case install::is_git_url(url):
 			if (ref.len && ctx.arg(1).len) return log::fail("give the version either as <url>@<ref> or as a separate argument, not both")~;
-			opts.hosts = with(opts.hosts, install::host_of(url));
+			opts.hosts.push(install::host_of(url));
 			w = { .kind = GIT, .origin = url, .ref = ref.len ? ref : ctx.arg(1) };
 		case registry::is_id(arg[:arg.index_of_char('@') ?? arg.len]):
 			sz at = arg.index_of_char('@') ?? arg.len;
@@ -43,9 +43,9 @@ fn void? add_run(Ctx* ctx)
 		default:
 			return log::fail("'%s' is neither <namespace>/<name>[@version], vendor:<name> nor a git URL", arg)~;
 	}
-	Op op = install::begin(&p, opts)!;
+	Op op = install::begin(&p, &opts)!;
 	defer catch op.rollback();
-	op.add(w)!;
+	op.add(w, DIRECT)!;
 	op.commit();
 }
 
@@ -53,7 +53,7 @@ fn void? remove_run(Ctx* ctx)
 {
 	Project p = project::find()!;
 	String name = ctx.arg(0).strip_suffix(".c3l");
-	String f = string::tformat("%s/%s.c3l", p.lib_dir()!, name);
+	String f = project::lib_file(p.lib_dir()!, name);
 	bool locked = p.lock.has(name);
 	if (!locked && !p.has_dep(name)! && !sys::exists(f)) return log::fail("'%s' is not installed", name)~;
 	if (!locked) log::warn("%s is not tracked in %s", name, p.lock.file);
@@ -89,7 +89,8 @@ fn void? prune_run(Ctx* ctx)
 		foreach (name : orphans) io::printfn("%s: not needed (dry run)", name);
 		return;
 	}
-	Op op = install::begin(&p, options(ctx))!;
+	Options opts = options(ctx);
+	Op op = install::begin(&p, &opts)!;
 	defer catch op.rollback();
 	foreach (name : orphans)
 	{
@@ -126,7 +127,7 @@ fn void? update_run(Ctx* ctx)
 		}
 		Entry e = *found;
 		if (e.kind == PATH) continue;  // a linked directory is always current
-		if (e.kind == GIT) opts.hosts = with(opts.hosts, install::host_of(e.origin));
+		if (e.kind == GIT) opts.hosts.push(install::host_of(e.origin));
 		if (!want.len)
 		{
 			String? newer = install::newer(&e);
@@ -151,7 +152,7 @@ fn void? update_run(Ctx* ctx)
 			n++;
 			continue;
 		}
-		if (!apply(&p, opts, { .kind = e.kind, .origin = e.origin, .id = e.id, .ref = want }, ctx.flag_bool("fail-fast"))!)
+		if (!apply(&p, &opts, { .kind = e.kind, .origin = e.origin, .id = e.id, .ref = want }, ctx.flag_bool("fail-fast"))!)
 		{
 			failed.push(name);
 			continue;
@@ -188,6 +189,7 @@ fn void? sync_run(Ctx* ctx)
 		if (drift) return log::fail("project and lockfile disagree (--frozen)")~;
 		p.lock.frozen = true;
 	}
+	Options opts = options(ctx);
 	List{Entry} entries;
 	entries.tinit_with_array(p.lock.entries.array_view());
 	List{String} failed;
@@ -213,7 +215,7 @@ fn void? sync_run(Ctx* ctx)
 			continue;
 		}
 		Want w = { .kind = e.kind, .origin = e.origin, .id = e.id, .ref = e.version, .pin = e.pin };
-		if (!apply(&p, options(ctx), w, ctx.flag_bool("fail-fast"))!) failed.push(e.name);
+		if (!apply(&p, &opts, w, ctx.flag_bool("fail-fast"))!) failed.push(e.name);
 	}
 	if (failed.len())
 	{
@@ -259,7 +261,7 @@ fn void? migrate_run(Ctx* ctx)
 				continue;
 		}
 		if (!label.len) label = "HEAD";
-		String f = string::tformat("%s/%s.c3l", dir, name);
+		String f = project::lib_file(dir, name);
 		if (!sys::exists(f)) f = string::tformat("%s/%s", dir, repo[(repo.rindex_of_char('/') ?? -1) + 1..]);
 		String pin = string::tformat("commit:%s", commit);
 		p.lock.put({
@@ -278,11 +280,10 @@ fn void? migrate_run(Ctx* ctx)
  restoring keeps its role. Unless `fail_fast`, a failure is rolled back and
  reported as false so the caller can go on with the next one.
 *>
-fn bool? apply(Project* p, Options opts, Want w, bool fail_fast)
+fn bool? apply(Project* p, Options* opts, Want w, bool fail_fast)
 {
 	Op op = install::begin(p, opts)!;
-	op.intent = KEEP;
-	if (catch e = op.add(w))
+	if (catch e = op.add(w, KEEP))
 	{
 		op.rollback();
 		if (fail_fast) return e~;
@@ -294,7 +295,9 @@ fn bool? apply(Project* p, Options opts, Want w, bool fail_fast)
 
 fn Options options(Ctx* ctx)
 {
-	return { .strict = ctx.flag_bool("strict"), .registry = registry_url(ctx), .hosts = ctx.flag_strings("allow-host") };
+	Options opts = { .strict = ctx.flag_bool("strict"), .registry = registry_url(ctx) };
+	opts.hosts.tinit_with_array(ctx.flag_strings("allow-host"));
+	return opts;
 }
 
 // Is `e` listed in the project's dependencies? A library's manifest lists only its direct ones.

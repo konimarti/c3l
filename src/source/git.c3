@@ -22,7 +22,7 @@ fn Ref[]? tags(String url)
 		String name = r.name.strip_prefix("refs/tags/");
 		bool peeled = name.ends_with("^{}");
 		name = name.strip_suffix("^{}");
-		Ref*? have = find(out, name);
+		Ref*? have = find(&out, name);
 		if (try have)
 		{
 			if (peeled) have.commit = r.commit;
@@ -34,10 +34,10 @@ fn Ref[]? tags(String url)
 }
 
 // The highest semver tag, empty if there is none.
-fn String? highest_tag(String url)
+fn String highest(Ref[] tags)
 {
 	String best;
-	foreach (t : tags(url)!)
+	foreach (t : tags)
 	{
 		if (!semver::valid(t.name)) continue;
 		if (!best.len || semver::compare(t.name, best) > 0) best = t.name;
@@ -45,10 +45,10 @@ fn String? highest_tag(String url)
 	return best;
 }
 
-// The commit of a tag, empty if there is no such tag.
-fn String? tag_commit(String url, String tag)
+// The commit of tag `name`, empty if there is no such tag.
+fn String commit_of(Ref[] tags, String name)
 {
-	foreach (t : tags(url)!) if (t.name == tag) return t.commit;
+	foreach (t : tags) if (t.name == name) return t.commit;
 	return "";
 }
 
@@ -97,14 +97,25 @@ fn void? archive(String dir, String out)
 	}
 }
 
+fn bool is_repo(String dir) => run(dir, { "rev-parse", "--is-inside-work-tree" });
+
+// The non-empty output lines of `git -C dir args...`; none if it fails.
+fn String[] lines(String dir, String[] args)
+{
+	Output o = git(dir, args);
+	return o.code ? {} : o.out.tsplit("\n", skip_empty: true);
+}
+
 // git -C dir args..., true when it exits with 0
-fn bool run(String dir, String[] args) @private
+fn bool run(String dir, String[] args) @private => git(dir, args).code == 0;
+
+fn Output git(String dir, String[] args) @private
 {
 	List{String} argv;
 	argv.tinit();
 	argv.push_all({ "git", "-C", dir });
 	argv.push_all(args);
-	return (sys::run(argv.array_view()) ?? (Output){ .code = 1 }).code == 0;
+	return sys::run(argv.array_view()) ?? (Output){ .code = 1 };
 }
 
 fn bool is_commit(String s)
@@ -134,7 +145,7 @@ fn Ref[]? ls_remote(String[] args) @private
 
 fn String first(Ref[] refs) @private => refs.len ? refs[0].commit : "";
 
-fn Ref*? find(List{Ref} refs, String name) @private
+fn Ref*? find(List{Ref}* refs, String name) @private
 {
 	foreach (&r : refs) if (r.name == name) return r;
 	return NOT_FOUND~;
