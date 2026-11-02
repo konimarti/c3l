@@ -14,7 +14,6 @@ VERSION="1.1.0"
 PROGRAM="${0##*/}"
 C3C="${C3C:-c3c}"
 LOCK="${C3L_LOCK:-c3l.lock}"
-OLDRECORDS=".c3l.deps"
 DEFAULT_REGISTRY="https://www.c3pkg.eu"
 TAB=$'\t'
 
@@ -27,7 +26,7 @@ TMPROOT=""
 TXN=""
 TXN_NAME=""
 TXN_DIR=""
-INSTALL_ROLE=direct; FORCE=0; TREE=0; FAILFAST=0; EMIT_C3PO=0; LIBMODE=0; OP_PID=""
+INSTALL_ROLE=direct; FORCE=0; TREE=0; FAILFAST=0; LIBMODE=0; OP_PID=""
 LAST_NAME=""; LAST_REQS=""; REQ_NAMES="-"
 STACK=(); DEP_COUNT=0; DEP_MAX="${C3L_MAX_DEPS:-200}"
 STRICT=0; ALLOW_DIRTY=0; NO_BUILD=0; OFFLINE=0
@@ -59,13 +58,8 @@ sha256_file() {
 	else die "neither sha256sum nor shasum found"; fi
 }
 
-# Read one member of a zip to stdout (unzip, else python3).
-zip_read() {
-	if command -v unzip >/dev/null 2>&1; then unzip -p "$1" "$2" 2>/dev/null
-	elif command -v python3 >/dev/null 2>&1; then
-		python3 -c 'import sys,zipfile; sys.stdout.write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]).decode())' "$1" "$2" 2>/dev/null
-	else return 1; fi
-}
+# Read one member of a zip to stdout.
+zip_read() { need unzip; unzip -p "$1" "$2" 2>/dev/null; }
 
 json_string_field() { # key  (reads JSON on stdin, first match)
 	sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n 1
@@ -341,15 +335,6 @@ fetch_into() { # dir c3c-args...
 	else "$C3C" --fetch-url "$reg" "$@"; fi
 }
 
-# github:owner/repo, codeberg:owner/repo, gitlab:owner/repo -> the https URL
-expand_source() {
-	case "$1" in
-		github:*) printf 'https://github.com/%s' "${1#github:}" ;;
-		codeberg:*) printf 'https://codeberg.org/%s' "${1#codeberg:}" ;;
-		gitlab:*) printf 'https://gitlab.com/%s' "${1#gitlab:}" ;;
-		*) printf '%s' "$1" ;;
-	esac
-}
 # an explicit local directory (./x, ../x, /x) that is a C3 library: linked, not copied
 is_path_dep() { [[ "$1" == ./* || "$1" == ../* || "$1" == /* || "$1" == . || "$1" == .. ]] && [[ -d "$1" && -f "$1/manifest.json" ]]; }
 is_registry_id() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; }
@@ -369,7 +354,6 @@ registry_info() { # id -> text on stdout
 # Transactions: every install can be rolled back (project file, lockfile, libraries)
 #
 txn_begin() { op_begin; op_backup "$1"; TXN_DIR="$OP_LIBDIR"; }
-txn_rollback() { op_rollback; }
 txn_fail() { op_rollback; die "$@ (rolled back)"; }
 
 #
@@ -531,7 +515,7 @@ op_begin() {
 op_backup() { # name: remember the library file before it is replaced
 	local n="$1" x
 	for x in ${OP_SAVED[@]+"${OP_SAVED[@]}"} ${OP_NEW[@]+"${OP_NEW[@]}"}; do [[ "$x" == "$n" ]] && return 0; done
-	if [[ -e "$OP_LIBDIR/$n.c3l" ]]; then cp -a "$OP_LIBDIR/$n.c3l" "$OP_DIR/lib/$n.c3l"; OP_SAVED+=("$n"); else OP_NEW+=("$n"); fi
+	if [[ -e "$OP_LIBDIR/$n.c3l" ]]; then cp -pPR "$OP_LIBDIR/$n.c3l" "$OP_DIR/lib/$n.c3l"; OP_SAVED+=("$n"); else OP_NEW+=("$n"); fi
 	return 0
 }
 op_commit() { OP_ON=0; }
@@ -542,7 +526,7 @@ op_rollback() {
 	cp -p "$OP_DIR/project" "$PROJECT"
 	if [[ -f "$OP_DIR/lock" ]]; then cp -p "$OP_DIR/lock" "$LOCK"; else rm -f "$LOCK"; fi
 	for n in ${OP_NEW[@]+"${OP_NEW[@]}"} ${OP_SAVED[@]+"${OP_SAVED[@]}"}; do rm -rf "${OP_LIBDIR:?}/$n.c3l"; done
-	for n in ${OP_SAVED[@]+"${OP_SAVED[@]}"}; do cp -a "$OP_DIR/lib/$n.c3l" "$OP_LIBDIR/$n.c3l"; done
+	for n in ${OP_SAVED[@]+"${OP_SAVED[@]}"}; do cp -pPR "$OP_DIR/lib/$n.c3l" "$OP_LIBDIR/$n.c3l"; done
 	return 0
 }
 
@@ -705,7 +689,7 @@ cycle_warn() {
 	warn "dependency cycle: $1 (each library is installed once)"
 }
 git_ref_of() { local v="$1"; v="${v#>=}"; v="${v#^}"; v="${v#\~}"; printf '%s' "$v"; }
-norm_ver() { local v="$1"; v="${v#>=}"; v="${v#^}"; v="${v#\~}"; v="${v#v}"; printf '%s' "$v"; }
+norm_ver() { local v; v="$(git_ref_of "$1")"; printf '%s' "${v#v}"; }
 same_source() { local a="${1%/}" b="${2%/}"; a="${a%.git}"; b="${b%.git}"; [[ "$a" == "$b" ]]; }
 
 follow_deps() { # name requirement-records
@@ -747,7 +731,6 @@ satisfy_existing() { # parent name source version lock-record
 
 resolve_req() { # parent name source version
 	local parent="$1" name="$2" src="$3" ver="$4" rec saved nm rq
-	src="$(expand_source "$src")"
 	if [[ "$name" == "$parent" ]]; then
 		(( STRICT )) && die "$parent lists itself as a dependency (--strict)"
 		warn "$parent lists itself as a dependency; ignored"; return 0
@@ -891,7 +874,7 @@ be_c3pkg_versions() { # name
 	local body="$TMPROOT/versions.json" code
 	code="$(curl -sS -m 30 -o "$body" -w '%{http_code}' "$(registry)/api/v1/packages/$1/versions" 2>/dev/null)" || return 1
 	case "$code" in
-		200) grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$body" | sed 's/.*:[[:space:]]*"\(.*\)"/\1/'; return 0 ;;
+		200) tr ',{' '\n\n' < "$body" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'; return 0 ;;
 		404) return 2 ;;
 		*) return 1 ;;
 	esac
@@ -931,7 +914,7 @@ be_c3pkg_publish() { # name version file c3_version
 	[[ -n "$GIT_OPT" ]] && a+=(--form-string "git_url=$GIT_OPT")
 	code="$(curl "${a[@]}" "$(registry)/api/v1/packages/$name/versions/$ver")" || die "upload failed: cannot reach $(registry)"
 	if [[ "$code" == 201 ]]; then return 0; fi
-	msg="$(json_string_field error < "$body")"; [[ -n "$msg" ]] || msg="$(head -c 300 "$body")"
+	msg="$(json_string_field error < "$body")"; [[ -n "$msg" ]] || msg="$(dd bs=300 count=1 < "$body" 2>/dev/null)"
 	case "$code" in
 		401|403) die "registry rejected the token (HTTP $code): ${msg:-not authorized}" ;;
 		429) wait="$(awk -F': *' 'tolower($1)=="retry-after"{gsub(/\r/,"",$2); print $2}' "$heads")"
@@ -972,9 +955,9 @@ compat_check() {
 		COMPAT_WARNED=1
 	fi
 	host="$(host_target)"
-	targets="$(grep -o '"targets"[[:space:]]*:[[:space:]]*\[[^]]*\]' <<< "$json")"
+	targets="$(sed -n 's/.*\("targets"[[:space:]]*:[[:space:]]*\[[^]]*\]\).*/\1/p' <<< "$json")"
 	if [[ -n "$host" && "$targets" == *'"'* && "$targets" != *"\"$host\""* ]]; then
-		warn "$1@$2 does not list this platform ($host); it supports: $(grep -o '"[a-z0-9-]*"' <<< "${targets#*:}" | tr -d '"' | paste -sd, -)"
+		warn "$1@$2 does not list this platform ($host); it supports: $(tr ',' '\n' <<< "${targets#*:}" | sed -n 's/.*"\([a-z0-9-]*\)".*/\1/p' | paste -s -d, -)"
 		COMPAT_WARNED=1
 	fi
 	return 0
@@ -1073,26 +1056,11 @@ pub_requires_json() { # dir
 
 # Add "vendor": {"c3l": {"requires": ...}} right after the opening brace (commas stay valid).
 # Does nothing if the author already wrote requires or has another vendor block.
-set_manifest_requires() { # file c3l-requires-json [c3po-sources-json]
+set_manifest_requires() { # file c3l-requires-json
 	local flat vb; flat="$(json_flatten < "$1")"
 	grep -q '^vendor\.' <<< "$flat" && return 0
 	vb="\"c3l\" : { \"requires\" : $2 }"
-	[[ -z "$3" ]] || vb="$vb, \"c3po\" : { \"c3po-version\" : 1, \"sources\" : $3 }"
 	awk -v r="$vb" 'BEGIN { gsub(/&/, "\\&", r) } !d && /\{/ { sub(/\{/, "{\n  \"vendor\" : { " r " },"); d=1 } { print }' "$1" > "$1.new" && mv "$1.new" "$1"
-}
-
-# vendor.c3po.sources for c3po users: the direct git dependencies on hosts c3po fetches from
-pub_c3po_json() { # dir
-	local lock="$1/c3l.lock" out="" name kind source role h
-	[[ -f "$lock" ]] || return 0
-	while IFS=$'\t' read -r name kind source _ _ _ role _; do
-		[[ "$role" == direct && "$kind" == git ]] || continue
-		h="$(url_host "$source")"
-		[[ "$h" == github.com || "$h" == codeberg.org ]] || continue
-		out+="${out:+, }{ \"name\": \"$name\", \"source\": \"$source\" }"
-	done < <(LOCK="$lock" lock_entries)
-	[[ -n "$out" ]] && printf '[ %s ]' "$out"
-	return 0
 }
 
 pub_stage() { # copies the package to $TMPROOT/stage/<name>.c3l with the final manifest
@@ -1101,41 +1069,26 @@ pub_stage() { # copies the package to $TMPROOT/stage/<name>.c3l with the final m
 	rm -rf "$base"; mkdir -p "$base/$PUB_NAME.c3l"
 	pub_files "$PUB_DIR" > "$files"
 	[[ -s "$files" ]] || die "no files to pack in $PUB_DIR"
-	( cd "$PUB_DIR" && tar -cf - -T "$files" ) | tar -xf - -C "$base/$PUB_NAME.c3l" || die "staging $PUB_DIR failed"
+	local f d
+	while IFS= read -r f; do
+		d="${f%/*}"; [[ "$d" == "$f" ]] && d=.
+		mkdir -p "$base/$PUB_NAME.c3l/$d" && cp -p "$PUB_DIR/$f" "$base/$PUB_NAME.c3l/$f" || die "staging $PUB_DIR/$f failed"
+	done < "$files"
 	set_manifest_version "$base/$PUB_NAME.c3l/manifest.json" "$PUB_VERSION"
-	local reqs c3po=""; reqs="$(pub_requires_json "$PUB_DIR")"
-	(( EMIT_C3PO )) && c3po="$(pub_c3po_json "$PUB_DIR")"
-	[[ -z "$reqs" ]] || set_manifest_requires "$base/$PUB_NAME.c3l/manifest.json" "$reqs" "$c3po"
+	local reqs; reqs="$(pub_requires_json "$PUB_DIR")"
+	[[ -z "$reqs" ]] || set_manifest_requires "$base/$PUB_NAME.c3l/manifest.json" "$reqs"
 	find "$base/$PUB_NAME.c3l" -type f ! -perm -u+x -exec chmod 644 {} + 2>/dev/null
 	find "$base/$PUB_NAME.c3l" -type f -perm -u+x -exec chmod 755 {} + 2>/dev/null
 	PUB_STAGE="$base/$PUB_NAME.c3l"
 }
 
 # Deterministic zip: sorted names, fixed timestamps, so the same tree gives the same bytes.
-# Uses zip(1); python3 is only a fallback when zip is missing.
 pub_zip() { # stagedir outfile
+	need zip
 	local out; out="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 	rm -f "$out"
-	if command -v zip >/dev/null 2>&1; then
-		( cd "$1" && find . -type f -exec touch -t 198001010000 {} + &&
-			find . -type f | sed 's|^\./||' | LC_ALL=C sort | zip -X -q "$out" -@ ) || die "creating $out failed"
-	elif command -v python3 >/dev/null 2>&1; then
-		python3 -I - "$1" "$out" <<'PY' || die "creating $out failed"
-import os, sys, zipfile
-src, out = sys.argv[1:3]
-names = sorted(os.path.relpath(os.path.join(r, f), src) for r, _, fs in os.walk(src) for f in fs)
-with zipfile.ZipFile(out, "w") as z:
-    for n in names:
-        p = os.path.join(src, n)
-        zi = zipfile.ZipInfo(n.replace(os.sep, "/"), (1980, 1, 1, 0, 0, 0))
-        zi.compress_type = zipfile.ZIP_DEFLATED
-        zi.external_attr = (0o755 if os.access(p, os.X_OK) else 0o644) << 16
-        with open(p, "rb") as fh:
-            z.writestr(zi, fh.read())
-PY
-	else
-		die "zip is required to create the package (python3 also works)"
-	fi
+	( cd "$1" && find . -type f -exec touch -t 198001010000 {} + &&
+		find . -type f | sed 's|^\./||' | LC_ALL=C sort | zip -X -q "$out" -@ ) || die "creating $out failed"
 }
 
 # pub_check <dir>: everything that can be verified before upload. Sets PUB_*, counts ERRS.
@@ -1186,8 +1139,6 @@ pub_check() {
 			[[ -n "$dn" ]] || continue
 			if [[ "$ds" == path ]]; then
 				perr "dependency '$dn' is a local directory, which consumers cannot fetch; add it from a registry or a git URL before publishing"
-			elif (( EMIT_C3PO )) && [[ "$ds" == registry || "$(url_host "$ds")" != github.com && "$(url_host "$ds")" != codeberg.org ]]; then
-				warn "--emit-c3po: '$dn' cannot be expressed for c3po (a registry library, or a host c3po does not know); c3po users must add it themselves"
 			fi
 		done < <(LOCK="$dir/c3l.lock" lock_entries | awk -F'\t' '$7 == "direct" { print $1 "\t" ($2 == "git" ? $3 : $2) }')
 	fi
@@ -1258,7 +1209,6 @@ cmd_usage() {
 	  init [name]               create a lockfile (and a project with 'c3c init name')
 	  add <ns/name[@ver]>       install from the registry, verify, lock       (alias: fetch, f)
 	  add <git-url>[@ref] [ref] install from git; ref = tag, branch, HEAD or commit
-	  add github:o/r | codeberg:o/r | gitlab:o/r   git shorthand (also with @ref)
 	  add ./dir                 link a local library directory (edits show up at once)
 	  remove <name>             remove library, project entry and lock line   (alias: rm)
 	  list                      show locked libraries and their state         (alias: ls)
@@ -1268,7 +1218,7 @@ cmd_usage() {
 	  sync [--frozen]           restore exactly what c3l.lock says            (alias: pull, p)
 	  search <text|tag:x>       search the registry
 	  info <ns/name>            show registry record (c3c fetch-info)
-	  migrate                   convert .c3l.deps (c3l 0.x) or project.lock.json (c3po) to c3l.lock
+	  migrate                   convert a c3po project.lock.json to c3l.lock
 	  prune                     remove dependency libraries nothing needs any more
 	  why <name>                show which libraries require <name>
 	  list --tree               the dependency graph
@@ -1295,12 +1245,11 @@ cmd_init() {
 }
 
 cmd_add() {
-	(( $# >= 1 )) || die "Usage: $PROGRAM add <ns/name[@version]> | <git-url|github:o/r|codeberg:o/r>[@tag|branch|HEAD|commit] | <./dir>"
+	(( $# >= 1 )) || die "Usage: $PROGRAM add <ns/name[@version]> | <git-url>[@tag|branch|HEAD|commit] | <./dir>"
 	find_project
 	local arg="$1" url ref="" last
 	url="$arg"; last="${arg##*/}"
 	if [[ "$arg" == */* && "$last" == *@* ]]; then ref="${last#*@}"; url="${arg%@"$ref"}"; fi
-	url="$(expand_source "$url")"
 	if is_path_dep "$arg"; then
 		install_path "$arg" ""
 	elif is_git_url "$url"; then
@@ -1323,7 +1272,7 @@ cmd_remove() {
 	[[ -n "$(lock_get "$name")" ]] || in_deps "$name" || [[ -e "$f" ]] || die "'$name' is not installed"
 	[[ -n "$(lock_get "$name")" ]] || warn "$name is not tracked in $LOCK"
 	local needed orphans
-	needed="$(lock_dependents "$name" | paste -sd' ' -)"
+	needed="$(lock_dependents "$name" | paste -s -d' ' -)"
 	if [[ -n "$needed" ]] && (( ! FORCE )); then
 		die "'$name' is required by: $needed. Remove those first, or use --force"
 	fi
@@ -1331,7 +1280,7 @@ cmd_remove() {
 	deps_edit del "$name" || warn "could not update $PROJECT; remove \"$name\" from 'dependencies' manually"
 	lock_del "$name"
 	info "removed $name"
-	orphans="$(lock_orphans | paste -sd' ' -)"
+	orphans="$(lock_orphans | paste -s -d' ' -)"
 	[[ -z "$orphans" ]] || info "no longer needed: $orphans (run '$PROGRAM prune' to remove)"
 }
 
@@ -1456,16 +1405,10 @@ cmd_outdated() {
 	return 0
 }
 
-update_install() { # kind source ref
-	case "$1" in
-		registry) install_registry "$2" "$3" "" ;;
-		git) install_git "$2" "$3" "" ;;
-	esac
-}
 # one library: its own transaction; unless --fail-fast, a failure is recorded and the next one goes on
 update_run() { # name kind source ref
-	if (( FAILFAST )); then update_install "$2" "$3" "$4"; return 0; fi
-	( update_install "$2" "$3" "$4" ) || { failed+=("$1"); return 1; }
+	if (( FAILFAST )); then install_kind "$1" "$2" "$3" "$4" ""; return 0; fi
+	( install_kind "$1" "$2" "$3" "$4" "" ) || { failed+=("$1"); return 1; }
 }
 
 cmd_update() {
@@ -1502,7 +1445,7 @@ cmd_update() {
 	return 0
 }
 
-sync_restore() { # name kind source version pin
+install_kind() { # name kind source version pin ("" = fresh install, not a restore)
 	case "$2" in
 		registry) install_registry "$3" "$4" "$5" ;;
 		git) install_git "$3" "$4" "$5" ;;
@@ -1537,8 +1480,8 @@ cmd_sync() {
 			continue
 		fi
 		[[ "$st" == modified ]] && warn "$name differs from the lockfile; restoring"
-		if (( FAILFAST )); then sync_restore "$name" "$kind" "$source" "$version" "$pin"
-		else ( sync_restore "$name" "$kind" "$source" "$version" "$pin" ) || { failed+=("$name"); continue; }
+		if (( FAILFAST )); then install_kind "$name" "$kind" "$source" "$version" "$pin"
+		else ( install_kind "$name" "$kind" "$source" "$version" "$pin" ) || { failed+=("$name"); continue; }
 		fi
 	done < <(lock_entries)
 	if (( ${#failed[@]} )); then
@@ -1642,30 +1585,9 @@ migrate_c3po() {
 
 cmd_migrate() {
 	find_project
-	if [[ ! -f "$OLDRECORDS" && -f project.lock.json ]]; then
-		[[ -f "$LOCK" ]] && die "$LOCK already exists"
-		migrate_c3po; return $?
-	fi
-	[[ -f "$OLDRECORDS" ]] || die "neither $OLDRECORDS (c3l 0.x) nor project.lock.json (c3po) found"
+	[[ -f project.lock.json ]] || die "no project.lock.json (c3po) found"
 	[[ -f "$LOCK" ]] && die "$LOCK already exists"
-	need git
-	local dir name path url tag commit hash f
-	dir="$(lib_dir)" || exit 1
-	: | lock_write ""
-	while read -r name path url tag; do
-		[[ -n "$name" ]] || continue
-		name="${name%.c3l}"
-		f="$dir/$name.c3l"
-		[[ -f "$f" ]] || { warn "$f missing, skipping $name (re-add it with '$PROGRAM add')"; continue; }
-		[[ -n "$tag" ]] || tag="HEAD"
-		if [[ "$tag" == HEAD ]]; then commit="$(git_head "$url")"
-		else commit="$(git_tags "$url" | awk -v t="$tag" '$1==t{print $2; exit}')"; fi
-		[[ -n "$commit" ]] || { warn "cannot resolve $url@$tag, skipping $name"; continue; }
-		hash="commit:$commit"
-		lock_put "$name" git "$url" "$tag" "commit:$commit" "$hash"
-		info "migrated $name ($tag, commit ${commit:0:12}); commit pin resolved now, not at install time"
-	done < "$OLDRECORDS"
-	mv "$OLDRECORDS" "$OLDRECORDS.migrated" && info "$OLDRECORDS renamed to $OLDRECORDS.migrated"
+	migrate_c3po
 }
 
 #
@@ -1682,7 +1604,6 @@ while (( $# )); do
 		--frozen) FROZEN=1; shift ;;
 		--strict) STRICT=1; shift ;;
 		--fail-fast) FAILFAST=1; shift ;;
-		--emit-c3po) EMIT_C3PO=1; shift ;;
 		--force) FORCE=1; shift ;;
 		--tree) TREE=1; shift ;;
 		--allow-host) [[ -n "$2" ]] || die "--allow-host needs a host"; TRUSTED_HOSTS+=" $2 "; shift 2 ;;

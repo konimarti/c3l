@@ -16,6 +16,14 @@ verification with rollback, and update, outdated, remove and sync. Libraries are
 kept as _.c3l_ zip files in the first entry of _dependency-search-paths_. Run
 *c3l* in the project root.
 
+# REQUIREMENTS
+
+*bash* 3.2 or newer, *c3c* with *fetch*, and POSIX tools (*awk*, *sed*, *grep*, *cut*,
+*tr*, *sort*, *find*, *cp* and so on), with *sha256sum* or *shasum* and *mktemp*. Some
+commands need more: *git* (git libraries, *check*, *pack*, *publish*), *unzip*
+(*add*, *sync*, *update*, *list*, *verify*), *zip* (*pack*, *publish*), *curl*
+(*publish*, *search*) and, optionally, *jq* (*search*). No Python is needed.
+
 # OPTIONS
 
 Options may appear before or after the command.
@@ -41,11 +49,6 @@ Options may appear before or after the command.
 *--fail-fast*
 	With *sync* and *update*: stop at the first library that fails. The default is to
 	go on with the others and report the failures at the end (exit status 1).
-
-*--emit-c3po*
-	With *pack* and *publish*: also write _vendor.c3po.sources_ for c3po users, from
-	the direct git dependencies on github.com and codeberg.org. Other dependencies
-	are named in a warning.
 
 *--force*
 	With *remove*: remove the library even if another library requires it.
@@ -101,10 +104,6 @@ Options may appear before or after the command.
 	Install a library from the registry with *c3c fetch*, compare the SHA-256 of the
 	download with the registry's checksum, write the lock line. A mismatch or any
 	failure restores the previous library file and _project.json_.
-
-*add* _github:owner/repo_[@_ref_], _codeberg:owner/repo_, _gitlab:owner/repo_
-	Shorthand for the https URL of that host; otherwise as *add* _git-url_. Plain
-	_owner/repo_ is a registry id.
 
 *add* _./dir_
 	Link a local library directory (_./dir_, _../dir_ or an absolute path with a
@@ -175,9 +174,8 @@ Options may appear before or after the command.
 	Run *c3c fetch-info*.
 
 *migrate*
-	Convert a c3l 0.x _.c3l.deps_ file, or a c3po _project.lock.json_, into
-	_c3l.lock_. For c3po the same commits are locked as git libraries; run *sync*
-	afterwards to rebuild them as verified archives.
+	Convert a c3po _project.lock.json_ into _c3l.lock_. The same commits are locked
+	as git libraries; run *sync* afterwards to rebuild them as verified archives.
 
 *check* [_dir_]
 	Verify that the library in _dir_ (default: .) can be published, without

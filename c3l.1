@@ -5,7 +5,7 @@
 .nh
 .ad l
 .\" Begin generated content:
-.TH "C3L" "1" "2026-11-01"
+.TH "C3L" "1" "2026-11-02"
 .P
 .SH NAME
 .P
@@ -22,6 +22,14 @@ cannot update or remove.\& \fBc3l\fR adds a lockfile, \fIc3l.\&lock\fR, checksum
 verification with rollback, and update, outdated, remove and sync.\& Libraries are
 kept as \fI.\&c3l\fR zip files in the first entry of \fIdependency-search-paths\fR.\& Run
 \fBc3l\fR in the project root.\&
+.P
+.SH REQUIREMENTS
+.P
+\fBbash\fR 3.\&2 or newer, \fBc3c\fR with \fBfetch\fR, and POSIX tools (\fBawk\fR, \fBsed\fR, \fBgrep\fR, \fBcut\fR,
+\fBtr\fR, \fBsort\fR, \fBfind\fR, \fBcp\fR and so on), with \fBsha256sum\fR or \fBshasum\fR and \fBmktemp\fR.\& Some
+commands need more: \fBgit\fR (git libraries, \fBcheck\fR, \fBpack\fR, \fBpublish\fR), \fBunzip\fR
+(\fBadd\fR, \fBsync\fR, \fBupdate\fR, \fBlist\fR, \fBverify\fR), \fBzip\fR (\fBpack\fR, \fBpublish\fR), \fBcurl\fR
+(\fBpublish\fR, \fBsearch\fR) and, optionally, \fBjq\fR (\fBsearch\fR).\& No Python is needed.\&
 .P
 .SH OPTIONS
 .P
@@ -57,13 +65,6 @@ other in a cycle or a library requires itself.\&
 .RS 4
 With \fBsync\fR and \fBupdate\fR: stop at the first library that fails.\& The default is to
 go on with the others and report the failures at the end (exit status 1).\&
-.P
-.RE
-\fB--emit-c3po\fR
-.RS 4
-With \fBpack\fR and \fBpublish\fR: also write \fIvendor.\&c3po.\&sources\fR for c3po users, from
-the direct git dependencies on github.\&com and codeberg.\&org.\& Other dependencies
-are named in a warning.\&
 .P
 .RE
 \fB--force\fR
@@ -151,12 +152,6 @@ Create \fIc3l.\&lock\fR.\& With \fIname\fR and outside a project, run \fBc3c ini
 Install a library from the registry with \fBc3c fetch\fR, compare the SHA-256 of the
 download with the registry'\&s checksum, write the lock line.\& A mismatch or any
 failure restores the previous library file and \fIproject.\&json\fR.\&
-.P
-.RE
-\fBadd\fR \fIgithub:owner/repo\fR[@\fIref\fR], \fIcodeberg:owner/repo\fR, \fIgitlab:owner/repo\fR
-.RS 4
-Shorthand for the https URL of that host; otherwise as \fBadd\fR \fIgit-url\fR.\& Plain
-\fIowner/repo\fR is a registry id.\&
 .P
 .RE
 \fBadd\fR \fI.\&/dir\fR
@@ -253,9 +248,8 @@ Run \fBc3c fetch-info\fR.\&
 .RE
 \fBmigrate\fR
 .RS 4
-Convert a c3l 0.\&x \fI.\&c3l.\&deps\fR file, or a c3po \fIproject.\&lock.\&json\fR, into
-\fIc3l.\&lock\fR.\& For c3po the same commits are locked as git libraries; run \fBsync\fR
-afterwards to rebuild them as verified archives.\&
+Convert a c3po \fIproject.\&lock.\&json\fR into \fIc3l.\&lock\fR.\& The same commits are locked
+as git libraries; run \fBsync\fR afterwards to rebuild them as verified archives.\&
 .P
 .RE
 \fBcheck\fR [\fIdir\fR]

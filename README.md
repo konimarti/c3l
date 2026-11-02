@@ -19,7 +19,7 @@ c3l sync --frozen                   # CI: restore exactly what c3l.lock says
 - **Verified**: the registry's checksum is compared with the downloaded file. A mismatch means rollback, not a warning.
 - **Safe**: every install is transactional (library file and `project.json` are restored on failure).
 - **Registry**: default [www.c3pkg.eu](https://www.c3pkg.eu); any `c3c fetch` registry works (`--registry`, `$C3L_REGISTRY`, or `@registry` in the lockfile).
-- **One file**: a single bash script. Needs `c3c` with `fetch` (0.8.6 or a nightly), `awk`, `sha256sum` or `shasum`; `git` and `unzip` for git sources; `curl`, `tar` and `zip` for publishing.
+- **One file**: a single bash script, no Python or other runtime. See [Requirements](#requirements).
 
 ## Install
 
@@ -41,11 +41,10 @@ make PREFIX=~/.local install        # or just copy ./c3l into your PATH
 | `list [--tree]` | libraries and state: `ok`, `modified`, `missing`, `untracked`; `dep` marks libraries pulled in by another; `--tree` shows the dependency graph |
 | `verify` | check files against the lock, exit 1 on problems |
 | `outdated`, `update [--dry-run] [name[@ref]...]` | newer versions, update them; `name@ref` switches to an explicit version, tag, branch, `HEAD` or commit |
-| `add github:o/r`, `codeberg:o/r`, `gitlab:o/r` | git shorthand for the https URL, also with `@ref` |
 | `add ./dir` | link a local library directory into `lib/` (a symlink: edits show up in the next build; never publishable) |
 | `sync [--frozen] [--fail-fast]` | restore from the lock; `--frozen` fails if lock and project disagree. A library that cannot be restored does not stop the others (exit status 1 and a summary); `--fail-fast` stops at the first one |
 | `search <text\|tag:x>`, `info <ns/name>` | registry lookups |
-| `migrate` | convert a c3l 0.x `.c3l.deps` or a c3po `project.lock.json` |
+| `migrate` | convert a c3po `project.lock.json` into `c3l.lock` |
 | `check [dir]`, `pack [dir]`, `publish [dir]` | publish a library to a registry, see [Publishing](#publishing) |
 
 Libraries are stored as `.c3l` zip files in the first `dependency-search-paths`
@@ -61,7 +60,6 @@ Options may appear before or after the command:
 | `--strict` | with `add`/`update`: a library built for another C3 release or platform, or a dependency cycle, is an error, not a warning |
 | `--force` | with `remove`: remove even if another library needs it |
 | `--fail-fast` | with `sync`/`update`: stop at the first library that fails instead of going on with the rest |
-| `--emit-c3po` | with `pack`/`publish`: also write `vendor.c3po.sources` for c3po users (direct git dependencies on GitHub or Codeberg) |
 | `--allow-host HOST` | trust a git host named by a library's dependencies (`file` for local paths), see [Dependencies](#dependencies) |
 | `--version X.Y.Z`, `--token-file F`, `--description`, `--license`, `--tags`, `--docs-url`, `--git-url`, `--c3-version`, `--output`, `--allow-dirty`, `--no-build`, `--offline`, `--registry-type` | see [Publishing](#publishing) |
 | `-h`, `-v` | help, version |
@@ -138,8 +136,6 @@ as kind `path`, `sync` re-creates the link, `update` leaves it alone, and the li
 dependencies are followed like any other. Git repositories on disk are added with a
 `file://` URL.
 
-**Short git sources.** `github:owner/repo`, `codeberg:owner/repo` and `gitlab:owner/repo`
-stand for the https URL (`owner/repo` alone is a registry id), also in `vendor.c3l.requires`.
 When a project has no `dependency-search-paths`, the first install adds `"lib"`.
 
 `c3l.lock` stays at `# c3l.lock v1`; each line now ends with `direct` or `dep` and the
@@ -153,10 +149,8 @@ c3l share the `lib/` layout, so you can switch one project at a time.
 - c3l **follows** the dependencies c3po libraries declare in `vendor.c3po.sources`.
 - `c3l migrate` reads a `project.lock.json` and locks the same commits (GitHub and
   Codeberg), then `c3l sync` rebuilds the libraries as verified archives.
-- c3l never writes c3po's lock or `project.json`. `c3l publish --emit-c3po` also writes
-  `vendor.c3po.sources` into the published manifest, for the direct git dependencies on
-  GitHub or Codeberg, so c3po users who add your library get them too (registry
-  libraries cannot be expressed for c3po; c3l says which).
+- c3l never writes c3po's files: no c3po lock, no `project.json` changes, no
+  `vendor.c3po` in published manifests.
 - c3po has no versions or checksums, only commits, so a migrated library is pinned to a
   commit and `c3l update` follows its tag, branch or HEAD from there.
 
@@ -215,6 +209,37 @@ that is a local directory (`c3l add ./dir`), since consumers cannot fetch it.
 **Not covered:** yanking versions, editing package metadata after the first publish, and
 registries without an upload API (publishing to those fails with a clear message).
 
+## Requirements
+
+c3l is one bash script that calls ordinary command line tools. It uses only
+POSIX options for the POSIX tools, to stay portable between Linux, macOS and the BSDs.
+The test suite runs on Linux with both GNU awk and mawk; macOS and BSD are not yet
+tested. It needs no Python.
+
+**Always:**
+
+| Tool | Used for |
+|---|---|
+| `bash` 3.2 or newer | the script itself (not POSIX `sh`; the macOS system bash works) |
+| `c3c` with `fetch` (0.8.6 or a nightly) | installing registry libraries, reading `project.json` |
+| POSIX tools: `awk`, `sed`, `grep`, `cut`, `tr`, `sort`, `head`, `tail`, `paste`, `find`, `touch`, `chmod`, `cp`, `mv`, `rm`, `mkdir`, `ln`, `cat`, `cmp`, `dd`, `dirname`, `basename`, `uname` | everything |
+| `sha256sum` or `shasum` | checksums (GNU coreutils / macOS and BSD) |
+| `mktemp` | temporary directories (not in POSIX, but on every system c3l targets) |
+
+**Only for some commands** (c3l tells you which is missing):
+
+| Tool | Needed for |
+|---|---|
+| `git` 2.7 or newer | git libraries (`add <git-url>`), `check`, `pack`, `publish` |
+| `unzip` | `add`, `sync`, `update`, `list`, `verify`: reading an installed library's `manifest.json` and a git library's commit stamp |
+| `zip` | `pack`, `publish` (builds the deterministic archive) |
+| `curl` | `publish`, `search`, registry type detection |
+| `jq` (optional) | nicer output for `search` |
+
+`zip`, `unzip`, `curl`, `git`, `jq` and `mktemp` are not part of POSIX; they are
+the one dependency for each job and are available everywhere (macOS ships `curl`, `zip`
+and `unzip`).
+
 ## Why not just `c3c fetch`?
 
 You can. c3l is for when you also want to know *which* version you have, be
@@ -225,7 +250,8 @@ sure it is the *same bytes* everywhere, and update on purpose.
 0.x cloned a git repository, zipped it (including `.git/`) and edited
 `project.json` with `sed`. 1.0 uses `c3c fetch`, builds git libraries with
 `git archive`, and reads the project only through `c3c project view`.
-Run `c3l migrate` once. `LOCALREPO` is gone; `file://` URLs and `--registry`
+`c3l migrate` no longer reads the 0.x `.c3l.deps` file: run `c3l add <git-url>@<tag>`
+for each library instead. `LOCALREPO` is gone; `file://` URLs and `--registry`
 cover testing.
 
 ## Tests

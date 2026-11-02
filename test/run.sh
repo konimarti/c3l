@@ -435,15 +435,6 @@ printf '# c3l.lock v1\nold\tregistry\tacme/old\t1.0.0\tsha256:aa\tsha256:aa\n' >
 out="$(c3l list 2>&1)"; has "6-column line is readable" "old " "$out"
 eq "6-column line defaults to direct" "$(source "$C3L"; LOCK=c3l.lock lock_entries | cut -f7)" "direct"
 
-section "migrate from c3l 0.x"
-newproj p6
-mkdir -p lib; cp "$WORK/p5/app/lib/gitlib.c3l" lib/gitlib.c3l
-echo "gitlib.c3l lib/gitlib.c3l file://$GR v0.2.0" > .c3l.deps
-c3l migrate >/dev/null 2>&1; eq "migrate rc" $? 0
-has "migrated line" "^gitlib.git.file://$GR.v0.2.0.commit:$C2" "$(cat c3l.lock)"
-check "old file renamed" test -f .c3l.deps.migrated
-check_not "migrate again refuses" c3l migrate
-
 section "publish: check, pack, publish (fake c3pkg server)"
 PKG=$((PORT + 1)); PKG429=$((PORT + 2))
 python3 "$HERE/fakepkg.py" "$PKG" >/dev/null 2>&1 & PKGPID=$!
@@ -655,12 +646,7 @@ out="$(c3l --offline --no-build check 2>&1)"; eq "publishing a path dependency f
 has "path dependency explained" "is a local directory" "$out"
 rm -f c3l.lock
 
-section "git shorthand, and 'lib' is added to dependency-search-paths"
-eq "github:" "$(expand_source github:o/r)" "https://github.com/o/r"
-eq "codeberg:" "$(expand_source codeberg:o/r)" "https://codeberg.org/o/r"
-eq "gitlab:" "$(expand_source gitlab:o/r)" "https://gitlab.com/o/r"
-eq "other sources unchanged" "$(expand_source acme/x)" "acme/x"
-eq "urls unchanged" "$(expand_source https://example.org/x)" "https://example.org/x"
+section "'lib' is added to dependency-search-paths"
 rm -rf "$WORK/nosp"; mkdir -p "$WORK/nosp/src"; cd "$WORK/nosp" || exit 1
 printf '{ "langrev": "1", "authors": [], "version": "0.1.0", "sources": ["src/**"], "targets": { "app": { "type": "executable" } } }\n' > project.json
 echo 'fn void main() {}' > src/main.c3
@@ -692,22 +678,6 @@ has "update summary" "could not update 1 library: ka" "$out"
 eq "kb was updated anyway" "$(awk -F'\t' '$1=="kb"{print $4}' c3l.lock)" "1.1.0"
 eq "ka stayed" "$(awk -F'\t' '$1=="ka"{print $4}' c3l.lock)" "1.0.0"
 check "ka intact after its rollback" c3l verify
-
-section "publish --emit-c3po"
-cd "$WORK/libm/lm.c3l" || exit 1
-printf '# c3l.lock v1\ngl\tgit\thttps://github.com/o/gl\tv0.3.0\tcommit:x\tcommit:x\tdirect\t-\nreg\tregistry\tacme/reg\t1.0.0\tsha256:aa\tsha256:aa\tdirect\t-\nel\tgit\thttps://example.org/o/el\tv1\tcommit:y\tcommit:y\tdirect\t-\n' > c3l.lock
-c3l pack --no-build --allow-dirty --version 0.9.0 --output "$WORK/plain.c3l" >/dev/null 2>&1
-check_not "no c3po block unless asked" bash -c "unzip -p '$WORK/plain.c3l' manifest.json | grep -q c3po"
-out="$(c3l --emit-c3po pack --no-build --allow-dirty --version 0.9.0 --output "$WORK/emit.c3l" 2>&1)"; eq "emit-c3po pack rc" $? 0
-man="$(unzip -p "$WORK/emit.c3l" manifest.json)"
-has "c3po-version stamped" '"c3po-version" : 1' "$man"
-has "github dependency expressed for c3po" '"name": "gl", "source": "https://github.com/o/gl"' "$man"
-check_not "registry library not in the c3po block" bash -c "unzip -p '$WORK/emit.c3l' manifest.json | grep -o '\"c3po\".*' | grep -q acme/reg"
-has "unrepresentable dependencies are named" "'reg' cannot be expressed for c3po" "$out"
-has "unknown host is named" "'el' cannot be expressed for c3po" "$out"
-flat="$(unzip -p "$WORK/emit.c3l" manifest.json | ( source "$C3L"; json_flatten ))"
-has "c3l requires still there" "vendor.c3l.requires\[0\].source" "$flat"
-rm -f c3l.lock
 
 section "cli"
 has "help" "reproducible dependencies" "$(c3l help)"
