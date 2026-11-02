@@ -55,3 +55,20 @@ fn void set_top_level_string() @test
 	assert(s.contains(`"version" : "1.2.0"`) && s.contains(`{ "version" : "9" }`) && s.contains(`// "version": "0"`), "%s", s);
 	assert(jsonedit::set_string(`{ "provides": "x" }`, "version", "1.0.0") == "{\n  \"version\" : \"1.0.0\", \"provides\": \"x\" }");
 }
+
+fn void broken_files_are_left_alone() @test
+{
+	String[] broken = { `{ "dependencies": [ "a", `, `{ "dependencies": [ "a" /* x `, `{ "dependencies": [ "a`, `{ "x": "`, `` };
+	foreach (t : broken) assert(jsonedit::edit_array(t, "dependencies", "b", true) == t, "%s", t);
+	assert(jsonedit::set_string(`{ "version": "1.0`, "version", "2.0.0") == `{ "version": "1.0`);
+}
+
+fn void json5_edge_cases() @test
+{
+	assert(jsonedit::edit_array(`{ "dependencies": [ ["x"], "a" ] }`, "dependencies", "b", true) == `{ "dependencies": [ "a", "b" ] }`);
+	assert(jsonedit::edit_array(`{ dependencies: [ "a" ], other: 1 }`, "dependencies", "b", true) == `{ dependencies: [ "a", "b" ], other: 1 }`);
+	assert(jsonedit::edit_array(`{}`, "dependencies", "a", true) == "{\n  \"dependencies\": [ \"a\" ]\n}");
+	assert(jsonedit::edit_array(`{ 'dependencies': [ 'it\'s', 'say "hi"' ] }`, "dependencies", "b", true)
+		== `{ 'dependencies': [ "it's", "say \"hi\"", "b" ] }`);
+	assert(jsonedit::set_string(`{ version: "1.0.0" }`, "version", "2.0.0") == `{ version: "2.0.0" }`);
+}
