@@ -12,12 +12,36 @@ fn int main(String[] args)
 {
 	Command* app = serp::app("c3l", VERSION, "reproducible dependencies for C3 projects")
 		.persistent_flag({ .name = "registry", .kind = STRING, .env = "C3L_REGISTRY", .default_value = registry::DEFAULT,
-			.value_name = "URL", .desc = "registry base URL for new installs, search, info and publish" });
+			.value_name = "URL", .desc = "registry base URL for new installs, search, info and publish" })
+		.persistent_flag({ .name = "strict", .desc = "a C3 release or platform mismatch, or a dependency cycle, is an error" })
+		.persistent_flag({ .name = "allow-host", .kind = STRING, .value_name = "HOST",
+			.desc = "trust a git or registry host named by a dependency (repeatable)" })
+		.persistent_flag({ .name = "dry-run", .desc = "with update, prune, publish: show what would change" })
+		.persistent_flag({ .name = "frozen", .desc = "with sync: fail if lock and project disagree, never write the lock" })
+		.persistent_flag({ .name = "fail-fast", .desc = "with sync, update: stop at the first failure" })
+		.persistent_flag({ .name = "force", .desc = "with remove: remove even if another library requires it" });
 	defer app.free();
 
 	app.add(serp::cmd("init", "create c3l.lock (and a project with 'c3c init name')", &init_run)
 		.usage_args("[name]")
 		.accepts(serp::max_args(1)));
+	app.add(serp::cmd("add", "install a library, verify it, lock it", &add_run)
+		.aka("fetch").aka("f").aka("get").aka("g")
+		.usage_args("<ns/name[@version]> | vendor:<name> | <git-url>[@ref] [ref] | <./dir>")
+		.accepts(serp::range_args(1, 2)));
+	app.add(serp::cmd("remove", "remove a library, its project entry and lock line", &remove_run)
+		.aka("rm").aka("r").aka("delete")
+		.usage_args("<name>")
+		.accepts(serp::exact_args(1)));
+	app.add(serp::cmd("prune", "remove dependency libraries nothing needs any more", &prune_run)
+		.accepts(serp::no_args()));
+	app.add(serp::cmd("update", "update to the newest version, or to name@ref", &update_run)
+		.aka("u")
+		.usage_args("[name[@ref]]...")
+		.accepts(serp::any_args()));
+	app.add(serp::cmd("sync", "restore exactly what c3l.lock says", &sync_run)
+		.aka("pull").aka("p")
+		.accepts(serp::no_args()));
 	app.add(serp::cmd("list", "show locked libraries and their state", &list_run)
 		.aka("ls").aka("l")
 		.accepts(serp::no_args())

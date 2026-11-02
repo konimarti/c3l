@@ -4,7 +4,7 @@
 *>
 module c3l::git;
 
-import std::collections::list, c3l::sys, c3l::semver;
+import std::io, std::os, std::collections::list, c3l::log, c3l::sys, c3l::semver;
 
 struct Ref
 {
@@ -57,6 +57,54 @@ fn String? head(String url) => first(ls_remote({ url, "HEAD" })!);
 fn String? branch_commit(String url, String branch)
 {
 	return first(ls_remote({ "--heads", url, string::tformat("refs/heads/%s", branch) })!);
+}
+
+<*
+ Check out `commit` of `url` into the empty directory `dir`: a shallow fetch of
+ just that commit, else a clone (of the tag or branch `ref`, if given).
+*>
+fn void? checkout(String url, String commit, String ref, String dir)
+{
+	if (run(dir, { "init", "-q" }) && run(dir, { "remote", "add", "origin", url })
+		&& run(dir, { "fetch", "-q", "--depth", "1", "origin", commit }) && run(dir, { "checkout", "-q", "FETCH_HEAD" }))
+	{
+		return;
+	}
+	sys::remove(dir);
+	bool cloned = ref.len
+		? run(".", { "clone", "-q", "--depth", "1", "--branch", ref, url, dir })
+		: run(".", { "clone", "-q", url, dir }) && run(dir, { "checkout", "-q", commit });
+	if (!cloned) return log::fail("git clone of %s failed", url)~;
+	String head = sys::run({ "git", "-C", dir, "rev-parse", "HEAD" })!.out.trim();
+	if (head != commit) return log::fail("commit mismatch for %s: expected %s, got %s", url, commit, head)~;
+}
+
+<*
+ Archive the checked out commit in `dir` as a zip, the same way everywhere:
+ stored (-0), UTC timestamps, no line-ending or filter conversion. git puts the
+ commit id in the zip comment.
+*>
+fn void? archive(String dir, String out)
+{
+	String info = string::tformat("%s/.git/info", dir);
+	(void)path::mkdir(info, true);
+	file::save(string::tformat("%s/attributes", info), "* -text -filter -ident -working-tree-encoding\n") ?? log::fail("cannot write %s", info)~!;
+	env::set_var("TZ", "UTC");
+	String abs = (String)out.to_absolute_path(tmem) ?? out;
+	if (!run(dir, { "-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive", "--format=zip", "-0", "-o", abs, "HEAD" }))
+	{
+		return log::fail("git archive failed")~;
+	}
+}
+
+// git -C dir args..., true when it exits with 0
+fn bool run(String dir, String[] args) @private
+{
+	List{String} argv;
+	argv.tinit();
+	argv.push_all({ "git", "-C", dir });
+	argv.push_all(args);
+	return (sys::run(argv.array_view()) ?? (Output){ .code = 1 }).code == 0;
 }
 
 fn bool is_commit(String s)

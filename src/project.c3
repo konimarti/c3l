@@ -65,14 +65,16 @@ fn bool? Project.has_dep(&self, String name)
 	return false;
 }
 
+faultdef NOT_UPDATED;
+
 <*
  List `name` in the project's "dependencies" (`add`) or take it out.
- The result is checked against what c3c reads back.
+ NOT_UPDATED when c3c does not read back what was written.
 *>
 fn void? Project.set_dep(&self, String name, bool add)
 {
 	self.edit("dependencies", name, add)!;
-	if (self.has_dep(name)! != add) return log::fail("could not update \"%s\" in %s", name, self.file)~;
+	if (self.has_dep(name)! != add) return NOT_UPDATED~;
 }
 
 fn void? Project.edit(&self, String key, String name, bool add)

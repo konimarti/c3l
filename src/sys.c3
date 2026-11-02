@@ -89,3 +89,33 @@ fn String? sha256_file(String path)
 	}
 	return string::tformat("sha256:%s", hex::encode(tmem, &&h.final()));
 }
+
+// A new private directory under the system temp directory; the caller removes it.
+fn String? temp_dir()
+{
+	String base = (String)path::temp_directory(tmem) ?? "/tmp";
+	ZString dir = mkdtemp(string::tformat("%s/c3l.XXXXXXXX", base).zstr_tcopy());
+	if (!dir) return log::fail("cannot create a temporary directory")~;
+	return dir.str_view();
+}
+
+fn void? link(String target, String link)
+{
+	if (symlink(target.zstr_tcopy(), link.zstr_tcopy())) return log::fail("cannot link %s", link)~;
+}
+
+// Remove a file, a symlink (never what it points to) or a directory tree.
+fn void remove(String p)
+{
+	if (!path::is_link((Path)p) && file::is_dir(p))
+	{
+		(void)path::rmtree((Path)p);
+		return;
+	}
+	(void)file::delete(p);
+}
+
+fn bool exists(String p) => path::is_link((Path)p) || file::exists(p);
+
+extern fn ZString mkdtemp(ZString template) @private;
+extern fn CInt symlink(ZString target, ZString link) @private;
