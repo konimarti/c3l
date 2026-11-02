@@ -153,11 +153,6 @@ fn bool Package.resolve_version(&self, String option, String in_manifest)
 // Consumers get the dependencies from vendor.c3l.requires in the published manifest.
 fn void Package.check_dependencies(&self, Manifest m)
 {
-	String reqs = requires_json(self.dir);
-	if (reqs.len && m.has_vendor && !m.has_c3l_requires)
-	{
-		log::warn("manifest.json already has a \"vendor\" block, so c3l cannot add vendor.c3l.requires; add it by hand: \"requires\": %s", reqs);
-	}
 	Lock? l = lock::load(string::tformat("%s/c3l.lock", self.dir));
 	if (catch l)
 	{
@@ -193,7 +188,9 @@ fn void Package.check_clean(&self, bool allow_dirty)
 		log::warn("working tree is not clean; the package will not match the commit");
 		return;
 	}
-	self.error("working tree is not clean (commit or stash, or pass --allow-dirty), so the package would not match a commit");
+	bool lock = git::lines(self.dir, { "status", "--porcelain", "--", "c3l.lock" }).len > 0;
+	self.error("working tree is not clean (commit or stash, or pass --allow-dirty), so the package would not match a commit%s",
+		lock ? "; c3l.lock is part of the package, commit it" : "");
 }
 
 // Compile the staged package as a library, with the library's own dependencies.
@@ -271,8 +268,9 @@ fn void Package.check_registry(&self, Settings s)
 }
 
 <*
- Copy the package into `<tmp>/stage/<name>.c3l` with its final manifest: the
- version being published, and vendor.c3l.requires from the library's c3l.lock.
+ Copy the package into `<tmp>/stage/<name>.c3l` with the version being
+ published in its manifest. Its c3l.lock comes along: that is how consumers
+ learn what the library requires.
 *>
 fn String? Package.stage(&self, String tmp)
 {
@@ -289,11 +287,6 @@ fn String? Package.stage(&self, String tmp)
 	String mfile = string::tformat("%s/manifest.json", to);
 	String text = (String)file::load_temp(mfile) ?? log::fail("manifest.json is not part of the package (is it ignored by git?)")~!;
 	text = jsonedit::set_string(text, "version", self.version);
-	String reqs = requires_json(self.dir);
-	if (reqs.len && !(manifest::parse(text) ?? (Manifest){}).has_vendor)
-	{
-		text = jsonedit::insert_first(text, string::tformat("\"vendor\" : { \"c3l\" : { \"requires\" : %s } }", reqs));
-	}
 	file::save(mfile, text) ?? log::fail("cannot write %s", mfile)~!;
 	return to;
 }
@@ -310,8 +303,8 @@ fn String? Package.pack(&self, String out)
 
 <*
  The files that belong in the package, sorted: tracked and untracked-not-ignored
- in a git repository, else everything; never the lockfile, installed libraries
- or build output.
+ in a git repository, else everything; never installed libraries or build output.
+ c3l.lock is part of it.
 *>
 fn String[] Package.files(&self)
 {
@@ -350,28 +343,10 @@ fn String[] packed(String[] files) @private
 		String in_lib = f.starts_with("lib/") ? f["lib/".len..] : "";
 		bool top_c3l = f.ends_with(".c3l") && !f.contains("/");
 		bool lib_c3l = in_lib[:in_lib.index_of_char('/') ?? in_lib.len].ends_with(".c3l");  // lib/x.c3l, lib/x.c3l/...
-		if (f == "c3l.lock" || top_c3l || lib_c3l || f.starts_with("obj/") || f.starts_with("build/") || f.starts_with(".git/")) continue;
+		if (top_c3l || lib_c3l || f.starts_with("obj/") || f.starts_with("build/") || f.starts_with(".git/")) continue;
 		out.push(f);
 	}
 	return out.array_view();
-}
-
-<*
- vendor.c3l.requires from the library's own c3l.lock (see manifest::from_lock).
- Empty if there is nothing to require.
-*>
-fn String requires_json(String dir)
-{
-	Lock l = lock::load(string::tformat("%s/c3l.lock", dir)) ?? (Lock){};
-	DString out = dstring::temp();
-	foreach (r : manifest::from_lock(&l))
-	{
-		out.appendf("%s{ \"name\": \"%s\", \"source\": \"%s\"", out.len() ? ", " : "", r.name, r.source);
-		if (r.registry.len) out.appendf(", \"registry\": \"%s\"", r.registry);
-		if (r.version.len) out.appendf(", \"version\": \"%s\"", r.version);
-		out.append(" }");
-	}
-	return out.len() ? string::tformat("[ %s ]", out) : "";
 }
 
 <*

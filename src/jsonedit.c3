@@ -75,7 +75,7 @@ fn String set_string(String text, String key, String value)
 }
 
 // `member` (`"key": value`) as the first member of the top-level object.
-fn String insert_first(String text, String member)
+fn String insert_first(String text, String member) @private
 {
 	sz? brace = text.index_of_char('{');
 	if (catch brace) return text;

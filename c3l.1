@@ -282,7 +282,8 @@ Exit status 1 on any problem.\&
 .RS 4
 Write \fIname-version.\&c3l\fR (or \fB--output\fR): a zip with \fImanifest.\&json\fR at its
 root and the repository files (git: tracked and untracked-not-ignored; not
-\fI.\&git\fR).\& The archive is deterministic, the same tree gives the same bytes.\&
+\fI.\&git\fR, \fIlib/\fR, \fIobj/\fR or \fIbuild/\fR), \fIc3l.\&lock\fR included.\& The archive is
+deterministic, the same tree gives the same bytes.\&
 .P
 .RE
 \fBpublish\fR [\fIdir\fR]
@@ -317,34 +318,25 @@ with \fB--strict\fR).\&
 A library directory (a \fImanifest.\&json\fR and no \fIproject.\&json\fR) works too: \fBadd\fR installs
 into \fI.\&/lib\fR (keep it out of git; it is never packed), lists only the dependencies you
 asked for in the manifest'\&s \fIdependencies\fR, and writes \fIc3l.\&lock\fR.\& Commit the lock: it is
-how the library declares its dependencies to whoever installs it from git, and
-\fBpublish\fR turns it into \fIvendor.\&c3l.\&requires\fR for the registry.\&
+how the library declares its dependencies, and it travels with the library, in its git
+archive and in the package \fBpack\fR builds.\&
 .P
 c3c lists a library'\&s dependencies by name only and does not install them
 transitively: every one must be in \fIproject.\&json\fR.\& \fBadd\fR and \fBupdate\fR therefore
 follow the dependencies a library declares and add them all, flat, to \fIlib\fR and
 \fIproject.\&json\fR, as one transaction.\&
 .P
-A library declares them in its committed \fIc3l.\&lock\fR (its direct entries: source and
-locked version), or in its \fImanifest.\&json\fR (c3c ignores the \fIvendor\fR key):
+A library declares them in its \fIc3l.\&lock\fR: each direct entry is a requirement, from
+the source it names (a registry the consumer has no library from yet needs
+\fB--allow-host\fR), at least at the locked version for registry libraries, at the locked
+tag, branch or commit for git libraries (\fBupdate\fR moves a tag like any other version).\&
+Apps and libraries alike, \fIc3l.\&lock\fR is the only file c3l writes dependencies to.\&
 .P
-.nf
-.RS 4
-"vendor": { "c3l": { "requires": [
-    { "name": "vk", "source": "tonis2/vk", "version": "1\&.0\&.1" } ] } }
-.fi
-.RE
-.P
-\fIsource\fR is a registry id or a git URL.\& A registry source may add \fIregistry\fR, the
-registry base URL; without it the default registry is used, and a registry that no
-installed library comes from yet needs \fB--allow-host\fR.\& \fIversion\fR is the minimum for
-registry libraries, a tag, branch or commit for git libraries (\fBupdate\fR moves a tag
-like any other version).\& \fBpublish\fR writes this block
-from the library'\&s own \fIc3l.\&lock\fR, since registry packages carry no lockfile.\& c3l also
-reads c3po'\&s \fIvendor.\&c3po.\&sources\fR (\fIc3po-version\fR 1) and c3c'\&s plain \fIdependencies\fR
-names (no source: a warning, and \fBverify\fR fails until the library is added).\& For each
-name the first wins, in this order: \fIvendor.\&c3l.\&requires\fR, \fIc3l.\&lock\fR,
-\fIvendor.\&c3po.\&sources\fR, \fIdependencies\fR.\& Dependencies that \fIproject.\&json\fR lists for a
+c3l also reads, but never writes, \fIvendor.\&c3l.\&requires\fR in a library'\&s \fImanifest.\&json\fR
+(packages published by c3l 1.\&1), c3po'\&s \fIvendor.\&c3po.\&sources\fR (\fIc3po-version\fR 1) and
+c3c'\&s plain \fIdependencies\fR names (no source: a warning, and \fBverify\fR fails until the
+library is added).\& For each name the first wins, in this order: \fIvendor.\&c3l.\&requires\fR,
+\fIc3l.\&lock\fR, \fIvendor.\&c3po.\&sources\fR, \fIdependencies\fR.\& Dependencies that \fIproject.\&json\fR lists for a
 single target are part of the project too (\fBlist\fR, \fBverify\fR, \fBsync --frozen\fR).\&
 .P
 Versions are chosen as in Go (minimum version selection): the highest of all

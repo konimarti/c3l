@@ -8,26 +8,16 @@ Writes download/ns/name@VERSION (a zip with manifest.json) and info/ns/name.
 --badsum    info record advertises a wrong checksum
 --no-checksum  info record has no checksum field
 --not-latest   do not move 'latest' to this version
---requires     vendor.c3l.requires entries (id[:min version])
+--requires     vendor.c3l.requires entries (id[:min version]), as packages of c3l 1.1 had
 --reqreg       registry URL written on every --requires entry
 --deps         c3c "dependencies" names (no source)
 --c3po         vendor.c3po.sources entries (name|git url)
+--from         publish this .c3l file instead of generating one
 """
-import hashlib, json, os, sys, zipfile
+import hashlib, json, os, shutil, sys, zipfile
 
 
-def main():
-    root, cmd, lib_id, version = sys.argv[1:5]
-    flags = set(a for a in sys.argv[5:] if "=" not in a)
-    opts = dict(a[2:].split("=", 1) for a in sys.argv[5:] if a.startswith("--") and "=" in a)
-    assert cmd == "publish"
-    ns, name = lib_id.split("/")
-    dl = os.path.join(root, "download", ns)
-    inf = os.path.join(root, "info", ns)
-    os.makedirs(dl, exist_ok=True)
-    os.makedirs(inf, exist_ok=True)
-
-    path = os.path.join(dl, f"{name}@{version}")
+def write_package(path, name, version, opts):
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         man = {"provides": name, "version": version, "targets": {t: {} for t in ("linux-x64", "linux-aarch64", "macos-x64", "macos-aarch64", "windows-x64")}}
         if "deps" in opts:
@@ -51,6 +41,24 @@ def main():
             man.setdefault("vendor", {}).setdefault("c3po", {}).update({"c3po-version": 1, "sources": srcs})
         z.writestr("manifest.json", json.dumps(man))
         z.writestr("src/lib.c3", f"module {name};\nfn int answer() => 42;\n")
+
+
+def main():
+    root, cmd, lib_id, version = sys.argv[1:5]
+    flags = set(a for a in sys.argv[5:] if "=" not in a)
+    opts = dict(a[2:].split("=", 1) for a in sys.argv[5:] if a.startswith("--") and "=" in a)
+    assert cmd == "publish"
+    ns, name = lib_id.split("/")
+    dl = os.path.join(root, "download", ns)
+    inf = os.path.join(root, "info", ns)
+    os.makedirs(dl, exist_ok=True)
+    os.makedirs(inf, exist_ok=True)
+
+    path = os.path.join(dl, f"{name}@{version}")
+    if "from" in opts:
+        shutil.copyfile(opts["from"], path)
+    else:
+        write_package(path, name, version, opts)
     data = open(path, "rb").read()
     sha = hashlib.sha256(data).hexdigest()
 

@@ -14,7 +14,7 @@ fn void requirements_in_precedence_order() @test
 			"c3po": { "sources": [ { "source": "https://github.com/x/box2d.c3l.git" }, { "name": "vk", "source": "other" } ] },
 		},
 	}`)!!;
-	assert(m.provides == "app" && m.version == "1.0.0" && m.has_vendor && m.has_c3l_requires);
+	assert(m.provides == "app" && m.version == "1.0.0");
 	assert(m.dependencies.len == 3);
 	assert(m.requires.len == 5, "%d", m.requires.len);
 	Requirement vk = m.requires[0];
@@ -29,7 +29,7 @@ fn void requirements_in_precedence_order() @test
 fn void minimal() @test
 {
 	Manifest m = manifest::parse(`{ "provides": "x" }`)!!;
-	assert(m.provides == "x" && !m.version.len && !m.requires.len && !m.has_vendor);
+	assert(m.provides == "x" && !m.version.len && !m.requires.len);
 	assert(@catch(manifest::parse("not json")));
 }
 

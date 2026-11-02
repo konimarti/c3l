@@ -202,7 +202,8 @@ command. The publishing options, from *--version* to *--offline*, follow *check*
 *pack* [_dir_]
 	Write _name-version.c3l_ (or *--output*): a zip with _manifest.json_ at its
 	root and the repository files (git: tracked and untracked-not-ignored; not
-	_.git_). The archive is deterministic, the same tree gives the same bytes.
+	_.git_, _lib/_, _obj/_ or _build/_), _c3l.lock_ included. The archive is
+	deterministic, the same tree gives the same bytes.
 
 *publish* [_dir_]
 	Run *check*, *pack* and upload to the registry, then compare the registry's
@@ -234,32 +235,25 @@ with *--strict*).
 A library directory (a _manifest.json_ and no _project.json_) works too: *add* installs
 into _./lib_ (keep it out of git; it is never packed), lists only the dependencies you
 asked for in the manifest's _dependencies_, and writes _c3l.lock_. Commit the lock: it is
-how the library declares its dependencies to whoever installs it from git, and
-*publish* turns it into _vendor.c3l.requires_ for the registry.
+how the library declares its dependencies, and it travels with the library, in its git
+archive and in the package *pack* builds.
 
 c3c lists a library's dependencies by name only and does not install them
 transitively: every one must be in _project.json_. *add* and *update* therefore
 follow the dependencies a library declares and add them all, flat, to _lib_ and
 _project.json_, as one transaction.
 
-A library declares them in its committed _c3l.lock_ (its direct entries: source and
-locked version), or in its _manifest.json_ (c3c ignores the _vendor_ key):
+A library declares them in its _c3l.lock_: each direct entry is a requirement, from
+the source it names (a registry the consumer has no library from yet needs
+*--allow-host*), at least at the locked version for registry libraries, at the locked
+tag, branch or commit for git libraries (*update* moves a tag like any other version).
+Apps and libraries alike, _c3l.lock_ is the only file c3l writes dependencies to.
 
-```
-"vendor": { "c3l": { "requires": [
-    { "name": "vk", "source": "tonis2/vk", "version": "1.0.1" } ] } }
-```
-
-_source_ is a registry id or a git URL. A registry source may add _registry_, the
-registry base URL; without it the default registry is used, and a registry that no
-installed library comes from yet needs *--allow-host*. _version_ is the minimum for
-registry libraries, a tag, branch or commit for git libraries (*update* moves a tag
-like any other version). *publish* writes this block
-from the library's own _c3l.lock_, since registry packages carry no lockfile. c3l also
-reads c3po's _vendor.c3po.sources_ (_c3po-version_ 1) and c3c's plain _dependencies_
-names (no source: a warning, and *verify* fails until the library is added). For each
-name the first wins, in this order: _vendor.c3l.requires_, _c3l.lock_,
-_vendor.c3po.sources_, _dependencies_. Dependencies that _project.json_ lists for a
+c3l also reads, but never writes, _vendor.c3l.requires_ in a library's _manifest.json_
+(packages published by c3l 1.1), c3po's _vendor.c3po.sources_ (_c3po-version_ 1) and
+c3c's plain _dependencies_ names (no source: a warning, and *verify* fails until the
+library is added). For each name the first wins, in this order: _vendor.c3l.requires_,
+_c3l.lock_, _vendor.c3po.sources_, _dependencies_. Dependencies that _project.json_ lists for a
 single target are part of the project too (*list*, *verify*, *sync --frozen*).
 
 Versions are chosen as in Go (minimum version selection): the highest of all

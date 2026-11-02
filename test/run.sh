@@ -437,8 +437,11 @@ check "--allow-dirty passes" pc check --offline --allow-dirty
 git checkout -q README.md
 
 # review fixes: unpacked junk is not "dirty"; modes do not depend on umask; nested .c3l is kept
-mkdir -p obj tests; echo x > obj/a.o; printf '# c3l.lock v1\n' > c3l.lock
-check "untracked obj/ and c3l.lock are not dirt" pc check --offline --no-build
+mkdir -p obj tests; echo x > obj/a.o
+check "untracked obj/ is not dirt" pc check --offline --no-build
+printf '# c3l.lock v1\n' > c3l.lock
+out="$(pc check --offline --no-build 2>&1)"; eq "an uncommitted c3l.lock is dirt rc" $? 1
+has "the lock is named" "c3l.lock is part of the package, commit it" "$out"
 echo x > tests/fixture.c3l; echo y > newfile.c3
 check_not "untracked packaged file is dirt" pc check --offline --no-build
 rm newfile.c3
@@ -446,21 +449,17 @@ rm newfile.c3
 ( umask 077; c3l pack --no-build --allow-dirty --output "$WORK/u7.c3l" >/dev/null 2>&1 )
 eq "pack independent of umask" "$(sha "$WORK/u2.c3l")" "$(sha "$WORK/u7.c3l")"
 has "nested .c3l kept" "tests/fixture.c3l" "$(unzip -l "$WORK/u2.c3l")"
-check_not "obj/ and c3l.lock not packed" bash -c "unzip -l '$WORK/u2.c3l' | grep -q -e obj/ -e c3l.lock"
+check_not "obj/ not packed" bash -c "unzip -l '$WORK/u2.c3l' | grep -q obj/"
 rm -rf obj c3l.lock tests
 out="$(pc check --offline --version 2>&1)"; eq "--version without value rc" $? 2
 has "--version message" "needs a value" "$out"
 
-# publishing a library that has dependencies: vendor.c3l.requires comes from its own c3l.lock
+# publishing a library that has dependencies: its c3l.lock is packed, the manifest is left alone
 printf '# c3l.lock v1\ndcb\tregistry\thttp://example.invalid/v1\tacme/dcb\t1.2.0\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tdirect\t-\ndcc\tregistry\thttp://example.invalid/v1\tacme/dcc\t1.0.0\tsha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tsha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tdep\t-\ngl\tgit\thttps://github.com/o/gl\t-\tv0.3.0\tcommit:cccccccccccccccccccccccccccccccccccccccc\tcommit:cccccccccccccccccccccccccccccccccccccccc\tdirect\t-\n' > c3l.lock
-c3l pack --no-build --output "$WORK/withdeps.c3l" >/dev/null 2>&1; eq "pack with a lockfile rc" $? 0
-man="$(unzip -p "$WORK/withdeps.c3l" manifest.json)"
-has "requires has the registry dependency and its registry" '"source": "acme/dcb", "registry": "http://example.invalid/v1", "version": "1.2.0"' "$man"
-has "requires has the git dependency" '"source": "https://github.com/o/gl", "version": "v0.3.0"' "$man"
-check_not "transitive-only libs are not listed" grep -q acme/dcc <<< "$man"
-check_not "c3l.lock itself is not packed" bash -c "unzip -l '$WORK/withdeps.c3l' | grep -q c3l.lock"
+c3l pack --no-build --allow-dirty --output "$WORK/withdeps.c3l" >/dev/null 2>&1; eq "pack with a lockfile rc" $? 0
+check "c3l.lock is packed" cmp -s c3l.lock <(unzip -p "$WORK/withdeps.c3l" c3l.lock)
+check_not "no vendor block is written" bash -c "unzip -p '$WORK/withdeps.c3l' manifest.json | grep -q vendor"
 has "repo manifest untouched" '"provides" : "demo"' "$(cat manifest.json)"
-check_not "no requires without a lock" bash -c "unzip -p '$WORK/a.c3l' manifest.json | grep -q requires"
 rm -f c3l.lock
 sed -i 's|"provides" : "demo",|"provides" : "demo",\n  "dependencies" : [ "nowhere", "demo" ],|' manifest.json
 out="$(pc check --offline --no-build --allow-dirty 2>&1)"; eq "undeclared dependency is a warning, not an error" $? 0
@@ -468,12 +467,11 @@ has "warns where-from is missing" "'nowhere' is in the manifest's dependencies b
 has "warns about self dependency" "demo lists itself as a dependency" "$out"
 git checkout -q manifest.json
 
-# vendor block goes to the top level even if a nested "version" comes first
+# the version goes to the top level even if a nested "version" comes first
 printf '# c3l.lock v1\ndcb\tregistry\thttp://example.invalid\tacme/dcb\t1.2.0\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tdirect\t-\n' > c3l.lock
 sed -i 's|"provides" : "demo",|"targets-note" : { "version" : "9" },\n  "provides" : "demo",|' manifest.json
 c3l pack --no-build --allow-dirty --output "$WORK/nested.c3l" >/dev/null 2>&1; eq "pack with a nested version rc" $? 0
 flat="$(unzip -p "$WORK/nested.c3l" manifest.json | flat)"
-has "vendor block at top level" "^vendor.c3l.requires\[0\].source	acme/dcb" "$flat"
 has "nested version untouched" "^targets-note.version	9" "$flat"
 has "top-level version set" "^version	" "$flat"
 rm -f c3l.lock; git checkout -q manifest.json
@@ -573,8 +571,15 @@ out="$(c3l check 2>&1)"; eq "check with installed dependencies rc" $? 0
 has "compile check sees lib/" "compiles" "$out"
 c3l pack --no-build --output "$WORK/lm.c3l" >/dev/null 2>&1
 check_not "installed dependencies are not packed" bash -c "unzip -l '$WORK/lm.c3l' | grep -q 'lib/'"
-has "requires written from the lock" 'acme/lmb' "$(unzip -p "$WORK/lm.c3l" manifest.json)"
-check "untracked c3l.lock and ignored lib/ do not make the tree dirty" c3l check --offline --no-build
+has "the lock is packed" 'acme/lmb' "$(unzip -p "$WORK/lm.c3l" c3l.lock)"
+check "a committed c3l.lock and ignored lib/ do not make the tree dirty" c3l check --offline --no-build
+publish acme/lm 0.1.1 --from="$WORK/lm.c3l" >/dev/null
+newproj lmcons
+c3l init >/dev/null 2>&1
+out="$(c3l add acme/lm 2>&1)"; eq "add a published library that has a lock rc" $? 0
+has "its locked dependency follows" "lmb installed for lm" "$out"
+check "and that one's dependency too" test -f lib/lmc.c3l
+cd "$WORK/libm/lm.c3l" || exit 1
 rm -f lib/lmb.c3l lib/lmc.c3l
 c3l sync >/dev/null 2>&1; eq "sync in a library directory rc" $? 0
 check "sync restored lib/lmc.c3l" test -f lib/lmc.c3l

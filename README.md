@@ -96,26 +96,19 @@ c3l why dcc           # who requires dcc?
 c3l remove app && c3l prune
 ```
 
-A library declares its dependencies by being managed with c3l: run `c3l add`
-in the library directory and commit its `c3l.lock`. Whoever installs the library
-from git (or as a local directory) gets what that lock lists as direct
-dependencies, from the same sources, at least at the locked versions.
+Apps and libraries work the same way: `c3l.lock` is the only place c3l writes
+dependencies to. A library declares its dependencies by being managed with c3l:
+run `c3l add` in the library directory and commit its `c3l.lock`. It travels
+with the library, in the git archive or in the package `c3l pack` builds, and
+whoever installs the library gets what that lock lists as direct dependencies,
+from the same sources, at least at the locked registry versions (git: the locked
+tag, branch or commit; `update` moves a tag like any other version).
 
-Packages on a registry carry no lockfile, so `c3l publish` writes the same
-information into the package's `manifest.json`, which you can also write by hand:
-
-```json
-"vendor": { "c3l": { "requires": [
-    { "name": "vk", "source": "tonis2/vk", "version": "1.0.1" } ] } }
-```
-
-`source` is a registry id or git URL. `version` is a minimum (registry) or a
-tag, branch or commit (git; `update` moves a tag like any other version). A registry dependency may add `"registry": "<base URL>"`;
-without it the default registry is used.
-
-For each name the first of these wins: `vendor.c3l.requires`, the library's
-`c3l.lock`, c3po's `vendor.c3po.sources`, plain `dependencies` (no source: a
-warning). Dependencies listed only for one target in `project.json` count too.
+c3l also reads, but never writes: `vendor.c3l.requires` in a manifest (packages
+published by c3l 1.1), c3po's `vendor.c3po.sources`, and plain `dependencies`
+names (no source: a warning). For each name the first of these wins:
+`vendor.c3l.requires`, `c3l.lock`, `vendor.c3po.sources`, `dependencies`.
+Dependencies listed only for one target in `project.json` count too.
 
 Rules:
 
@@ -151,7 +144,7 @@ c3l publish --description "My library" --license MIT --tags "gpu,vulkan"
 - **Package**: built from git-tracked files, deterministically.
 - **Checks**: valid `manifest.json`, clean working tree (`--allow-dirty`), library compiles (`--no-build`), version not yet published, a `--description` on first publish.
 - **Token**: create it in the registry under Settings, API tokens. Never pass it as a command-line argument.
-- **Dependencies**: `c3l add` them inside the library directory. They go into `manifest.json` automatically. Local `./dir` dependencies are refused.
+- **Dependencies**: `c3l add` them inside the library directory and commit `c3l.lock`; it is packed with the library. Local `./dir` dependencies are refused.
 
 Other options, given after `check`, `pack` or `publish`: `--license`, `--tags`, `--docs-url`, `--git-url`, `--c3-version`, `--output`, `--offline`. Before or after the command: `--registry-type`.
 

@@ -3,9 +3,9 @@
  together with the library's own c3l.lock when it has one.
 
  What a library requires, per name, in this order of precedence:
-   vendor.c3l.requires   [{name, source, version, registry}]  written by publish
-   c3l.lock              its direct entries                   a library shared through git
-   vendor.c3po.sources   [{name, source}]                     read-only c3po compatibility
+   vendor.c3l.requires   [{name, source, version, registry}]  read only: packages published by c3l 1.1
+   c3l.lock              its direct entries                   how c3l libraries declare them
+   vendor.c3po.sources   [{name, source}]                     read only: c3po compatibility
    dependencies          names only (top level and per target), no source
 *>
 module c3l::manifest;
@@ -27,8 +27,6 @@ struct Manifest
 	String version;
 	String[] dependencies;  // top level "dependencies"
 	Requirement[] requires;
-	bool has_vendor;        // there is a "vendor" block
-	bool has_c3l_requires;  // ... and it has vendor.c3l.requires
 	String invalid;         // a required name that is not a valid library name (not in `requires`)
 	String[] notes;         // what was not followed, and why: for the user
 }
@@ -67,12 +65,11 @@ fn Manifest? parse(String text, String lock_text = "")
 
 	List{Requirement} reqs;
 	reqs.tinit();
-	if (try vendor = root.get("vendor"))
+	Object* vendor = root.get("vendor") ?? null;
+	if (vendor && vendor.is_map())
 	{
-		m.has_vendor = true;
 		if (try c3l = vendor.get("c3l"))
 		{
-			m.has_c3l_requires = c3l.has_key("requires");
 			foreach (r : objects(c3l, "requires"))
 			{
 				add(&m, &reqs, {
@@ -99,7 +96,7 @@ fn Manifest? parse(String text, String lock_text = "")
 			notes.push(string::tformat("its %s; what it locks is not followed", why));
 		}
 	}
-	Object* c3po = m.has_vendor ? root.get("vendor").get("c3po") ?? null : null;
+	Object* c3po = vendor && vendor.is_map() ? vendor.get("c3po") ?? null : null;
 	if (c3po && c3po.is_map())
 	{
 		long version = c3po.get_long("c3po-version") ?? 1;
@@ -128,7 +125,7 @@ fn Manifest? parse(String text, String lock_text = "")
 }
 
 <*
- What a library's own lock says it requires: its direct entries, each from the
+ What a library's own lock says it requires (how consumers read it): its direct entries, each from the
  source it was installed from, at least at the locked version (registry), at
  the locked tag, branch or commit (git). Local directories cannot be fetched by
  anyone else and are left out.
