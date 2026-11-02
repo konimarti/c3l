@@ -35,8 +35,11 @@ def main():
         if "requires" in opts:
             reqs = []
             for item in opts["requires"].split(","):
-                rid, _, rver = item.partition(":")
-                r = {"name": rid.split("/")[-1], "source": rid}
+                if item.startswith("vendor:"):   # vendor:<name> has no version
+                    rid, rver = item, ""
+                else:
+                    rid, _, rver = item.partition(":")
+                r = {"name": rid.split("/")[-1].split(":")[-1], "source": rid}
                 if rver:
                     r["version"] = rver
                 if "reqreg" in opts:

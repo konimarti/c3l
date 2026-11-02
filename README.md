@@ -42,6 +42,7 @@ needed only by some commands; c3l tells you which one is missing.
 | `init [name]` | create `c3l.lock` (and a project with `c3c init name`) |
 | `add <ns/name[@ver]>` | install from the registry |
 | `add <git-url>[@ref]` | install from git. No ref: highest semver tag, else HEAD. Tags and commits stay pinned; branches and `HEAD` follow the tip on `update` |
+| `add vendor:<name>` | install from c3c's vendor collection (raylib, sdl3, sqlite3, …); `add vendor` lists it |
 | `add ./dir` | symlink a local library into `lib/` (never publishable) |
 | `remove <name>` | remove a library; refuses if another needs it (`--force`) |
 | `prune` | remove dependencies nothing needs any more (`--dry-run`) |
@@ -81,7 +82,7 @@ use works with c3l. A library installed with plain `c3c fetch` shows up as
 `untracked` and fails `verify` and `sync --frozen` until you run
 `c3l add <ns/name>@<version>` for it.
 
-Not supported: `c3c vendor-fetch`, `c3c project fetch`, and registries that
+Not supported: `c3c project fetch` (use `c3l sync`), and registries that
 need authentication to download.
 
 ## Dependencies

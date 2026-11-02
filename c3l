@@ -15,6 +15,9 @@ PROGRAM="${0##*/}"
 C3C="${C3C:-c3c}"
 LOCK="${C3L_LOCK:-c3l.lock}"
 DEFAULT_REGISTRY="https://www.c3pkg.eu"
+# c3c's vendor collection: one rolling GitHub release, no versions. The API gives a sha256 per file.
+VENDOR_URL="${C3L_VENDOR_URL:-https://github.com/c3lang/vendor/releases/download/latest}"
+VENDOR_API="${C3L_VENDOR_API:-https://api.github.com/repos/c3lang/vendor/releases/tags/latest}"
 TAB=$'\t'
 
 REGISTRY_OPT=""
@@ -271,8 +274,10 @@ effective_role() { # name role
 #        <TAB> requires (comma separated names this library requires, "-" if none)
 # origin is where the library is fetched from, exactly as the fetch tool wants it:
 #   registry  the registry base URL (what c3c gets as --fetch-url), no trailing slash
+#   vendor    the base URL of the vendor release (id = library name)
 #   git       the repository URL          path  the directory
-# id is the name inside the origin: <namespace>/<name> for a registry, "-" otherwise.
+# id is the name inside the origin: <namespace>/<name> for a registry, the library name for
+# vendor, "-" otherwise.
 # hash: registry = sha256 of the file; git = the commit.
 # There is no global registry: every line says where it came from.
 #
@@ -417,6 +422,50 @@ install_registry_one() { # origin id version(optional) pin(optional)
 	read_reqs "$name" "$file"
 	lock_put "$name" registry "$CUR_REG" "$id" "$want" "$got" "$got" "$role" "$REQ_NAMES"
 	info "installed $name $want ($got)"
+}
+
+# The vendor collection (vendor:<name>): files of one rolling release, so the only thing to pin is
+# the file's sha256, which GitHub lists for every asset.
+vendor_assets() { # -> "name<TAB>sha256:<hex>" per library ("-" = no digest listed)
+	local out
+	out="$(curl -fsS -m 30 "$VENDOR_API" 2>/dev/null)" || return 1
+	json_flatten <<< "$out" | awk -F'\t' '
+		$1 ~ /^assets\[[0-9]+\]\.(name|digest)$/ { i = $1; sub(/^assets\[/, "", i); sub(/\].*/, "", i); k = $1; sub(/.*\./, "", k); r[i, k] = $2; if (!(i in s)) { s[i] = 1; o[++n] = i } }
+		END { for (j = 1; j <= n; j++) { i = o[j]; nm = r[i, "name"]; if (nm ~ /\.c3l$/) { sub(/\.c3l$/, "", nm); print nm "\t" (r[i, "digest"] == "" ? "-" : r[i, "digest"]) } } }'
+}
+
+install_vendor_one() { # origin name pin(optional)
+	local origin="${1%/}" name="$2" pin="$3" list line sum expected dir file got prov role
+	need curl
+	[[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "'$name' is not a vendor library name"
+	check_collision "$name" vendor "$origin" "$name"
+	sum=""
+	if [[ -z "$pin" ]]; then   # a pinned (lock) restore needs no lookup: the lock has the digest
+		list="$(vendor_assets)" || die "cannot read the vendor library list ($VENDOR_API)"
+		line="$(awk -F'\t' -v n="$name" '$1==n' <<< "$list")"
+		[[ -n "$line" ]] || die "no vendor library '$name' (list them with: $PROGRAM add vendor)"
+		sum="${line#*$'\t'}"; [[ "$sum" == - ]] && sum=""
+	fi
+	expected="$pin"; [[ -n "$expected" ]] || expected="$sum"
+	[[ -n "$expected" ]] || warn "no checksum is listed for vendor:$name; recording the downloaded file (trust on first use)"
+
+	find_project
+	txn_begin "$name"
+	dir="$TXN_DIR"; file="$dir/$name.c3l"
+	mkdir -p "$dir"; rm -rf "$file"
+	info "fetching vendor:$name from $origin"
+	curl -fsSL -m 300 -o "$file" "$origin/$name.c3l" || txn_fail "download of vendor:$name failed"
+	got="sha256:$(sha256_file "$file")"
+	if [[ -n "$expected" && "$got" != "$expected" ]]; then
+		txn_fail "checksum mismatch for vendor:$name: expected $expected, got $got"
+	fi
+	prov="$(zip_read "$file" manifest.json | json_string_field provides)"
+	[[ -z "$prov" || "$prov" == "$name" ]] || warn "manifest of vendor:$name provides '$prov', c3c will register it as '$name'"
+	register_dep "$name" "$(effective_role "$name" "$INSTALL_ROLE")" || txn_fail "could not register $name in $PROJECT"
+	role="$INSTALL_ROLE"; [[ -n "$pin" ]] && role=keep
+	read_reqs "$name" "$file"
+	lock_put "$name" vendor "$origin" "$name" latest "$got" "$got" "$role" "$REQ_NAMES"
+	info "installed $name ($got)"
 }
 
 git_tags() { # url -> "tag commit" lines (annotated tags peeled)
@@ -733,11 +782,14 @@ satisfy_existing() { # parent name source version lock-record registry
 		if [[ "$ekind" == registry ]]; then
 			is_registry_id "$src" || same=0
 			if (( same )); then want_origin="$(req_registry "$reg")"; [[ "$want_origin" == "$eorigin" && "$src" == "$eid" ]] || same=0; fi
+		elif [[ "$ekind" == vendor ]]; then
+			[[ "$src" == "vendor:$eid" ]] || same=0
 		else
 			same_source "$src" "$eorigin" || same=0
 		fi
 		if (( ! same )); then
 			[[ "$ekind" == registry ]] && eorigin="$eorigin $eid"
+			[[ "$ekind" == vendor ]] && eorigin="$eid"
 			die "'$name' is installed from $ekind:$eorigin but $parent requires it from ${reg:+$reg }$src. Library names are global in a project; remove one of them"
 		fi
 	fi
@@ -780,7 +832,10 @@ resolve_req() { # parent name source version registry
 	DEP_COUNT=$((DEP_COUNT+1))
 	(( DEP_COUNT <= DEP_MAX )) || die "more than $DEP_MAX transitive libraries; refusing (see C3L_MAX_DEPS)"
 	saved="$INSTALL_ROLE"; INSTALL_ROLE=dep
-	if is_git_url "$src"; then trust_host "$src"; install_git_one "$src" "$(git_ref_of "$ver")" ""
+	if [[ "$src" == vendor:* ]]; then
+		trust_host "$VENDOR_URL"
+		install_vendor_one "$VENDOR_URL" "${src#vendor:}" ""
+	elif is_git_url "$src"; then trust_host "$src"; install_git_one "$src" "$(git_ref_of "$ver")" ""
 	elif is_registry_id "$src"; then
 		origin="$(req_registry "$reg")"
 		registry_known "$origin" || trust_host "$origin"
@@ -820,6 +875,12 @@ install_registry() { # origin id version pin
 	[[ -n "$4" ]] || follow_deps "$nm" "$rq"
 	op_commit
 }
+install_vendor() { # origin name pin
+	install_vendor_one "$@"
+	local nm="$LAST_NAME" rq="$LAST_REQS"
+	[[ -n "$3" ]] || follow_deps "$nm" "$rq"
+	op_commit
+}
 install_git() { # url ref pin
 	install_git_one "$@"
 	local nm="$LAST_NAME" rq="$LAST_REQS"
@@ -855,6 +916,10 @@ lib_status() { # name hash dir kind pin
 latest_for() { # kind origin id version pin -> newest version label (empty if unknown)
 	case "$1" in
 		registry) local CUR_REG="$2"; registry_info "$3" 2>/dev/null | info_latest ;;
+		vendor) local d
+			d="$(vendor_assets 2>/dev/null | awk -F'\t' -v n="$3" '$1==n{print $2}')"
+			[[ -n "$d" && "$d" != - && "$d" != "$5" ]] && echo "HEAD@${d#sha256:}" | cut -c1-17
+			return 0 ;;
 		git) local t h
 			case "$4" in
 				HEAD) h="$(git_head "$2")" ;;
@@ -1082,7 +1147,9 @@ pub_requires_json() { # dir
 	while IFS=$'\t' read -r name kind origin id version _ _ role _; do
 		[[ "$role" == direct && "$kind" != path ]] || continue
 		[[ "$kind" == git && "$version" == HEAD ]] && version=""
+		[[ "$kind" == vendor ]] && version=""
 		src="$origin"; reg=""
+		[[ "$kind" == vendor ]] && src="vendor:$id"
 		if [[ "$kind" == registry ]]; then src="$id"; reg=", \"registry\": \"$origin\""; fi
 		out+="${out:+, }{ \"name\": \"$name\", \"source\": \"$src\"$reg${version:+, \"version\": \"$version\"} }"
 	done < <(LOCK="$lock" lock_entries)
@@ -1245,6 +1312,7 @@ cmd_usage() {
 
 	  init [name]               create a lockfile (and a project with 'c3c init name')
 	  add <ns/name[@ver]>       install from the registry, verify, lock       (alias: fetch, f)
+	  add vendor:<name>         install from c3c's vendor collection ('add vendor' lists them)
 	  add <git-url>[@ref] [ref] install from git; ref = tag, branch, HEAD or commit
 	  add ./dir                 link a local library directory (edits show up at once)
 	  remove <name>             remove library, project entry and lock line   (alias: rm)
@@ -1284,9 +1352,18 @@ cmd_init() {
 }
 
 cmd_add() {
-	(( $# >= 1 )) || die "Usage: $PROGRAM add <ns/name[@version]> | <git-url>[@tag|branch|HEAD|commit] | <./dir>"
+	(( $# >= 1 )) || die "Usage: $PROGRAM add <ns/name[@version]> | vendor:<name> | <git-url>[@tag|branch|HEAD|commit] | <./dir>"
 	find_project
 	local arg="$1" url ref="" last
+	if [[ "$arg" == vendor || "$arg" == vendor: ]]; then
+		need curl
+		vendor_assets | cut -f1 | sed 's/^/vendor:/' || die "cannot read the vendor library list ($VENDOR_API)"
+		return 0
+	elif [[ "$arg" == vendor:* ]]; then
+		[[ "$arg" != *@* ]] || die "vendor libraries have no versions (the collection is one rolling release); use vendor:<name>"
+		install_vendor "$VENDOR_URL" "${arg#vendor:}" ""
+		return 0
+	fi
 	url="$arg"; last="${arg##*/}"
 	if [[ "$arg" == */* && "$last" == *@* ]]; then ref="${last#*@}"; url="${arg%@"$ref"}"; fi
 	if is_path_dep "$arg"; then
@@ -1299,7 +1376,7 @@ cmd_add() {
 		if [[ "$arg" == *@* ]]; then install_registry "$(default_registry)" "${arg%%@*}" "${arg#*@}" ""
 		else install_registry "$(default_registry)" "$arg" "" ""; fi
 	else
-		die "'$arg' is neither <namespace>/<name>[@version] nor a git URL"
+		die "'$arg' is neither <namespace>/<name>[@version], vendor:<name> nor a git URL"
 	fi
 }
 
@@ -1393,7 +1470,7 @@ cmd_list() {
 	dir="$(lib_dir)" || exit 1; deps="$(deps_list)"
 	while IFS=$'\t' read -r name kind origin id version pin hash role reqs; do
 		[[ -n "$name" ]] || continue
-		where="$origin"; [[ "$kind" == registry ]] && where="$id ($origin)"
+		where="$origin"; [[ "$kind" == registry ]] && where="$id ($origin)"; [[ "$kind" == vendor ]] && where="vendor:$id"
 		n=$((n+1))
 		st="$(lib_status "$name" "$hash" "$dir" "$kind" "$pin")"
 		grep -qx -- "$name" <<< "$deps" || { (( LIBMODE )) && [[ "$role" == dep ]]; } || st="$st,not-in-project"
@@ -1489,6 +1566,7 @@ install_kind() { # name kind origin id version pin ("" = fresh install, not a re
 	case "$2" in
 		registry) install_registry "$3" "$4" "$5" "$6" ;;
 		git) install_git "$3" "$5" "$6" ;;
+		vendor) install_vendor "$3" "$4" "$6" ;;
 		path) [[ -d "$3" ]] || die "path dependency $1: $3 does not exist here"; install_path "$3" "$6" ;;
 		*) die "unknown source kind '$2' for $1" ;;
 	esac

@@ -107,6 +107,15 @@ Options may appear before or after the command.
 	download with the registry's checksum, write the lock line. A mismatch or any
 	failure restores the previous library file and _project.json_.
 
+*add* vendor:_name_, *add* vendor
+	Install a library from c3c's vendor collection (the files of the _c3lang/vendor_
+	release _latest_, what *c3c vendor-fetch* downloads). The collection has no
+	versions, so the lock pins the SHA-256 that GitHub lists for the file (kind
+	_vendor_, version _latest_). *sync* fails if the file changed upstream; *outdated*
+	shows such a change and *update* re-pins it. If no digest is listed, c3l warns and
+	records the download. Plain *add vendor* lists the collection. A library may
+	require one with _"source": "vendor:name"_. Needs *curl*.
+
 *add* _./dir_
 	Link a local library directory (_./dir_, _../dir_ or an absolute path with a
 	_manifest.json_) into _lib/_ with a symlink, so edits show up in the next build.
@@ -260,7 +269,7 @@ box2d	registry	https://www.c3pkg.eu	jecokef902/box2d	1.0.0	sha256:4945...	sha256
 hex	git	https://github.com/konimarti/hex.c3l	-	v0.1.1	commit:3fa9...	commit:3fa9...	direct	-
 ```
 
-Columns: name, kind (_registry_, _git_ or _path_), origin, id, version, pin (checksum
+Columns: name, kind (_registry_, _git_, _vendor_ or _path_), origin, id, version, pin (checksum
 or commit), SHA-256 of the installed file (registry) or the commit again (git), role
 (_direct_: added by you; _dep_: required by another library) and the comma
 separated names the library requires (_-_ for none).

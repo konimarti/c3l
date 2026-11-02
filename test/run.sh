@@ -713,6 +713,67 @@ has "refusal names the host" "not trusted" "$out"
 out="$(c3l --allow-host 127.0.0.1 add acme/mr4 2>&1 </dev/null)"; eq "allowed registry rc" $? 0
 eq "dependency came from its registry" "$(awk -F'\t' '$1=="mr3"{print $3}' c3l.lock)" "$C3L_REGISTRY/c3/v2"
 
+section "vendor collection (vendor:<name>)"
+VEN="$REG/vendor"; mkdir -p "$VEN/latest"
+vendor_make() { # name content-marker [nodigest]: write the file and the API record for the vendor stub
+	python3 -I - "$VEN" "$1" "$2" "${3:-}" <<'PY'
+import hashlib, json, os, sys, zipfile
+root, name, marker, nodigest = sys.argv[1:5]
+f = os.path.join(root, "latest", name + ".c3l")
+with zipfile.ZipFile(f, "w") as z:
+    z.writestr("manifest.json", json.dumps({"provides": name}))
+    z.writestr("marker", marker)
+api = os.path.join(root, "api.json")
+d = json.load(open(api)) if os.path.exists(api) else {"assets": []}
+d["assets"] = [a for a in d["assets"] if a["name"] != name + ".c3l"]
+a = {"name": name + ".c3l"}
+if not nodigest:
+    a["digest"] = "sha256:" + hashlib.sha256(open(f, "rb").read()).hexdigest()
+d["assets"].append(a)
+json.dump(d, open(api, "w"))
+PY
+}
+vendor_make vz one; vendor_make vnd one nodigest
+export C3L_VENDOR_URL="$C3L_REGISTRY/vendor/latest" C3L_VENDOR_API="$C3L_REGISTRY/vendor/api.json"
+newproj vd
+c3l init >/dev/null 2>&1
+out="$(c3l add vendor 2>&1)"; has "lists the collection" "vendor:vz" "$out"
+out="$(c3l add vendor:vz 2>&1)"; eq "add vendor rc" $? 0
+check "installed" test -f lib/vz.c3l
+has "registered" '"vz"' "$(cat project.json)"
+VSUM="sha256:$(sha vz 2>/dev/null || sha lib/vz.c3l)"
+eq "lock line" "$(awk -F'\t' '$1=="vz"{print $2 " " $3 " " $4 " " $5 " " $6}' c3l.lock)" "vendor $C3L_VENDOR_URL vz latest $VSUM"
+check "verify" c3l verify
+has "list shows vendor:" "vz .*vendor:vz" "$(c3l list)"
+out="$(c3l add vendor:nope 2>&1)"; eq "unknown vendor library rc" $? 1
+has "unknown explained" "no vendor library 'nope'" "$out"
+out="$(c3l add vendor:vz@1.0 2>&1)"; eq "vendor has no versions rc" $? 1
+rm -f lib/vz.c3l; c3l sync >/dev/null 2>&1; eq "sync restores rc" $? 0
+check "restored" test -f lib/vz.c3l
+check "sync --frozen is clean" c3l sync --frozen
+# the collection replaces a file: sync must refuse it, outdated must see it, update must re-pin
+vendor_make vz two
+rm -f lib/vz.c3l
+out="$(c3l sync 2>&1)"; eq "changed upstream: sync fails rc" $? 1
+has "mismatch explained" "checksum mismatch for vendor:vz" "$out"
+check_not "nothing left behind" test -e lib/vz.c3l
+out="$(c3l outdated 2>&1)"; has "outdated sees the change" "vz .*latest.*-> HEAD@" "$out"
+c3l update >/dev/null 2>&1; eq "update rc" $? 0
+eq "update re-pins" "$(awk -F'\t' '$1=="vz"{print $6}' c3l.lock)" "sha256:$(sha lib/vz.c3l)"
+check "verify after update" c3l verify
+out="$(c3l outdated 2>&1)"; has "up to date again" "up to date" "$out"
+# no digest in the listing: warn and record the download
+out="$(c3l add vendor:vnd 2>&1)"; eq "no digest rc" $? 0
+has "trust on first use warning" "no checksum is listed for vendor:vnd" "$out"
+# a library can depend on a vendor library
+publish acme/vuser 1.0.0 --requires=vendor:vz >/dev/null
+newproj vd2
+c3l init >/dev/null 2>&1
+out="$(c3l --allow-host 127.0.0.1 add acme/vuser 2>&1 </dev/null)"; eq "dependency on vendor:vz rc" $? 0
+eq "vz came in as a dep" "$(awk -F'\t' '$1=="vz"{print $2 "/" $8}' c3l.lock)" "vendor/dep"
+eq "vuser requires vz" "$(awk -F'\t' '$1=="vuser"{print $9}' c3l.lock)" "vz"
+unset C3L_VENDOR_URL C3L_VENDOR_API
+
 section "cli"
 has "help" "reproducible dependencies" "$(c3l help)"
 has "version" "c3l 1" "$(c3l version)"
