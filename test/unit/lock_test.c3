@@ -1,6 +1,6 @@
 module c3l::lock_test;
 
-import std::io, c3l::lock;
+import std::io, c3l::lock, c3l::sys;
 
 const String SAMPLE = lock::HEADER +++
 	"app\tgit\thttps://h/app\t-\tv1.0.0\tcommit:0123456789abcdef0123456789abcdef01234567\tcommit:0123456789abcdef0123456789abcdef01234567\tdirect\tmid\n"
@@ -8,9 +8,12 @@ const String SAMPLE = lock::HEADER +++
 	"leaf\tvendor\thttps://v\tleaf\tlatest\tsha256:2222222222222222222222222222222222222222222222222222222222222222\tsha256:2222222222222222222222222222222222222222222222222222222222222222\tdep\t-\n"
 	"lost\tpath\t../lost\t-\t-\t-\t-\tdep\t-\n";
 
+fn void drop(String lock_file) => sys::remove(lock_file[:lock_file.rindex_of_char('/')!!]);
+
+// A lockfile in a fresh temporary directory (parallel runs do not collide).
 fn String tmp_lock(String content)
 {
-	String f = string::tformat("%s/c3l-lock-test.lock", path::temp_directory(tmem)!!);
+	String f = string::tformat("%s/c3l.lock", sys::temp_dir()!!);
 	file::save(f, content)!!;
 	return f;
 }
@@ -30,14 +33,14 @@ fn void round_trip() @test
 	assert(back.contains("\nleaf\tvendor") && back.index_of("app\t")!! < back.index_of("leaf\t")!!);
 	assert(back.contains("\tdep\t-\n"));
 	assert(lock::load(f)!!.entries.len() == 4);
-	file::delete(f);
+	drop(f);
 }
 
 fn void old_format_refused() @test
 {
 	String f = tmp_lock(lock::HEADER +++ "a\tgit\turl\t-\tv1\tcommit:x\tcommit:x\n");
 	assert(@catch(lock::load(f)));
-	file::delete(f);
+	drop(f);
 }
 
 fn void put_del() @test
@@ -50,7 +53,7 @@ fn void put_del() @test
 	assert(l.entries.len() == 5);
 	l.del("new");
 	assert(!l.has("new") && l.entries.len() == 4);
-	file::delete(f);
+	drop(f);
 }
 
 fn void graph() @test
@@ -64,7 +67,7 @@ fn void graph() @test
 	assert(d.len == 1 && d[0] == "mid");
 	String[] o = l.orphans();
 	assert(o.len == 1 && o[0] == "lost");
-	file::delete(f);
+	drop(f);
 }
 
 // A lock may come from someone else's repository: what c3l cannot have written is refused.
@@ -83,10 +86,10 @@ fn void damaged_lines_refused() @test
 	{
 		String f = tmp_lock(string::tformat("%s%s", lock::HEADER, line));
 		assert(@catch(lock::load(f)), "accepted: %s", line);
-		file::delete(f);
+		drop(f);
 	}
 	String good = string::tformat("%sx\tgit\thttps://h/x\t-\tHEAD\tcommit:%s\tcontent:%s\tdirect\t-\n", lock::HEADER, c40, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
 	String f = tmp_lock(good);
 	assert(@ok(lock::load(f)), "a git entry with the archive's content hash is valid");
-	file::delete(f);
+	drop(f);
 }

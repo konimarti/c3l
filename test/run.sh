@@ -801,6 +801,11 @@ out="$(c3l sync --frozen 2>&1)"; eq "frozen sync with a failing restore rc" $? 1
 check "--frozen leaves the lockfile alone" cmp -s c3l.lock "$WORK/lock.bad"
 eq "--frozen does not touch the lockfile" "$(date -r c3l.lock +%Y)" "2001"
 check_not "no backup debris" bash -c "ls -A lib | grep -q c3l-backup"
+newproj rv4
+printf '{ "langrev": "1", "sources": ["src/**"], "targets": { "app": { "type": "executable" } } }\n' > project.json
+cp project.json "$WORK/project.rv4"
+c3l add acme/nope >/dev/null 2>&1
+check "a failed add also takes back the \"lib\" it added" cmp -s project.json "$WORK/project.rv4"
 publish acme/fa 1.0.0 >/dev/null; publish acme/fb 1.0.0 --requires=acme/fa:1.0.0 >/dev/null
 newproj rv2
 c3l init >/dev/null 2>&1
