@@ -8,6 +8,7 @@ module c3l::http;
 import std::io, curl, c3l::sys;
 
 const usz MAX_BODY = 64 * 1024 * 1024;
+const long SSLOPT_REVOKE_BEST_EFFORT @private = 1 << 3;  // CURLSSLOPT_REVOKE_BEST_EFFORT
 
 struct Response
 {
@@ -19,6 +20,9 @@ struct Response
 
 // The transfer worked and the server did not answer with an error status.
 fn bool Response.ok(&self) => !self.error.len && self.status < 400;
+
+// Why it did not work, for messages.
+fn String Response.why(&self) => self.error.len ? self.error : string::tformat("HTTP %d", self.status);
 
 // A multipart form field: `value`, or the contents of `file` when that is set.
 struct Part
@@ -82,6 +86,9 @@ fn Response request(Request req)
 	curl::easy_setopt(h, CurlOption.ERRORBUFFER, &err);
 	curl::easy_setopt(h, CurlOption.NOSIGNAL, 1L);
 	curl::easy_setopt(h, CurlOption.CONNECTTIMEOUT, 15L);
+	$if env::WIN32:  // Schannel fails when it cannot reach a revocation list; downloads are checked by sha256
+		curl::easy_setopt(h, CurlOption.SSL_OPTIONS, SSLOPT_REVOKE_BEST_EFFORT);
+	$endif
 	curl::easy_setopt(h, CurlOption.TIMEOUT, req.timeout);
 
 	CurlMime* mime;

@@ -166,7 +166,8 @@ fn Manifest? Op.install_registry(&self, Want w, Intent intent)
 	String staged = self.staging(name);
 	defer (void)file::delete(staged);
 	log::info("fetching %s@%s from %s", w.id, version, w.origin);
-	if (!registry::download(w.origin, w.id, version, staged)) return log::fail("download of %s@%s from %s failed", w.id, version, w.origin)~;
+	Response r = registry::download(w.origin, w.id, version, staged);
+	if (!r.ok()) return log::fail("download of %s@%s from %s failed: %s", w.id, version, w.origin, r.why())~;
 	String got = verify(staged, expected, string::tformat("%s@%s", w.id, version))!;
 	warn_provides(staged, name, w.id);
 	Manifest m = self.place({ .name = name, .kind = REGISTRY, .origin = w.origin, .id = w.id, .version = version, .pin = got, .hash = got }, staged, intent)!;
@@ -195,7 +196,8 @@ fn Manifest? Op.install_vendor(&self, Want w, Intent intent)
 	String staged = self.staging(name);
 	defer (void)file::delete(staged);
 	log::info("fetching vendor:%s from %s", name, w.origin);
-	if (!http::download(project::lib_file(w.origin, name), staged).ok()) return log::fail("download of vendor:%s failed", name)~;
+	Response r = http::download(project::lib_file(w.origin, name), staged);
+	if (!r.ok()) return log::fail("download of vendor:%s failed: %s", name, r.why())~;
 	if (w.pin.len && (sys::sha256_file(staged) ?? "") != w.pin)
 	{
 		return log::fail("vendor:%s changed upstream (the collection is one rolling release, it has no versions); 'c3l update %s' takes the new file", name, name)~;

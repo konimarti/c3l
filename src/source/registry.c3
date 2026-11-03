@@ -92,9 +92,9 @@ fn String Info.checksum(&self, String version)
 	return v && v.is_map() ? v.get_string("checksum") ?? "" : "";
 }
 
-fn bool download(String base, String id, String version, String file)
+fn Response download(String base, String id, String version, String file)
 {
-	return http::download(string::tformat("%s/download/%s@%s", base, id, version), file).ok();
+	return http::download(string::tformat("%s/download/%s@%s", base, id, version), file);
 }
 
 struct Hit
