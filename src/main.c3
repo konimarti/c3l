@@ -6,7 +6,7 @@ module c3l;
 
 import std::io, serp, c3l::registry, c3l::sys;
 
-const String VERSION = "1.1.0";
+const String VERSION = "2.0.0";
 
 fn int main(String[] args)
 {

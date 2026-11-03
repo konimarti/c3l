@@ -891,7 +891,7 @@ out="$(c3l remove ../../etc 2>&1)"; eq "path as a name rc" $? 1
 
 section "cli"
 has "help" "reproducible dependencies" "$(c3l help)"
-has "version" "c3l 1" "$(c3l version)"
+has "version" "^c3l [0-9][0-9.]*$" "$(c3l version)"
 check_not "unknown command" c3l frobnicate
 cd "$WORK" && mkdir -p empty && cd empty
 check_not "outside project" c3l list
