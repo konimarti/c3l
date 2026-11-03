@@ -5,7 +5,7 @@
 module c3l;
 
 import std::io, std::os, std::collections::list, serp;
-import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::install, c3l::registry;
+import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::install, c3l::registry, c3l::vendor;
 
 fn void? init_run(Ctx* ctx)
 {
@@ -158,7 +158,23 @@ fn void? search_run(Ctx* ctx)
 		tag = query["tag:".len..];
 		query = "";
 	}
-	registry::search(registry_url(ctx), query, tag)!;
+	List{Hit} hits;
+	hits.tinit();
+	long total;
+	fault failed = @catch(hits.push_all(registry::search(registry_url(ctx), query, tag, &total)));
+	if (!tag.len)
+	{
+		String q = query.to_lower_tcopy();
+		foreach (lib : vendor::SNAPSHOT)
+		{
+			if (!lib.name.contains(q) && !lib.about.to_lower_tcopy().contains(q)) continue;
+			hits.push({ string::tformat("vendor:%s", lib.name), "latest", lib.about });
+			total++;
+		}
+	}
+	foreach (h : hits) io::printfn("%-32s %-10s %s", h.name, h.version, h.about);
+	if (!failed || hits.len()) io::printfn("(%d of %d shown)", hits.len(), total);
+	if (failed) return failed~;
 }
 
 fn void? info_run(Ctx* ctx)

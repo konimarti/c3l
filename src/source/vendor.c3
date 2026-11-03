@@ -13,6 +13,44 @@ fn String api() => env::tget_var("C3L_VENDOR_API") ?? "https://api.github.com/re
 
 faultdef UNREACHABLE, NOT_LISTED;
 
+struct Library
+{
+	String name;
+	String about;
+}
+
+// The collection when this c3l was released, so 'c3l search' needs no GitHub
+// API call; 'c3l add vendor' lists the live collection.
+const Library[] SNAPSHOT = {
+	{ "box2d", "Box2D 2D physics engine" },
+	{ "clang", "libclang, the C interface to Clang" },
+	{ "curl", "libcurl, URL transfers (HTTP, FTP, ...)" },
+	{ "glfw", "GLFW windows, OpenGL/Vulkan contexts and input" },
+	{ "glfw34", "GLFW 3.4 windows, OpenGL/Vulkan contexts and input" },
+	{ "ktx", "KTX texture files (Khronos)" },
+	{ "lmdb", "LMDB key-value database" },
+	{ "lz4", "LZ4 compression" },
+	{ "microui", "microui immediate-mode UI" },
+	{ "mysql8", "MySQL 8 client" },
+	{ "opengl", "OpenGL" },
+	{ "pq", "libpq, PostgreSQL client" },
+	{ "raylib5", "raylib 5 games library" },
+	{ "raylib55", "raylib 5.5 games library" },
+	{ "raylib6", "raylib 6 games library" },
+	{ "sdl2", "SDL 2 media and input" },
+	{ "sdl3", "SDL 3 media and input" },
+	{ "sdl3_image", "SDL3_image image loading" },
+	{ "sdl3_ttf", "SDL3_ttf TrueType fonts" },
+	{ "spng", "libspng PNG decoding and encoding" },
+	{ "sqlite3", "SQLite 3 database" },
+	{ "tigr", "TIGR tiny graphics library" },
+	{ "tinyfiledialogs", "native file and message dialogs" },
+	{ "tracy", "Tracy frame profiler" },
+	{ "tree_sitter", "tree-sitter incremental parsing" },
+	{ "vulkan", "Vulkan" },
+	{ "webgpu", "WebGPU" },
+};
+
 struct Asset
 {
 	String name;    // library name, without .c3l

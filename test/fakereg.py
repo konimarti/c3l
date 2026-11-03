@@ -4,7 +4,8 @@
   fakereg.py ROOT publish ns/name VERSION [--badsum] [--no-checksum] [--not-latest]
                  [--requires=ns/x:1.0.0,ns/y] [--reqreg=URL] [--deps=a,b] [--c3po=name|url,...]
 
-Writes download/ns/name@VERSION (a zip with manifest.json) and info/ns/name.
+Writes download/ns/name@VERSION (a zip with manifest.json), info/ns/name and
+index.json.
 --badsum    info record advertises a wrong checksum
 --no-checksum  info record has no checksum field
 --not-latest   do not move 'latest' to this version
@@ -75,6 +76,8 @@ def main():
     if "--not-latest" not in flags:
         rec["latest"] = version
     json.dump(rec, open(ipath, "w"))
+    libs = [json.load(open(os.path.join(d, f))) for d, _, fs in os.walk(os.path.join(root, "info")) for f in fs]
+    json.dump({"libraries": sorted(libs, key=lambda r: r["library"])}, open(os.path.join(root, "index.json"), "w"))
     print(sha)
 
 

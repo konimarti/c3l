@@ -54,7 +54,8 @@ Shell completion: `source <(c3l completion bash)` (also `zsh`, `fish`).
 | `outdated` | show newer versions |
 | `update [name[@ref]...]` | update all, or switch one to a version, tag, branch or commit |
 | `sync` | restore from the lock. One failure does not stop the others (exit 1 and a summary) |
-| `search <text\|tag:x>`, `info <ns/name>` | registry lookups |
+| `search <text\|tag:x>` | search the registry and c3c's vendor collection (a list built into c3l) |
+| `info <ns/name>` | the registry record of a library |
 | `migrate` | convert a c3po `project.lock.json` into `c3l.lock` |
 | `check`, `pack`, `publish` | publish a library, see [Publishing](#publishing) |
 

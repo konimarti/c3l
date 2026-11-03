@@ -257,7 +257,10 @@ atomically.\&
 .RE
 \fBsearch\fR \fItext\fR | \fBtag:\fR\fIname\fR
 .RS 4
-Search the registry (its \fI/search\fR API, else its \fIindex.\&json\fR).\&
+Search the registry (its \fI/search\fR API, else its \fIindex.\&json\fR) and c3c'\&s vendor
+collection, by name and description.\& The vendor list is the one built into this
+c3l, so a library added to the collection since is missing; \fBadd vendor\fR lists the
+collection as it is now.\& \fBtag:\fR searches the registry only.\&
 .P
 .RE
 \fBinfo\fR \fInamespace/name\fR

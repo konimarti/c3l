@@ -85,11 +85,19 @@ fn bool download(String base, String id, String version, String file)
 	return http::download(string::tformat("%s/download/%s@%s", base, id, version), file).ok();
 }
 
+struct Hit
+{
+	String name;
+	String version;
+	String about;
+}
+
 <*
- Print the libraries matching `query` (or tagged `tag`): the registry's search
- API if it has one (c3pkg), else its index.json.
+ The libraries matching `query` (or tagged `tag`): the registry's search API if
+ it has one (c3pkg), else its index.json. `total` gets how many match in all;
+ the search API returns only the first page.
 *>
-fn void? search(String base, String query, String tag)
+fn Hit[]? search(String base, String query, String tag, long* total)
 {
 	String q = string::tformat("%s/search?q=%s", base, url::encode(tmem, query, QUERY));
 	if (tag.len) q = string::tformat("%s&tag=%s", q, url::encode(tmem, tag, QUERY));
@@ -99,17 +107,17 @@ fn void? search(String base, String query, String tag)
 	if (!found) return log::fail("search failed: %s has no search API and no index.json", base)~;
 
 	Object* list = found.get("libraries")!!;
-	sz shown;
+	List{Hit} hits;
+	hits.tinit();
 	for (sz i = 0; i < list.get_len(); i++)
 	{
 		Object* lib = list.get_at(i);
 		String name = lib.get_string("library") ?? "";
 		if (filter && (!name.contains(query) || (tag.len && !has_tag(lib, tag)))) continue;
-		io::printfn("%-32s %-10s %s", name, lib.get_string("latest") ?? "", lib.get_string("description") ?? "");
-		shown++;
+		hits.push({ name, lib.get_string("latest") ?? "", lib.get_string("description") ?? "" });
 	}
-	long total = found.get_long("total") ?? shown;
-	io::printfn("(%d of %d shown)", shown, filter ? shown : total);
+	*total = filter ? hits.len() : found.get_long("total") ?? hits.len();
+	return hits.array_view();
 }
 
 // {libraries: [...]} from `url`, or null

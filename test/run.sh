@@ -892,6 +892,16 @@ check_not "unknown command" c3l frobnicate
 cd "$WORK" && mkdir -p empty && cd empty
 check_not "outside project" c3l list
 out="$(c3l list 2>&1)"; has "plain directory: project hint" "no project.json found" "$out"
+section "search: the registry and the vendor snapshot"
+out="$(c3l search SQLite 2>&1)"; eq "search rc" $? 0
+has "vendor snapshot, by description, any case" "^vendor:sqlite3 .*SQLite 3 database" "$out"
+has "count includes vendor" "(1 of 1 shown)" "$out"
+out="$(c3l search alpha 2>&1)"; has "registry index.json" "^acme/alpha .*test lib alpha" "$out"
+out="$(c3l search tag:db 2>&1)"
+if grep -q vendor: <<< "$out"; then fail "tag search lists vendor libraries: $out"; else ok; fi
+out="$(c3l --registry http://127.0.0.1:1 search sdl3 2>&1)"; eq "unreachable registry rc" $? 1
+has "vendor shown without the registry" "vendor:sdl3_ttf" "$out"
+
 if [[ -n "$LIVE" ]]; then
 	section "live: www.c3pkg.eu"
 	unset C3L_REGISTRY

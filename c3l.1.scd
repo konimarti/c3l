@@ -187,7 +187,10 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 	atomically.
 
 *search* _text_ | *tag:*_name_
-	Search the registry (its _/search_ API, else its _index.json_).
+	Search the registry (its _/search_ API, else its _index.json_) and c3c's vendor
+	collection, by name and description. The vendor list is the one built into this
+	c3l, so a library added to the collection since is missing; *add vendor* lists the
+	collection as it is now. *tag:* searches the registry only.
 
 *info* _namespace/name_
 	Show the registry record of a library: its versions and their checksums, and
