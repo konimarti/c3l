@@ -27,8 +27,8 @@ sure it is the *same bytes* everywhere, and update on purpose.
 ## Install
 
 Binaries for Linux (x64), macOS (Apple silicon) and Windows (x64) are on the
-[releases page](https://github.com/konimarti/c3l/releases); on Linux and macOS
-they need libcurl, the Windows one has it built in.
+[releases page](https://github.com/konimarti/c3l/releases). They need nothing
+besides the system: libcurl is built in (on macOS, the system's own is used).
 From source:
 
 ```sh

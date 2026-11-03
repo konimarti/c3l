@@ -67,6 +67,9 @@ fn void graph() @test
 	assert(d.len == 1 && d[0] == "mid");
 	String[] o = l.orphans();
 	assert(o.len == 1 && o[0] == "lost");
+	assert(string::join(tmem, l.chain("leaf"), " -> ") == "app -> mid -> leaf", "how the project gets there");
+	assert(string::join(tmem, l.chain("app"), " -> ") == "app", "added directly");
+	assert(!l.chain("lost").len, "nothing reaches it");
 	drop(f);
 }
 

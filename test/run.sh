@@ -317,7 +317,9 @@ c3l init >/dev/null 2>&1; c3l add acme/dl@1.0.0 >/dev/null 2>&1
 publish acme/dx 1.0.0 --requires=acme/dl:2.0.0 >/dev/null
 cp c3l.lock "$WORK/lock.before"; cp project.json "$WORK/project.before"
 out="$(c3l add acme/dx 2>&1)"; eq "major conflict rc" $? 1
-has "conflict message" "version conflict" "$out"
+has "conflict message" "version conflict on dl: 1.0.0 is installed" "$out"
+has "the side being added" "dx -> dl: dx asks for 2.0.0 (being added)" "$out"
+has "the installed side" "dl: added by you" "$out"
 check "conflict: lock unchanged" cmp -s c3l.lock "$WORK/lock.before"
 check "conflict: project unchanged" cmp -s project.json "$WORK/project.before"
 check_not "conflict: dx not left behind" test -e lib/dx.c3l
@@ -908,7 +910,7 @@ has "update stays in major 1" "	1.1.0	" "$(grep '^mj	' c3l.lock)"
 has "new major announced" "mj 2.0.0 is available" "$out"
 cp c3l.lock "$WORK/lock.before"
 out="$(c3l update mj@2.0.0 2>&1)"; eq "major conflict rc" $? 1
-has "dependent named" "version conflict: mjuser needs mj 1.0.0" "$out"
+has "dependent named" "mjuser -> mj: mjuser asks for 1.0.0" "$out"
 check "conflict rolled back" cmp -s c3l.lock "$WORK/lock.before"
 check "verify after rollback" c3l verify
 

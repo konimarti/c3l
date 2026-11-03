@@ -8,7 +8,7 @@ SCDOC=scdoc
 all: build/c3l
 
 build/c3l: project.json c3l.lock $(wildcard src/*.c3 src/*/*.c3) $(wildcard vendor/*.c3l)
-	$(C3C) build c3l
+	$(C3C) build c3l $(C3FLAGS)
 
 c3l.1: c3l.1.scd
 	$(SCDOC) < $< > $@
@@ -16,7 +16,7 @@ c3l.1: c3l.1.scd
 doc: c3l.1
 
 test: build/c3l
-	$(C3C) test
+	$(C3C) test $(C3FLAGS)
 	build/c3l verify
 	./test/run.sh
 

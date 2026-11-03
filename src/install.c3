@@ -264,7 +264,7 @@ fn void? Op.check_collision(&self, String name, Kind kind, String origin, String
 	if (catch e) return;
 	bool same_origin = kind == GIT ? git::canonical(e.origin) == git::canonical(origin) : e.origin == origin;
 	if (e.kind == kind && same_origin && e.id == id) return;
-	return log::fail("'%s' is already installed from %s. Library names are global in a project; run 'c3l remove %s' first.", name, e.source(), name)~;
+	return log::fail("'%s' is already installed from %s; library names are global in a project, so run 'c3l remove %s' first:%s", name, e.source(), name, self.holders(name))~;
 }
 
 // "provides" of a library's manifest becomes a file name and a lock key.

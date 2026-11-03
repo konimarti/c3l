@@ -283,6 +283,41 @@ fn String[] Lock.dependents(&self, String name)
 	return out.array_view();
 }
 
+<*
+ How the project gets to `name`: a library it added, then each library that
+ requires the next, down to `name` ({ name } when it was added directly); the
+ shortest such chain, empty if none.
+*>
+fn String[] Lock.chain(&self, String name)
+{
+	List{String} names;  // breadth first, up through the dependents
+	List{sz} from;       // from[i]: where names[i] was reached from
+	names.tinit();
+	from.tinit();
+	names.push(name);
+	from.push(0);
+	for (sz i = 0; i < names.len(); i++)
+	{
+		Entry*? e = self.get(names[i]);
+		if (catch e) continue;
+		if (e.role == DIRECT)
+		{
+			List{String} out;
+			out.tinit();
+			for (sz j = i; j; j = from[j]) out.push(names[j]);
+			out.push(name);
+			return out.array_view();
+		}
+		foreach (d : self.dependents(names[i]))
+		{
+			if (names.contains(d)) continue;
+			names.push(d);
+			from.push(i);
+		}
+	}
+	return {};
+}
+
 // Dependency libraries that no direct library reaches.
 fn String[] Lock.orphans(&self)
 {

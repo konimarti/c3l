@@ -8,6 +8,8 @@ on:
 
 env:
   C3C_RELEASE: v0.8.5_1
+  CURL_VERSION: 8.23.0
+  CURL_SHA256: 8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5
 
 defaults:
   run:
@@ -38,9 +40,37 @@ jobs:
           esac
           echo "$RUNNER_TEMP/c3" >> "$GITHUB_PATH"
 
-      - name: Install libcurl
+      - name: Cache libcurl
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/curl
+          key: curl-${{ env.CURL_VERSION }}-static-ubuntu-22.04
+
+      # a static libcurl (HTTP(S) and file:// only; OpenSSL and zlib linked in): the binary
+      # needs only glibc, not a libcurl built the way Debian builds it (CURL_OPENSSL_4)
+      - name: Build libcurl (static)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y libssl-dev zlib1g-dev
+          lib="$RUNNER_TEMP/curl/lib"
+          if [ ! -f "$lib/libcurl.a" ]; then
+            cd "$RUNNER_TEMP"
+            curl -fsSLO "https://curl.se/download/curl-$CURL_VERSION.tar.xz"
+            echo "$CURL_SHA256  curl-$CURL_VERSION.tar.xz" | sha256sum -c
+            tar xJf "curl-$CURL_VERSION.tar.xz" && cd "curl-$CURL_VERSION"
+            ./configure --prefix="$RUNNER_TEMP/curl" --disable-shared --with-openssl --with-zlib \
+              --without-libpsl --without-brotli --without-zstd --without-nghttp2 --without-libidn2 \
+              --without-librtmp --without-libssh2 --without-libssh --without-gssapi \
+              --disable-ldap --disable-ldaps --disable-rtsp --disable-dict --disable-telnet --disable-tftp \
+              --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-smb \
+              --disable-ftp --disable-ipfs --disable-websockets --disable-manual --disable-docs \
+              --without-ca-bundle --without-ca-path
+            make -j"$(nproc)" install >/dev/null
+          fi
+          cp /usr/lib/x86_64-linux-gnu/libssl.a /usr/lib/x86_64-linux-gnu/libcrypto.a /usr/lib/x86_64-linux-gnu/libz.a "$lib"/
+          # curl first: c3c puts these before the binding's -lcurl, and static libraries are read in order
+          echo "C3FLAGS=-L $lib -l curl -l ssl -l crypto -l z" >> "$GITHUB_ENV"
 
       - name: Cache vcpkg
         if: runner.os == 'Windows'
@@ -65,6 +95,12 @@ jobs:
       - name: Test
         if: runner.os == 'Linux'
         run: make test
+
+      - name: Static libcurl, HTTPS with this system's CA certificates
+        if: runner.os == 'Linux'
+        run: |
+          ! ldd build/c3l | grep -E 'libcurl|libssl|libcrypto|libz'
+          build/c3l info jecokef902/box2d
 
       # test/run.sh needs GNU tools and POSIX signals; elsewhere run the unit tests
       - name: Test

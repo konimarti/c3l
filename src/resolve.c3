@@ -84,7 +84,8 @@ fn void? Op.satisfy(&self, String parent, Entry e, Requirement r)
 	if (r.source.len && !self.same_source(e, r))
 	{
 		String reg = r.registry.len ? string::tformat("%s ", r.registry) : "";
-		return log::fail("'%s' is installed from %s but %s requires it from %s%s. Library names are global in a project; remove one of them", e.name, e.source(), parent, reg, r.source)~;
+		return log::fail("'%s' would come from two sources, %s (installed) and %s%s; library names are global in a project, so remove one side:\n  %s: %s asks for it from %s%s (being added)%s",
+			e.name, e.source(), reg, r.source, self.path_to(e.name), parent, reg, r.source, self.holders(e.name, parent))~;
 	}
 	if (!r.version.len) return;
 	if (e.kind != REGISTRY)
@@ -97,7 +98,8 @@ fn void? Op.satisfy(&self, String parent, Entry e, Requirement r)
 	if (!semver::valid(want) || !semver::valid(e.version)) return;
 	if (semver::major(want) != semver::major(e.version))
 	{
-		return log::fail("version conflict: %s needs %s %s (major %s) but %s (major %s) is installed", parent, e.name, want, semver::major(want), e.version, semver::major(e.version))~;
+		return log::fail("version conflict on %s: %s is installed, and major versions %s and %s cannot be used together; update or remove one side:\n  %s: %s asks for %s (being added)%s",
+			e.name, e.version, semver::major(e.version), semver::major(want), self.path_to(e.name), parent, want, self.holders(e.name, parent))~;
 	}
 	if (semver::compare(e.version, want) >= 0) return;
 	log::info("  %s %s -> %s (required by %s)", e.name, e.version, want, parent);
@@ -115,13 +117,37 @@ fn void? Op.check_dependents(&self, String name)
 	if (!semver::valid(version)) return;
 	foreach (d : self.proj.lock.dependents(name))
 	{
-		foreach (r : (manifest::load(self.file_of(d)) ?? (Manifest){}).requires)
-		{
-			String want = plain_version(r.version);
-			if (r.name != name || !semver::valid(want) || semver::major(want) == semver::major(version)) continue;
-			return log::fail("version conflict: %s needs %s %s (major %s), not %s; update or remove %s first", d, name, want, semver::major(want), version, d)~;
-		}
+		String want = plain_version(self.asked(d, name));
+		if (!semver::valid(want) || semver::major(want) == semver::major(version)) continue;
+		return log::fail("version conflict on %s: %s is major %s, but not every library that requires it takes that; update or remove them first:%s",
+			name, version, semver::major(version), self.holders(name))~;
 	}
+}
+
+// The version library `d` asks for of `name`, as its manifest or lock says; empty for any.
+fn String Op.asked(&self, String d, String name)
+{
+	foreach (r : (manifest::load(self.file_of(d)) ?? (Manifest){}).requires) if (r.name == name) return r.version;
+	return "";
+}
+
+<*
+ Why `name` is installed: one line per library that requires it (but `except`,
+ the one being added), with how the project gets there and the version it asks
+ for, and whether it was added directly. For conflict messages.
+*>
+fn String Op.holders(&self, String name, String except = "")
+{
+	Lock* l = &self.proj.lock;
+	DString s = dstring::temp();
+	if (try e = l.get(name) && e.role == DIRECT) s.appendf("\n  %s: added by you", name);
+	foreach (d : l.dependents(name))
+	{
+		if (d == except) continue;
+		String want = self.asked(d, name);
+		s.appendf("\n  %s -> %s: %s asks for %s", string::join(tmem, l.chain(d), " -> "), name, d, want.len ? want : "any version");
+	}
+	return s.str_view();
 }
 
 fn bool Op.same_source(&self, Entry e, Requirement r)
