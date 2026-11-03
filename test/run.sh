@@ -163,14 +163,18 @@ has "hexdump still in project" '"hexdump"' "$(cat project.json)"
 check "verify ok" c3l verify
 
 section "unpacked (c3c default) copy is replaced by a file"
-newproj p2
-c3l init >/dev/null 2>&1
-"$C3C" --fetch-url "$C3L_REGISTRY" fetch acme/alpha@1.0.0 >/dev/null 2>&1
-check "c3c unpacked it" test -d lib/alpha.c3l
-c3l add acme/alpha@1.0.0 >/dev/null 2>&1; eq "add over dir rc" $? 0
-check "now a file" test -f lib/alpha.c3l
-check "verify ok" c3l verify
-has "untracked shows for foreign dep" "alpha" "$(c3l list)"
+if "$C3C" --help 2>&1 | grep -q '^  fetch '; then
+	newproj p2
+	c3l init >/dev/null 2>&1
+	"$C3C" --fetch-url "$C3L_REGISTRY" fetch acme/alpha@1.0.0 >/dev/null 2>&1
+	check "c3c unpacked it" test -d lib/alpha.c3l
+	c3l add acme/alpha@1.0.0 >/dev/null 2>&1; eq "add over dir rc" $? 0
+	check "now a file" test -f lib/alpha.c3l
+	check "verify ok" c3l verify
+	has "untracked shows for foreign dep" "alpha" "$(c3l list)"
+else
+	echo "  skipped: this c3c has no 'fetch' (new in 0.8.6)"
+fi
 
 section "untracked dependency is reported"
 cp project.json "$WORK/p2.json"
