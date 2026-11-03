@@ -136,7 +136,9 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 	directory cannot be published.
 
 *add* _git-url_[@_ref_]
-	Install from a git repository. _ref_ is a tag, a branch, *HEAD*, or a full
+	Install from a git repository. _github.com/owner/repo_ and _codeberg.org/owner/repo_
+	without a scheme mean their https URL; for ssh, give the ssh URL
+	(_git@github.com:owner/repo_). _ref_ is a tag, a branch, *HEAD*, or a full
 	40-character commit hash; it can also be given as a separate argument. Without
 	a _ref_ the highest release tag is used (prerelease tags such as _v1.0.0-rc.1_ only
 	when asked for), or HEAD if there are none. The ref is resolved to a commit,

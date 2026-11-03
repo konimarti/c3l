@@ -48,7 +48,7 @@ Shell completion: `source <(c3l completion bash)` (also `zsh`, `fish`).
 |---|---|
 | `init [name]` | create `c3l.lock` (and a project with `c3c init name`) |
 | `add <ns/name[@ver]>` | install from the registry |
-| `add <git-url>[@ref]` | install from git. No ref: highest release tag, else HEAD. The lock pins the commit and a hash of the files; `update` moves tags to the newest release tag and follows branches and `HEAD` |
+| `add <git-url>[@ref]` | install from git (`github.com/o/r` and `codeberg.org/o/r` mean their https URL). No ref: highest release tag, else HEAD. The lock pins the commit and a hash of the files; `update` moves tags to the newest release tag and follows branches and `HEAD` |
 | `add vendor:<name>` | install from c3c's vendor collection (raylib, sdl3, sqlite3, …); `add vendor` lists it |
 | `add ./dir` | link a local library into `lib/` with a relative symlink (never publishable) |
 | `remove <name>` | remove a library; refuses if another needs it (`--force`) |

@@ -188,7 +188,9 @@ directory cannot be published.\&
 .RE
 \fBadd\fR \fIgit-url\fR[@\fIref\fR]
 .RS 4
-Install from a git repository.\& \fIref\fR is a tag, a branch, \fBHEAD\fR, or a full
+Install from a git repository.\& \fIgithub.\&com/owner/repo\fR and \fIcodeberg.\&org/owner/repo\fR
+without a scheme mean their https URL; for ssh, give the ssh URL
+(\fIgit@github.\&com:owner/repo\fR).\& \fIref\fR is a tag, a branch, \fBHEAD\fR, or a full
 40-character commit hash; it can also be given as a separate argument.\& Without
 a \fIref\fR the highest release tag is used (prerelease tags such as \fIv1.\&0.\&0-rc.\&1\fR only
 when asked for), or HEAD if there are none.\& The ref is resolved to a commit,

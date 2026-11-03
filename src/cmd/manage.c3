@@ -20,6 +20,10 @@ fn void? add_run(Ctx* ctx)
 	$if env::WIN32:  // the lock records it: keep it readable on other systems
 		if (sys::is_local_path(arg)) arg = arg.treplace("\\", "/");
 	$endif
+	foreach (host : install::BUILTIN_HOSTS)  // github.com/o/r: https, as the browser shows it
+	{
+		if (arg.starts_with(host.tconcat("/"))) arg = string::tformat("https://%s", arg);
+	}
 	// <source>@<ref>: the @ after the last '/' (git@host:path has one before it)
 	String source = arg;
 	String ref = ctx.arg(1);

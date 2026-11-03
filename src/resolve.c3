@@ -9,6 +9,7 @@ module c3l::install;
 import std::io, std::os, libc;
 import c3l::log, c3l::sys, c3l::lock, c3l::manifest, c3l::semver, c3l::registry, c3l::vendor, c3l::git;
 
+// Trusted for git dependencies; on the command line, github.com/o/r means https://github.com/o/r.
 const String[] BUILTIN_HOSTS = { "github.com", "codeberg.org" };
 
 fn void? Op.follow(&self, String parent, Requirement[] reqs)

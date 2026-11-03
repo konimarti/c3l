@@ -974,6 +974,8 @@ if [[ -n "$LIVE" ]]; then
 	check "live add" c3l add jecokef902/box2d
 	check "live verify" c3l verify
 	has "live search" "tonis2/vk" "$(c3l search vk)"
+	check "live add github.com/o/r" c3l add github.com/konimarti/serp.c3l@v0.2.0
+	has "recorded as https" "	https://github.com/konimarti/serp.c3l	" "$(cat c3l.lock)"
 fi
 
 echo
