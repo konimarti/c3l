@@ -115,7 +115,7 @@ tag, branch or commit; `update` moves a tag like any other version).
 c3l also reads, but never writes: `vendor.c3l.requires` in a manifest (packages
 published by c3l 1.1), c3po's `vendor.c3po.sources`, and plain `dependencies`
 names (no source: a warning). For each name the first of these wins:
-`vendor.c3l.requires`, `c3l.lock`, `vendor.c3po.sources`, `dependencies`.
+`c3l.lock`, `vendor.c3po.sources`, `dependencies`.
 Dependencies listed only for one target in `project.json` count too.
 
 Rules:
@@ -130,10 +130,9 @@ Rules:
 
 ### Coming from c3po
 
-c3po and c3l share the `lib/` layout. c3l follows dependencies declared in
-`vendor.c3po.sources`, and `c3l migrate` locks the commits from a
-`project.lock.json`, then `c3l sync` rebuilds them as verified archives. c3l
-never writes c3po's files.
+c3l follows dependencies declared in `vendor.c3po.sources`, and `c3l migrate`
+locks the commits from a `project.lock.json`, then `c3l sync` rebuilds them as
+verified archives.
 
 ## Windows
 
@@ -179,6 +178,5 @@ Other options, given after `check`, `pack` or `publish`: `--license`, `--tags`, 
 
 `make test` builds c3l, runs the unit tests (`c3c test`), checks `vendor/`
 against `c3l.lock` and runs the offline suite `test/run.sh` against the binary.
-`LIVE=1 make test` adds a smoke test against www.c3pkg.eu.
 
 MIT. See LICENSE.
