@@ -278,8 +278,7 @@ Print the usage text of \fBc3l\fR or of \fIcommand\fR.\&
 .RE
 \fBcompletion\fR \fIbash\fR|\fIzsh\fR|\fIfish\fR
 .RS 4
-Print a shell completion script, for example
-\fBc3l completion bash > /etc/bash_completion.\&d/c3l\fR.\&
+Print a shell completion script.\& See \fBSHELL COMPLETION\fR.\&
 .P
 .RE
 \fBmigrate\fR
@@ -391,6 +390,34 @@ from two origins is an error (git URLs that differ only in a trailing \fI/\fR or
 in case on github.\&com and codeberg.\&org, are the same origin).\& A file with another number
 of columns is refused, and so is a line with an invalid name, checksum or commit: a
 lockfile can come from someone else'\&s repository.\&
+.P
+.SH SHELL COMPLETION
+.P
+\fBc3l completion\fR prints a script that completes commands and options.\&
+.P
+bash: add to \fI~/.\&bashrc\fR, or save the script in \fI/etc/bash_completion.\&d/c3l\fR:
+.P
+.nf
+.RS 4
+source <(c3l completion bash)
+.fi
+.RE
+.P
+zsh: add to \fI~/.\&zshrc\fR, after \fBcompinit\fR:
+.P
+.nf
+.RS 4
+source <(c3l completion zsh)
+.fi
+.RE
+.P
+fish:
+.P
+.nf
+.RS 4
+c3l completion fish > ~/\&.config/fish/completions/c3l\&.fish
+.fi
+.RE
 .P
 .SH EXIT STATUS
 .P

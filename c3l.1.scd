@@ -200,8 +200,7 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 	Print the usage text of *c3l* or of _command_.
 
 *completion* _bash_|_zsh_|_fish_
-	Print a shell completion script, for example
-	*c3l completion bash > /etc/bash_completion.d/c3l*.
+	Print a shell completion script. See *SHELL COMPLETION*.
 
 *migrate*
 	Convert a c3po _project.lock.json_ into _c3l.lock_. The same commits are locked
@@ -302,6 +301,28 @@ from two origins is an error (git URLs that differ only in a trailing _/_ or _.g
 in case on github.com and codeberg.org, are the same origin). A file with another number
 of columns is refused, and so is a line with an invalid name, checksum or commit: a
 lockfile can come from someone else's repository.
+
+# SHELL COMPLETION
+
+*c3l completion* prints a script that completes commands and options.
+
+bash: add to _~/.bashrc_, or save the script in _/etc/bash_completion.d/c3l_:
+
+```
+source <(c3l completion bash)
+```
+
+zsh: add to _~/.zshrc_, after *compinit*:
+
+```
+source <(c3l completion zsh)
+```
+
+fish:
+
+```
+c3l completion fish > ~/.config/fish/completions/c3l.fish
+```
 
 # EXIT STATUS
 
