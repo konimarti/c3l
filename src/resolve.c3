@@ -194,7 +194,7 @@ fn void? Op.trust(&self, String url)
 *>
 fn String host_of(String url)
 {
-	if (url.starts_with("file://") || url.starts_with("/") || url.starts_with("./") || url.starts_with("../")) return "file";
+	if (url.starts_with("file://") || sys::is_local_path(url)) return "file";
 	String h;
 	if (url.starts_with("git@"))
 	{
@@ -225,7 +225,7 @@ fn String host_of(String url)
 
 fn bool is_git_url(String s)
 {
-	return s.contains("://") || s.starts_with("git@") || s.starts_with("/") || s.starts_with("./") || s.starts_with("../");
+	return s.contains("://") || s.starts_with("git@") || sys::is_local_path(s);
 }
 
 // ">=1.2.0", "^1.2.0", "~1.2.0" -> "1.2.0" (the constraint is a minimum either way)

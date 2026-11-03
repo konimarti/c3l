@@ -9,13 +9,19 @@ on:
 env:
   C3C_RELEASE: v0.8.5_1
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - { os: ubuntu-22.04, target: linux-x64, c3c: c3-linux.tar.gz }
           - { os: macos-14, target: macos-aarch64, c3c: c3-macos.zip }
+          - { os: windows-latest, target: windows-x64, c3c: c3-windows.zip }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -26,38 +32,58 @@ jobs:
         run: |
           gh release download "$C3C_RELEASE" -R c3lang/c3c -p '${{ matrix.c3c }}' -D "$RUNNER_TEMP"
           cd "$RUNNER_TEMP"
-          case '${{ matrix.c3c }}' in *.zip) unzip -q '${{ matrix.c3c }}' ;; *) tar xzf '${{ matrix.c3c }}' ;; esac
+          case '${{ matrix.c3c }}' in
+            *.tar.gz) tar xzf '${{ matrix.c3c }}' ;;
+            *) if [ "$RUNNER_OS" = Windows ]; then 7z x -y -bd '${{ matrix.c3c }}' >/dev/null; else unzip -q '${{ matrix.c3c }}'; fi ;;
+          esac
           echo "$RUNNER_TEMP/c3" >> "$GITHUB_PATH"
 
       - name: Install libcurl
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
 
-      - run: make
+      # static libcurl, so c3l.exe is a single file; the binding links "curl"
+      - name: Install libcurl (static)
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install curl:x64-windows-static-md
+          lib="$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md/lib"
+          cp "$lib/libcurl.lib" "$lib/curl.lib"
+          echo "C3FLAGS=-L $lib -l zlib -l ws2_32 -l crypt32 -l bcrypt -l advapi32 -l normaliz -l secur32 -l iphlpapi -l wldap32" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: if [ "$RUNNER_OS" = Windows ]; then c3c build c3l $C3FLAGS; else make; fi
 
       - name: Test
         if: runner.os == 'Linux'
         run: make test
 
-      # test/run.sh needs GNU tools; on macOS run the unit tests and a smoke test
+      # test/run.sh needs GNU tools and POSIX signals; elsewhere run the unit tests
       - name: Test
-        if: runner.os == 'macOS'
-        run: c3c test && build/c3l verify && build/c3l version
+        if: runner.os != 'Linux'
+        run: c3c test $C3FLAGS && build/c3l verify && build/c3l version
 
       - name: Tag matches the version
         if: startsWith(github.ref, 'refs/tags/')
-        run: test "c3l ${GITHUB_REF_NAME#v}" = "$(build/c3l version)"
+        run: test "c3l ${GITHUB_REF_NAME#v}" = "$(build/c3l version | tr -d '\r')"
 
       - name: Package
         run: |
-          mkdir c3l-${{ matrix.target }}
-          cp build/c3l c3l.1 README.md LICENSE c3l-${{ matrix.target }}/
-          tar czf c3l-${{ matrix.target }}.tar.gz c3l-${{ matrix.target }}
+          dir=c3l-${{ matrix.target }}
+          mkdir "$dir"
+          cp README.md LICENSE "$dir"/
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp build/c3l.exe "$dir"/
+            7z a -bd "$dir.zip" "$dir" >/dev/null
+          else
+            cp build/c3l c3l.1 "$dir"/
+            tar czf "$dir.tar.gz" "$dir"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: c3l-${{ matrix.target }}
-          path: c3l-${{ matrix.target }}.tar.gz
+          path: c3l-${{ matrix.target }}.*
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
@@ -73,5 +99,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sha256sum c3l-*.tar.gz > SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --generate-notes c3l-*.tar.gz SHA256SUMS
+          sha256sum c3l-*.tar.gz c3l-*.zip > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --generate-notes c3l-*.tar.gz c3l-*.zip SHA256SUMS

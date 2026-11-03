@@ -68,17 +68,16 @@ fn Output? run(String[] argv, Stderr err = APART)
 	check_interrupt()!;
 	SpawnOptions options = INHERIT_ENV;
 	ProcessStdio stderr = process::INHERIT;
-	File errors;
+	Capture errors;
 	switch (err)
 	{
 		case APART:
-			errors = { .file = libc::tmpfile() };
-			if (!errors.file) return log::fail("cannot create a temporary file")~;
-			stderr = process::bind(libc::fileno(errors.file));
+			errors = capture()!;
+			stderr = errors.stdio();
 		case MERGE:
 			options |= STDERR_TO_STDOUT;
 	}
-	defer if (err == APART) (void)errors.close();
+	defer if (err == APART) errors.close();
 
 	Process? p = process::spawn(argv, options, {}, process::INHERIT, process::CAPTURE, stderr);
 	if (catch p) return log::fail("'%s' is required for this command but was not found", argv[0])~;
@@ -93,15 +92,18 @@ fn Output? run(String[] argv, Stderr err = APART)
 		out.append(buf[:n]);
 	}
 	Output o = { .code = p.join() ?? -1, .out = out.str_view() };
-	if (err == APART)
-	{
-		DString msg = dstring::temp();
-		libc::rewind(errors.file);
-		(void)io::copy_to(&errors, &msg);
-		o.err = msg.str_view();
-	}
+	if (err == APART) o.err = errors.read();
 	check_interrupt()!;
 	return o;
+}
+
+// What the child wrote to the capture file.
+fn String Capture.read(&self)
+{
+	DString msg = dstring::temp();
+	libc::rewind(self.file.file);
+	(void)io::copy_to(&self.file, &msg);
+	return msg.str_view();
 }
 
 // Replace `file` with `data` (written next to it, then renamed).
@@ -112,7 +114,7 @@ fn void? write_atomic(String file, char[] data)
 	{
 		return log::fail("cannot write %s", file)~;
 	}
-	if (libc::rename(tmp.zstr_tcopy(), file.zstr_tcopy()))
+	if (!rename(tmp, file))
 	{
 		(void)file::delete(tmp);
 		return log::fail("cannot write %s", file)~;
@@ -170,50 +172,72 @@ fn String? content_hash(String path)
 	return string::tformat("content:%s", hex::encode(tmem, &&h.final()));
 }
 
-// Where a symbolic link points, as stored in it.
-fn String? read_link(String link)
-{
-	char[4096] buf;
-	sz n = libc::readlink(link.zstr_tcopy(), &buf, buf.len);
-	if (n < 0 || n >= buf.len) return NOT_FOUND~;
-	return ((String)buf[:n]).tcopy();
-}
-
-// The path of `to` relative to the directory `from`; both absolute and normalized.
+<*
+ The path of `to` relative to the directory `from`; both absolute and
+ normalized. Joined with the platform's separator; on Windows `to` itself when
+ the two are on different drives.
+*>
 fn String relative(String from, String to)
 {
-	String[] a = from.tsplit("/", skip_empty: true);
-	String[] b = to.tsplit("/", skip_empty: true);
+	String[] a = parts(from);
+	String[] b = parts(to);
+	$if env::WIN32:
+		if (!a.len || !b.len || a[0] != b[0]) return to;
+	$endif
 	sz common;
 	while (common < a.len && common < b.len && a[common] == b[common]) common++;
+	char sep = path::PREFERRED_SEPARATOR;
 	DString out = dstring::temp();
-	for (sz i = common; i < a.len; i++) out.append(out.len() ? "/.." : "..");
+	for (sz i = common; i < a.len; i++)
+	{
+		if (out.len()) out.append_char(sep);
+		out.append("..");
+	}
 	for (sz i = common; i < b.len; i++)
 	{
-		if (out.len()) out.append_char('/');
+		if (out.len()) out.append_char(sep);
 		out.append(b[i]);
 	}
 	return out.len() ? out.str_view() : ".";
 }
 
-// A new private directory in `base` (default: the system temp directory); the caller removes it.
-fn String? temp_dir(String base = "", String prefix = "c3l")
+// The non-empty parts of a path, split at the platform's separators.
+fn String[] parts(String p) @private
 {
-	if (!base.len) base = (String)path::temp_directory(tmem) ?? "/tmp";
-	ZString dir = mkdtemp(string::tformat("%s/%s.XXXXXX", base, prefix).zstr_tcopy());
-	if (!dir) return log::fail("cannot create a temporary directory")~;
-	return dir.str_view();
+	List{String} out;
+	out.tinit();
+	sz start;
+	foreach (i, c : p)
+	{
+		if (!path::is_separator(c)) continue;
+		if (i > start) out.push(p[start:i - start]);
+		start = i + 1;
+	}
+	if (start < p.len) out.push(p[start..]);
+	return out.array_view();
 }
 
-fn void? link(String target, String link)
+<*
+ A path on this machine rather than a URL or a registry id: ".", "..",
+ starting with "./" or "../" (also ".\" and "..\" on Windows), or absolute.
+*>
+fn bool is_local_path(String s)
 {
-	if (symlink(target.zstr_tcopy(), link.zstr_tcopy())) return log::fail("cannot link %s", link)~;
+	if (s == "." || s == "..") return true;
+	String rest = s.starts_with("..") ? s[2..] : s.starts_with(".") ? s[1..] : s;
+	if (rest.len < s.len) return rest.len > 0 && path::is_separator(rest[0]);
+	return s.is_absolute_path() ?? false;
 }
 
 // Remove a file, a symlink (never what it points to) or a directory tree.
 fn void remove(String p)
 {
-	if (!path::is_link((Path)p) && file::is_dir(p))
+	if (path::is_link((Path)p))
+	{
+		remove_link(p);
+		return;
+	}
+	if (file::is_dir(p))
 	{
 		(void)path::rmtree((Path)p);
 		return;
@@ -222,9 +246,6 @@ fn void remove(String p)
 }
 
 fn bool exists(String p) => path::is_link((Path)p) || file::exists(p);
-
-extern fn ZString mkdtemp(ZString template) @private;
-extern fn CInt symlink(ZString target, ZString link) @private;
 
 // The C3 version of the local compiler ("0.8.6"), empty if unknown.
 fn String c3_version()

@@ -326,8 +326,7 @@ fn void unregister(Project* p, String name)
 // An explicit local directory (./x, ../x, /x) that is a C3 library: linked, not copied.
 fn bool is_path_dep(String s)
 {
-	bool explicit = s.starts_with("./") || s.starts_with("../") || s.starts_with("/") || s == "." || s == "..";
-	return explicit && file::is_dir(s) && file::exists(string::tformat("%s/manifest.json", s));
+	return sys::is_local_path(s) && file::is_dir(s) && file::exists(string::tformat("%s/manifest.json", s));
 }
 
 fn String libraries(sz n) => n == 1 ? "library" : "libraries";

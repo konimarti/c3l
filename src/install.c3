@@ -10,7 +10,7 @@
 *>
 module c3l::install;
 
-import std::io, std::os, std::collections::list, libc;
+import std::io, std::os, std::collections::list;
 import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::manifest;
 import c3l::http, c3l::registry, c3l::vendor, c3l::git;
 
@@ -110,7 +110,7 @@ fn void Op.rollback(&self)
 	{
 		String f = self.file_of(t.name);
 		sys::remove(f);
-		if (t.had_file && libc::rename(project::lib_file(self.backup, t.name).zstr_tcopy(), f.zstr_tcopy()))
+		if (t.had_file && !sys::rename(project::lib_file(self.backup, t.name), f))
 		{
 			log::error("could not restore %s; the previous file is in %s", f, self.backup);
 			restored = false;
@@ -298,7 +298,7 @@ fn void? Op.set_aside(&self, String name)
 	{
 		if (!self.backup.len) self.backup = sys::temp_dir(self.dir, ".c3l-backup")!;
 		String to = project::lib_file(self.backup, name);
-		if (libc::rename(f.zstr_tcopy(), to.zstr_tcopy())) return log::fail("cannot move %s to %s", f, to)~;
+		if (!sys::rename(f, to)) return log::fail("cannot move %s to %s", f, to)~;
 	}
 	self.touched.push({ name, had });
 }
@@ -314,7 +314,7 @@ fn Manifest? Op.place(&self, Entry e, String staged, Intent intent)
 	if (staged.len)
 	{
 		self.set_aside(e.name)!;
-		if (libc::rename(staged.zstr_tcopy(), f.zstr_tcopy())) return log::fail("cannot write %s", f)~;
+		if (!sys::rename(staged, f)) return log::fail("cannot write %s", f)~;
 	}
 	Manifest m = manifest::load(f) ?? (Manifest){};
 	if (m.invalid.len) return log::fail("manifest.json of %s requires '%s', which is not a valid library name", e.name, m.invalid)~;

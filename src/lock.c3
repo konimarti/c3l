@@ -165,7 +165,7 @@ fn bool valid_id(String s)
 *>
 fn bool valid_git_url(String s)
 {
-	if (s.starts_with("/") || s.starts_with("./") || s.starts_with("../")) return true;
+	if (sys::is_local_path(s)) return true;
 	if (s.starts_with("git@")) return s.contains(":");
 	sz? i = s.index_of("://");
 	if (catch i) return false;

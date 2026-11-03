@@ -26,8 +26,9 @@ sure it is the *same bytes* everywhere, and update on purpose.
 
 ## Install
 
-Binaries for Linux (x64) and macOS (Apple silicon) are on the
-[releases page](https://github.com/konimarti/c3l/releases); they need libcurl.
+Binaries for Linux (x64), macOS (Apple silicon) and Windows (x64) are on the
+[releases page](https://github.com/konimarti/c3l/releases); on Linux and macOS
+they need libcurl, the Windows one has it built in.
 From source:
 
 ```sh
@@ -133,6 +134,15 @@ c3po and c3l share the `lib/` layout. c3l follows dependencies declared in
 `vendor.c3po.sources`, and `c3l migrate` locks the commits from a
 `project.lock.json`, then `c3l sync` rebuilds them as verified archives. c3l
 never writes c3po's files.
+
+## Windows
+
+c3l runs on Windows with [Git for Windows](https://gitforwindows.org) and c3c on
+the `PATH`. Linking a local library (`c3l add ./dir`) needs Developer Mode
+(Settings, System, For developers), which lets Windows create symbolic links.
+git checks out files with CRLF line endings on Windows, so a package packed
+there differs from one packed on Linux; a library that wants the same bytes
+everywhere sets `* text=auto eol=lf` in its `.gitattributes`.
 
 ## Private repositories
 

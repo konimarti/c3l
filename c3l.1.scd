@@ -25,6 +25,9 @@ with *c3c project view*, for *init* and for the compile check of *check*) and *g
 (git libraries, *check*, *pack*, *publish*). It talks to registries itself, with the
 protocol *c3c fetch* uses, so any *c3c* that can build the project will do.
 
+On Windows, *git* is Git for Windows, and linking a local directory (*add* _./dir_)
+needs Developer Mode, in which Windows lets users create symbolic links.
+
 # OPTIONS
 
 The options from *--registry* to *--registry-type* may appear before or after the

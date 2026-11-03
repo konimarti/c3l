@@ -71,6 +71,7 @@ fn int main(String[] args)
 		.flag({ .name = "docs-url", .kind = STRING, .value_name = "URL", .desc = "documentation URL" })
 		.flag({ .name = "git-url", .kind = STRING, .value_name = "URL", .desc = "repository URL" }));
 	app.add(serp::cmd("version", "print the version", &version_run).accepts(serp::no_args()));
+	sys::setup_console();
 	sys::catch_signals();
 	int status = app.execute(args);
 	return sys::interrupted ? 130 : status;

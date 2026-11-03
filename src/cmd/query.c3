@@ -13,7 +13,7 @@ fn void? init_run(Ctx* ctx)
 	if (name.len && !file::exists("project.json") && !file::exists("project.json5"))
 	{
 		if (process::run({ sys::c3c(), "init", name }, INHERIT_ENV | INHERIT_STDIO) ?? 1) return log::fail("c3c init failed")~;
-		if (posix::chdir(name.zstr_tcopy())) return log::fail("cannot enter %s", name)~;
+		path::chdir(name) ?? log::fail("cannot enter %s", name)~!;
 	}
 	Project p = project::find()!;
 	if (p.lock.exists())

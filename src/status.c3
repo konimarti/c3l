@@ -26,12 +26,8 @@ fn Status status(Entry* e, String dir)
 	if (e.kind == PATH)
 	{
 		if (!link) return file::exists(f) ? MODIFIED : MISSING;
-		String target = sys::read_link(f) ?? "";
-		if (!target.starts_with("/")) target = string::tformat("%s/%s", dir, target);
-		String want = (String)e.origin.to_absolute_path(tmem) ?? e.origin;
-		String points_to = (String)target.to_absolute_path(tmem) ?? target;
-		if (points_to != want) return MODIFIED;
-		return file::is_dir(f) ? OK : MISSING;
+		if (!file::is_dir(f)) return MISSING;
+		return sys::points_to(f, e.origin) ? OK : MODIFIED;
 	}
 	if (file::is_dir(f)) return UNPACKED;
 	if (!file::is_file(f)) return MISSING;
