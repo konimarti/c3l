@@ -77,14 +77,23 @@ installed and c3l shows both sides:
 
 A library declares its dependencies the way an app does: run `c3l add` in the
 library directory and commit its `c3l.lock`. Whoever installs the library gets
-those dependencies too. To publish it on www.c3pkg.eu:
+those dependencies too.
+
+## Publishing
 
 ```sh
 cd mylib                               # made with c3c init-lib mylib
 git tag v1.0.0                         # the version to publish
-export C3PKG_TOKEN=c3p_...             # an API token from the registry's settings
+c3l check                              # everything but the upload
+export C3PKG_TOKEN=c3p_...             # an API token from www.c3pkg.eu's settings
 c3l publish --description "My library" --license MIT
 ```
+
+- `check` makes sure the library compiles, the working tree is committed and
+  the version is new. Published versions cannot change.
+- The package is built from the files git tracks, the same bytes every time,
+  with `c3l.lock`, so its dependencies come along.
+- `c3l pack` writes the package without uploading it.
 
 ## Notes
 
