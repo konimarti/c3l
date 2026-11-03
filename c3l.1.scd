@@ -15,8 +15,15 @@ C3L(1)
 *c3c fetch* installs libraries but records no version, verifies no checksum and
 cannot update or remove. *c3l* adds a lockfile, _c3l.lock_, checksum
 verification with rollback, and update, outdated, remove and sync. Libraries are
-kept as _.c3l_ zip files in the first entry of _dependency-search-paths_. Run
-*c3l* in the project root.
+kept as _.c3l_ zip files in the first entry of _dependency-search-paths_ (_lib_
+is added if there is none); commit them, or ignore them and run *c3l sync* after
+cloning. Run *c3l* in the project root.
+
+c3l speaks the registry protocol of *c3c fetch*, so it works with any registry
+*c3c fetch* can use. A library installed with plain *c3c fetch* is listed as
+_untracked_ and fails *verify* and *sync --frozen* until it is added with *c3l add*.
+Not supported: *c3c project fetch* (use *c3l sync*) and registries that need a
+login to download.
 
 # REQUIREMENTS
 
@@ -27,6 +34,10 @@ protocol *c3c fetch* uses, so any *c3c* that can build the project will do.
 
 On Windows, *git* is Git for Windows, and linking a local directory (*add* _./dir_)
 needs Developer Mode or an administrator, for whom Windows creates symbolic links.
+Git for Windows checks files out with CRLF line endings by default
+(_core.autocrlf=true_), so a package packed there differs from one packed on
+Linux; a library that wants the same bytes everywhere sets _\* text=auto eol=lf_
+in its _.gitattributes_. c3l reads a _c3l.lock_ with either line ending.
 
 # OPTIONS
 

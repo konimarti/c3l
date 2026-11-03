@@ -22,8 +22,15 @@
 \fBc3c fetch\fR installs libraries but records no version, verifies no checksum and
 cannot update or remove.\& \fBc3l\fR adds a lockfile, \fIc3l.\&lock\fR, checksum
 verification with rollback, and update, outdated, remove and sync.\& Libraries are
-kept as \fI.\&c3l\fR zip files in the first entry of \fIdependency-search-paths\fR.\& Run
-\fBc3l\fR in the project root.\&
+kept as \fI.\&c3l\fR zip files in the first entry of \fIdependency-search-paths\fR (\fIlib\fR
+is added if there is none); commit them, or ignore them and run \fBc3l sync\fR after
+cloning.\& Run \fBc3l\fR in the project root.\&
+.P
+c3l speaks the registry protocol of \fBc3c fetch\fR, so it works with any registry
+\fBc3c fetch\fR can use.\& A library installed with plain \fBc3c fetch\fR is listed as
+\fIuntracked\fR and fails \fBverify\fR and \fBsync --frozen\fR until it is added with \fBc3l add\fR.\&
+Not supported: \fBc3c project fetch\fR (use \fBc3l sync\fR) and registries that need a
+login to download.\&
 .P
 .SH REQUIREMENTS
 .P
@@ -34,6 +41,10 @@ protocol \fBc3c fetch\fR uses, so any \fBc3c\fR that can build the project will 
 .P
 On Windows, \fBgit\fR is Git for Windows, and linking a local directory (\fBadd\fR \fI.\&/dir\fR)
 needs Developer Mode or an administrator, for whom Windows creates symbolic links.\&
+Git for Windows checks files out with CRLF line endings by default
+(\fIcore.\&autocrlf=true\fR), so a package packed there differs from one packed on
+Linux; a library that wants the same bytes everywhere sets \fI* text=auto eol=lf\fR
+in its \fI.\&gitattributes\fR.\& c3l reads a \fIc3l.\&lock\fR with either line ending.\&
 .P
 .SH OPTIONS
 .P
