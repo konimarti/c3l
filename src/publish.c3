@@ -319,7 +319,14 @@ fn String[] Package.files(&self)
 		found.tinit();
 		if (try list = path::ls(tmem, (Path)self.dir, no_dirs: true, recursive: true))
 		{
-			foreach (f : list) found.push((String)f);
+			foreach (f : list)
+			{
+				$if env::WIN32:
+					found.push(((String)f).treplace("\\", "/"));  // package paths use '/'
+				$else
+					found.push((String)f);
+				$endif
+			}
 		}
 		all = found.array_view();
 	}

@@ -215,6 +215,7 @@ fn Manifest? Op.install_vendor(&self, Want w, Intent intent)
 fn Manifest? Op.install_git(&self, Want w, Intent intent)
 {
 	String url = w.origin;
+	if (!git::valid_ref(w.ref)) return log::fail("'%s' is not a git ref (%s)", w.ref, url)~;
 	Rev rev = resolve_rev(url, w.ref, w.pin)!;
 	String tmp = sys::temp_dir()!;
 	defer sys::remove(tmp);

@@ -139,10 +139,12 @@ never writes c3po's files.
 
 c3l runs on Windows with [Git for Windows](https://gitforwindows.org) and c3c on
 the `PATH`. Linking a local library (`c3l add ./dir`) needs Developer Mode
-(Settings, System, For developers), which lets Windows create symbolic links.
-git checks out files with CRLF line endings on Windows, so a package packed
-there differs from one packed on Linux; a library that wants the same bytes
-everywhere sets `* text=auto eol=lf` in its `.gitattributes`.
+(Settings, System, For developers) or an administrator, for whom Windows creates
+symbolic links. With Git for Windows' default `core.autocrlf=true`, files are
+checked out with CRLF line endings, so a package packed there differs from one
+packed on Linux; a library that wants the same bytes everywhere sets
+`* text=auto eol=lf` in its `.gitattributes`. c3l reads a `c3l.lock` with either
+line ending.
 
 ## Private repositories
 

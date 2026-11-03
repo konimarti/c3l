@@ -21,7 +21,7 @@ jobs:
         include:
           - { os: ubuntu-22.04, target: linux-x64, c3c: c3-linux.tar.gz }
           - { os: macos-14, target: macos-aarch64, c3c: c3-macos.zip }
-          - { os: windows-latest, target: windows-x64, c3c: c3-windows.zip }
+          - { os: windows-2022, target: windows-x64, c3c: c3-windows.zip }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -42,14 +42,21 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
 
-      # static libcurl, so c3l.exe is a single file; the binding links "curl"
+      - name: Cache vcpkg
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: C:/vcpkg/installed
+          key: vcpkg-curl-x64-windows-static
+
+      # libcurl and the C runtime linked in, so c3l.exe is a single file
       - name: Install libcurl (static)
         if: runner.os == 'Windows'
         run: |
-          vcpkg install curl:x64-windows-static-md
-          lib="$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md/lib"
-          cp "$lib/libcurl.lib" "$lib/curl.lib"
-          echo "C3FLAGS=-L $lib -l zlib -l ws2_32 -l crypt32 -l bcrypt -l advapi32 -l normaliz -l secur32 -l iphlpapi -l wldap32" >> "$GITHUB_ENV"
+          vcpkg install curl:x64-windows-static
+          lib="$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static/lib"
+          cp "$lib/libcurl.lib" "$lib/curl.lib"  # vcpkg names it libcurl.lib; the curl binding links "curl"
+          echo "C3FLAGS=--wincrt=static -L $lib -l zlib -l ws2_32 -l crypt32 -l bcrypt -l advapi32 -l normaliz -l secur32 -l iphlpapi -l wldap32" >> "$GITHUB_ENV"
 
       - name: Build
         run: if [ "$RUNNER_OS" = Windows ]; then c3c build c3l $C3FLAGS; else make; fi

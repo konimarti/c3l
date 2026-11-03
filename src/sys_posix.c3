@@ -6,12 +6,7 @@ module c3l::sys @feat(!WIN32);
 
 import std::io, std::os, libc, c3l::log;
 
-// A child's stderr, kept in an anonymous temporary file.
-struct Capture
-{
-	File file;
-}
-
+// The capture file is anonymous: gone once closed.
 fn Capture? capture()
 {
 	CFile f = libc::tmpfile();
@@ -54,7 +49,9 @@ fn bool points_to(String link, String dir)
 
 fn void remove_link(String link) => (void)file::delete(link);
 
-fn void setup_console() {}
+fn void remove_tree(String dir) => (void)path::rmtree((Path)dir);
+
+fn void setup() {}
 
 extern fn ZString mkdtemp(ZString template) @private;
 extern fn CInt symlink(ZString target, ZString link) @private;

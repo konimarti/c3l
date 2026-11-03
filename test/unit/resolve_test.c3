@@ -49,11 +49,13 @@ fn void git_urls() @test
 	{
 		assert(lock::valid_git_url(u), "%s should be valid", u);
 	}
-	foreach (u : (String[]){ "https://user:token@github.com/x", "https://token@github.com/x", "ext::sh -c x% http://h", "ftp://h/x", "h/x", "git@h" })
+	foreach (u : (String[]){ "https://user:token@github.com/x", "https://token@github.com/x", "ext::sh -c x% http://h", "ftp://h/x", "h/x", "git@h", "https://h/x\" -x", "https://h/\nx" })
 	{
 		assert(!lock::valid_git_url(u), "%s should be refused", u);
 	}
 	assert(lock::valid_git_url("https://github.com/x/y@v1"), "an @ in the path is no credential");
+	foreach (r : (String[]){ "", "v1.2.0", "HEAD", "branch:feature/x", "commit:0123456789ab" }) assert(git::valid_ref(r), "%s", r);
+	foreach (r : (String[]){ "v1 --upload-pack=x", "v1\"", "a\tb", "x\n" }) assert(!git::valid_ref(r), "%s", r);
 }
 
 fn void newer_versions() @test

@@ -47,6 +47,9 @@ fn void on_signal(CInt sig) @private
 {
 	if (interrupted) libc::_exit(128 + sig);
 	interrupted = true;
+	$if env::WIN32:
+		libc::signal(sig, &on_signal);  // the CRT resets it before calling
+	$endif
 }
 
 // A failure (reported once) after a signal.
@@ -95,6 +98,13 @@ fn Output? run(String[] argv, Stderr err = APART)
 	if (err == APART) o.err = errors.read();
 	check_interrupt()!;
 	return o;
+}
+
+// A child's stderr, kept in a temporary file (see capture() in sys_posix.c3 and sys_win32.c3).
+struct Capture
+{
+	File file;
+	String path;  // Windows: the file is named, and deleted by close()
 }
 
 // What the child wrote to the capture file.
@@ -179,54 +189,40 @@ fn String? content_hash(String path)
 *>
 fn String relative(String from, String to)
 {
-	String[] a = parts(from);
-	String[] b = parts(to);
+	String sep = env::WIN32 ? "\\" : "/";
+	String[] a = from.tsplit(sep, skip_empty: true);
+	String[] b = to.tsplit(sep, skip_empty: true);
 	$if env::WIN32:
-		if (!a.len || !b.len || a[0] != b[0]) return to;
+		if (!a.len || !b.len || a[0].to_lower_tcopy() != b[0].to_lower_tcopy()) return to;
 	$endif
 	sz common;
 	while (common < a.len && common < b.len && a[common] == b[common]) common++;
-	char sep = path::PREFERRED_SEPARATOR;
 	DString out = dstring::temp();
 	for (sz i = common; i < a.len; i++)
 	{
-		if (out.len()) out.append_char(sep);
+		if (out.len()) out.append(sep);
 		out.append("..");
 	}
 	for (sz i = common; i < b.len; i++)
 	{
-		if (out.len()) out.append_char(sep);
+		if (out.len()) out.append(sep);
 		out.append(b[i]);
 	}
 	return out.len() ? out.str_view() : ".";
 }
 
-// The non-empty parts of a path, split at the platform's separators.
-fn String[] parts(String p) @private
-{
-	List{String} out;
-	out.tinit();
-	sz start;
-	foreach (i, c : p)
-	{
-		if (!path::is_separator(c)) continue;
-		if (i > start) out.push(p[start:i - start]);
-		start = i + 1;
-	}
-	if (start < p.len) out.push(p[start..]);
-	return out.array_view();
-}
-
 <*
- A path on this machine rather than a URL or a registry id: ".", "..",
- starting with "./" or "../" (also ".\" and "..\" on Windows), or absolute.
+ A path on this machine rather than a URL or a registry id: starting with
+ "./" or "../" (also ".\" and "..\" on Windows), or absolute.
 *>
 fn bool is_local_path(String s)
 {
-	if (s == "." || s == "..") return true;
+	$if env::WIN32:
+		if (s.starts_with("\\\\") || s.starts_with("//")) return false;  // \\server\share: another host
+	$endif
 	String rest = s.starts_with("..") ? s[2..] : s.starts_with(".") ? s[1..] : s;
 	if (rest.len < s.len) return rest.len > 0 && path::is_separator(rest[0]);
-	return s.is_absolute_path() ?? false;
+	return ((Path)s).is_absolute() ?? false;  // as written: normalizing would refuse "/.."
 }
 
 // Remove a file, a symlink (never what it points to) or a directory tree.
@@ -239,7 +235,7 @@ fn void remove(String p)
 	}
 	if (file::is_dir(p))
 	{
-		(void)path::rmtree((Path)p);
+		remove_tree(p);
 		return;
 	}
 	(void)file::delete(p);

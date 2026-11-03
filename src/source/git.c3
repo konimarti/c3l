@@ -173,23 +173,36 @@ fn bool run(String dir, String[] args) @private => git(dir, args).code == 0;
 fn Output git(String dir, String[] args) @private => exec({ "-C", dir }, args) ?? (Output){ .code = 1 };
 
 <*
- git with `args`: never asks on the terminal (c3l runs git several times per
- library), never runs a command named by a URL (ext::).
+ git with `args`: never asks on the terminal or in a window (c3l runs git
+ several times per library), never runs a command named by a URL (ext::),
+ takes long paths on Windows.
 *>
 fn Output? exec(String[] pre, String[] args) @private
 {
 	List{String} argv;
 	argv.tinit();
-	argv.push_all({ "git", "-c", "protocol.ext.allow=never" });
+	argv.push_all({ "git", "-c", "protocol.ext.allow=never", "-c", "core.longpaths=true" });
 	argv.push_all(pre);
 	argv.push_all(args);
 	env::set_var("GIT_TERMINAL_PROMPT", "0");
+	env::set_var("GCM_INTERACTIVE", "never");
 	Output o = sys::run(argv.array_view())!;
 	failure = o.code ? o.reason() : "";
 	return o;
 }
 
 fn bool is_commit(String s) => lock::is_commit(s);
+
+<*
+ A ref c3l passes to git (tag, branch, HEAD or commit, as asked or locked): no
+ spaces, quotes or control characters, which could change how the command line
+ is split on Windows.
+*>
+fn bool valid_ref(String s)
+{
+	foreach (c : s) if (c <= ' ' || c == '"' || c == 0x7f) return false;
+	return true;
+}
 
 fn Ref[]? ls_remote(String[] args) @private
 {

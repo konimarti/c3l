@@ -17,6 +17,9 @@ fn void? add_run(Ctx* ctx)
 		return;
 	}
 	Options opts = options(ctx);
+	$if env::WIN32:  // the lock records it: keep it readable on other systems
+		if (sys::is_local_path(arg)) arg = arg.treplace("\\", "/");
+	$endif
 	// <source>@<ref>: the @ after the last '/' (git@host:path has one before it)
 	String source = arg;
 	String ref = ctx.arg(1);
@@ -326,7 +329,7 @@ fn void unregister(Project* p, String name)
 // An explicit local directory (./x, ../x, /x) that is a C3 library: linked, not copied.
 fn bool is_path_dep(String s)
 {
-	return sys::is_local_path(s) && file::is_dir(s) && file::exists(string::tformat("%s/manifest.json", s));
+	return (s == "." || s == ".." || sys::is_local_path(s)) && file::is_dir(s) && file::exists(string::tformat("%s/manifest.json", s));
 }
 
 fn String libraries(sz n) => n == 1 ? "library" : "libraries";

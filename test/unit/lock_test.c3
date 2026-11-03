@@ -90,6 +90,8 @@ fn void damaged_lines_refused() @test
 		assert(@catch(lock::load(f)), "accepted: %s", line);
 		drop(f);
 	}
+	String crlf = string::tformat("%sx\tgit\thttps://h/x\t-\tHEAD\tcommit:%s\tcommit:%s\tdirect\t-\r\n", lock::HEADER, c40, c40);
+	assert(@ok(lock::parse(crlf, "c3l.lock", &&(String){})), "a lock checked out with CRLF");
 	String why;
 	assert(@catch(lock::parse("x\tsvn\th\t-\t-\t-\t-\tdirect\t-\n", "c3l.lock", &why)));
 	assert(why.contains("unknown kind 'svn'"), "%s", why);

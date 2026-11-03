@@ -4,18 +4,12 @@
 *>
 module c3l::sys @feat(WIN32);
 
-import std::io, std::os, std::os::win32, std::math, libc, c3l::log;
+import std::io, std::os, std::os::win32, std::math::uuid, libc, c3l::log;
 
 <*
- A child's stderr, kept in a temporary file: the handle a child writes to must
- be inheritable, which CRT files are not, and tmpfile() may use the drive root.
+ The capture file is named, in the temp directory (tmpfile() may use the drive
+ root), and its handle explicitly inheritable: the child writes to it.
 *>
-struct Capture
-{
-	File file;
-	String path;
-}
-
 fn Capture? capture()
 {
 	String p = string::tformat("%s/c3l.%s.err", (String)path::temp_directory(tmem) ?? ".", uuid::generate());
@@ -42,7 +36,10 @@ fn void Capture.close(&self)
 // Rename `from` to `to`, replacing `to` if it exists (rename() would fail).
 fn bool rename(String from, String to)
 {
-	return moveFileExW(from.to_temp_wstring()!!, to.to_temp_wstring()!!, MOVEFILE_REPLACE_EXISTING) != 0;
+	WString? f = from.to_temp_wstring();
+	WString? t = to.to_temp_wstring();
+	if (catch f, t) return false;
+	return moveFileExW(f, t, MOVEFILE_REPLACE_EXISTING) != 0;
 }
 
 // A new private directory in `base` (default: the system temp directory); the caller removes it.
@@ -60,7 +57,7 @@ fn String? temp_dir(String base = "", String prefix = "c3l")
 *>
 fn void? link(String target, String link)
 {
-	if (createSymbolicLinkW(link.to_temp_wstring()!!, target.to_temp_wstring()!!, SYMBOLIC_LINK_DIRECTORY | SYMBOLIC_LINK_UNPRIVILEGED)) return;
+	if (createSymbolicLinkW(link.to_temp_wstring()!, target.to_temp_wstring()!, SYMBOLIC_LINK_DIRECTORY | SYMBOLIC_LINK_UNPRIVILEGED)) return;
 	return log::fail("cannot link %s; Windows creates symbolic links only in Developer Mode (Settings, System, For developers) or for an administrator", link)~;
 }
 
@@ -82,12 +79,42 @@ fn void remove_link(String link)
 	(void)file::delete(link);
 }
 
-// Let the console show the colours of log.c3 (ANSI escapes).
-fn void setup_console()
+<*
+ Remove a directory tree, never following a link (the stdlib's rmtree walks
+ into directory links on Windows) and deleting read-only files (git makes its
+ objects read-only).
+*>
+fn void remove_tree(String dir)
 {
-	foreach (std : (Win32_DWORD[]){ win32::STD_OUTPUT_HANDLE, win32::STD_ERROR_HANDLE })
+	PathList? names = path::ls(tmem, (Path)dir);
+	if (catch names) return;
+	foreach (name : names)
 	{
-		Win32_HANDLE h = win32::getStdHandle(std);
+		String f = string::tformat("%s\\%s", dir, name);
+		switch
+		{
+			case path::is_link((Path)f): remove_link(f);
+			case file::is_dir(f): remove_tree(f);
+			default:
+				if (try w = f.to_temp_wstring()) setFileAttributesW(w, win32::FILE_ATTRIBUTE_NORMAL);
+				(void)file::delete(f);
+		}
+	}
+	(void)path::rmdir((Path)dir);
+}
+
+<*
+ Process settings: the console shows UTF-8 and the colours of log.c3 (ANSI
+ escapes), and programs are found on the PATH only, never in the current
+ directory (a git.exe in a cloned project).
+*>
+fn void setup()
+{
+	env::set_var("NoDefaultCurrentDirectoryInExePath", "1");
+	win32::setConsoleOutputCP(UTF8);
+	foreach (which : (Win32_DWORD[]){ win32::STD_OUTPUT_HANDLE, win32::STD_ERROR_HANDLE })
+	{
+		Win32_HANDLE h = win32::getStdHandle(which);
 		Win32DwMode mode;
 		if (!win32::getConsoleMode(h, &mode)) continue;
 		win32::setConsoleMode(h, mode | (Win32DwMode)ENABLE_VIRTUAL_TERMINAL_PROCESSING);
@@ -97,7 +124,9 @@ fn void setup_console()
 // The path Windows resolves `p` to, links followed; empty if it cannot be opened.
 fn String final_path(String p) @private
 {
-	Win32_HANDLE h = createFileW(p.to_temp_wstring()!!, 0, FILE_SHARE_ALL, null, win32::OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, null);
+	WString? name = p.to_temp_wstring();
+	if (catch name) return "";
+	Win32_HANDLE h = createFileW(name, 0, FILE_SHARE_READ_WRITE_DELETE, null, win32::OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, null);
 	if (h == win32::INVALID_HANDLE_VALUE) return "";
 	defer win32::closeHandle(h);
 	Char16[1024] buf;
@@ -110,10 +139,11 @@ const Win32_DWORD MOVEFILE_REPLACE_EXISTING @private = 0x1;
 const Win32_DWORD SYMBOLIC_LINK_DIRECTORY @private = 0x1;
 const Win32_DWORD SYMBOLIC_LINK_UNPRIVILEGED @private = 0x2;
 const Win32_DWORD ENABLE_VIRTUAL_TERMINAL_PROCESSING @private = 0x4;
-const Win32_DWORD FILE_SHARE_ALL @private = 0x7;  // read, write, delete
+const Win32_DWORD FILE_SHARE_READ_WRITE_DELETE @private = 0x7;
 const Win32_DWORD FILE_FLAG_BACKUP_SEMANTICS @private = 0x02000000;  // needed to open a directory
 
 extern fn char createSymbolicLinkW(WString link, WString target, Win32_DWORD flags) @cname("CreateSymbolicLinkW") @private;
+extern fn Win32_BOOL setFileAttributesW(WString name, Win32_DWORD attributes) @cname("SetFileAttributesW") @private;
 extern fn Win32_BOOL moveFileExW(WString from, WString to, Win32_DWORD flags) @cname("MoveFileExW") @private;
 extern fn Win32_HANDLE createFileW(WString name, Win32_DWORD access, Win32_DWORD share, void* security,
 	Win32_DWORD creation, Win32_DWORD flags, Win32_HANDLE template) @cname("CreateFileW") @private;

@@ -79,8 +79,9 @@ fn Lock? parse(String text, String file, String* why)
 {
 	Lock lock = { .file = file };
 	lock.entries.tinit();
-	foreach (i, line : text.tsplit("\n"))
+	foreach (i, raw : text.tsplit("\n"))
 	{
+		String line = raw.strip_suffix("\r");  // git for Windows may check it out with CRLF
 		if (!line.len || line.starts_with("#")) continue;
 		String[] col = line.tsplit("\t");
 		if (col.len != 9)
@@ -165,6 +166,7 @@ fn bool valid_id(String s)
 *>
 fn bool valid_git_url(String s)
 {
+	foreach (c : s) if (c < ' ' || c == '"' || c == 0x7f) return false;  // see git::valid_ref
 	if (sys::is_local_path(s)) return true;
 	if (s.starts_with("git@")) return s.contains(":");
 	sz? i = s.index_of("://");
