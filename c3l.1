@@ -156,8 +156,9 @@ Create \fIc3l.\&lock\fR.\& With \fIname\fR and outside a project, run \fBc3c ini
 \fBadd\fR \fInamespace/name\fR[@\fIversion\fR]
 .RS 4
 Install a library from the registry, compare the SHA-256 of the download with
-the registry'\&s checksum, write the lock line.\& A mismatch or any
-failure restores the previous library file and \fIproject.\&json\fR.\&
+the registry'\&s checksum, write the lock line.\& The version can also be given as a
+separate argument.\& A mismatch or any failure restores the previous library file
+and \fIproject.\&json\fR.\&
 .P
 .RE
 \fBadd\fR vendor:\fIname\fR, \fBadd\fR vendor
@@ -190,8 +191,9 @@ a \fIref\fR the highest release tag is used (prerelease tags such as \fIv1.\&0.\
 when asked for), or HEAD if there are none.\& The ref is resolved to a commit,
 which is what the lockfile pins.\& \fBoutdated\fR and \fBupdate\fR move a tag to the
 highest release tag and follow the tip of \fBHEAD\fR and of branches; commits stay
-put.\& In scp-style URLs (\fIgit@host:path\fR) the \fB@\fR only starts a ref after the
-last \fB/\fR.\& The library is built with \fBgit archive\fR, so no \fI.\&git\fR is included, and without
+put; a tag only moves within its major version.\& In scp-style URLs (\fIgit@host:path\fR) the \fB@\fR only starts a ref after the
+last \fB/\fR.\& URLs with credentials (\fIhttps://user:token@host/.\&.\&.\&\fR) are refused: the
+URL is written to the lockfile; see \fBPRIVATE REPOSITORIES\fR.\& The library is built with \fBgit archive\fR, so no \fI.\&git\fR is included, and without
 line-ending conversion.\& A git library is identified by its commit and its files:
 the lockfile pins the commit and records a hash of the files in the archive, and
 \fBverify\fR and \fBsync\fR check both (\fBgit archive\fR stores the commit id in the zip
@@ -232,16 +234,21 @@ Check installed files against the lockfile.\& Exit status 1 on any difference.\&
 .RE
 \fBoutdated\fR
 .RS 4
-Show locked libraries for which the registry (or git) has a higher version.\&
+Show locked libraries for which the registry (or git) has a higher version: the
+newest of the same major version, which \fBupdate\fR moves to, and a newer major
+version if there is one.\& A library whose source cannot be reached is named, and
+the exit status is 1.\&
 .P
 .RE
 \fBupdate\fR [\fIname\fR[@\fIref\fR] .\&.\&.\&]
 .RS 4
-Update to the newest version, one library at a time, with rollback.\& With
-\fIname\fR@\fIref\fR switch that library to an explicit version instead: a registry
-version, or for git libraries a tag, branch, \fBHEAD\fR or full commit hash (for
-example \fBc3l update lib@HEAD\fR moves a tag-locked library to HEAD).\& With
-\fB--dry-run\fR only print what would change.\&
+Update to the newest version of the same major version, one library at a time,
+with rollback; a newer major version is only announced.\& With \fIname\fR@\fIref\fR switch
+that library to an explicit version instead: a registry version, or for git
+libraries a tag, branch, \fBHEAD\fR or full commit hash (for example \fBc3l update
+lib@HEAD\fR moves a tag-locked library to HEAD).\& Moving to another major version
+fails if a library that requires it asks for the old one.\& A name that is not in
+the lockfile is an error.\& With \fB--dry-run\fR only print what would change.\&
 .P
 .RE
 \fBsync\fR
@@ -366,6 +373,34 @@ library is installed once.\& Git sources other than github.\&com, codeberg.\&org
 hosts of URLs given on the command line need \fB--allow-host\fR or an answer at the
 prompt.\& More than 200 libraries are refused.\&
 .P
+.SH PRIVATE REPOSITORIES
+.P
+c3l runs \fBgit\fR for git libraries, so private repositories work with whatever gives
+git access: an ssh key (\fIgit@github.\&com:me/lib\fR) or, for https URLs, a credential
+helper (for GitHub: \fBgh auth setup-git\fR).\& git is never allowed to ask on the
+terminal; when it fails, c3l shows what git said.\&
+.P
+The same repository as \fIhttps://host/path\fR, \fIssh://git@host/path\fR and
+\fIgit@host:path\fR counts as one source.\& Libraries should name their dependencies with
+https URLs, which work for everyone; to fetch them over ssh yourself, let git
+rewrite them:
+.P
+.nf
+.RS 4
+git config --global url\&."git@github\&.com:"\&.insteadOf https://github\&.com/
+.fi
+.RE
+.P
+In CI, give git access to the other repositories: an ssh deploy key with the
+rewrite above, or a token (in GitHub Actions a personal access token; the
+built-in \fIGITHUB_TOKEN\fR reads only the repository being built):
+.P
+.nf
+.RS 4
+git config --global url\&."https://x-access-token:${TOKEN}@github\&.com/"\&.insteadOf https://github\&.com/
+.fi
+.RE
+.P
 .SH LOCKFILE
 .P
 Tab separated, one library per line, sorted by name:
@@ -425,7 +460,8 @@ c3l completion fish > ~/\&.config/fish/completions/c3l\&.fish
 .SH EXIT STATUS
 .P
 0 on success, 1 when a command fails, 2 for a usage error (an unknown command or
-option, a wrong number of arguments).\&
+option, a wrong number of arguments), 130 when interrupted (SIGINT or SIGTERM;
+what the command changed so far is undone, a second signal stops at once).\&
 .P
 .SH ENVIRONMENT VARIABLES
 .P

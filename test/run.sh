@@ -896,6 +896,66 @@ check_not "unknown command" c3l frobnicate
 cd "$WORK" && mkdir -p empty && cd empty
 check_not "outside project" c3l list
 out="$(c3l list 2>&1)"; has "plain directory: project hint" "no project.json found" "$out"
+section "update stays in its major version; a new major is asked for and checked"
+newproj maj
+c3l init >/dev/null 2>&1
+for v in 1.0.0 1.1.0 2.0.0; do publish acme/mj "$v" >/dev/null; done
+publish acme/mjuser 1.0.0 --requires=acme/mj:1.0.0 >/dev/null
+c3l add acme/mjuser >/dev/null 2>&1
+has "outdated: next and new major" "^mj .*1.0.0 .*-> 1.1.0 .*(new major version: 2.0.0)" "$(c3l outdated)"
+out="$(c3l update 2>&1)"; eq "update rc" $? 0
+has "update stays in major 1" "	1.1.0	" "$(grep '^mj	' c3l.lock)"
+has "new major announced" "mj 2.0.0 is available" "$out"
+cp c3l.lock "$WORK/lock.before"
+out="$(c3l update mj@2.0.0 2>&1)"; eq "major conflict rc" $? 1
+has "dependent named" "version conflict: mjuser needs mj 1.0.0" "$out"
+check "conflict rolled back" cmp -s c3l.lock "$WORK/lock.before"
+check "verify after rollback" c3l verify
+
+section "arguments are checked: version argument, unknown names, unreachable sources"
+newproj args
+c3l init >/dev/null 2>&1
+c3l add acme/mj 1.0.0 >/dev/null 2>&1; eq "version as a second argument rc" $? 0
+has "that version installed" "	1.0.0	" "$(grep '^mj	' c3l.lock)"
+check_not "version in both forms" c3l add acme/mj@1.0.0 1.1.0
+check_not "vendor library with a version" c3l add vendor:mj 1.0
+out="$(c3l update nosuch 2>&1)"; eq "update unknown rc" $? 1
+has "unknown named" "'nosuch' is not in" "$out"
+sed -i "s|$C3L_REGISTRY|http://127.0.0.1:1|" c3l.lock
+out="$(c3l outdated 2>&1)"; eq "outdated unreachable rc" $? 1
+has "unknown is not up to date" "mj: cannot determine the newest version" "$out"
+
+section "git: what git says, URLs with credentials, export-subst"
+newproj gitmsg
+c3l init >/dev/null 2>&1
+out="$(c3l add "file://$WORK/no-such-repo" 2>&1)"; eq "missing repo rc" $? 1
+has "git's reason shown" "; git: .*does not appear to be a git repository" "$out"
+out="$(c3l add "https://me:secret@github.com/me/lib" 2>&1)"; eq "credentials rc" $? 1
+has "credentials explained" "without credentials" "$out"
+check_not "no secret in the lock" grep -q secret c3l.lock
+ES="$WORK/es"; mkdir -p "$ES/src"; cd "$ES" || exit 1
+git init -q . && git config commit.gpgsign false
+echo '{ "provides": "es", "targets": {} }' > manifest.json
+echo '* export-subst' > .gitattributes
+echo '// $Format:%H %d$' > src/es.c3
+git add -A && git commit -qm one
+cd "$WORK/gitmsg/app" || exit 1
+c3l add "file://$ES" >/dev/null 2>&1; eq "export-subst add rc" $? 0
+has "placeholders kept" 'Format:%H %d' "$(python3 -c "import zipfile;print(zipfile.ZipFile('lib/es.c3l').read('src/es.c3').decode())")"
+
+section "an interrupted install undoes itself"
+mkdir -p "$WORK/slowbin" "$WORK/tmp"
+printf '#!/bin/sh\nsleep 2\nexec %s "$@"\n' "$(command -v git)" > "$WORK/slowbin/git"; chmod +x "$WORK/slowbin/git"
+newproj intr
+c3l init >/dev/null 2>&1
+cp c3l.lock "$WORK/lock.before"; cp project.json "$WORK/project.before"
+TMPDIR="$WORK/tmp" PATH="$WORK/slowbin:$PATH" "$C3L" add "file://$GR" >/dev/null 2>&1 &
+P=$!; sleep 0.5; kill -TERM "$P"; wait "$P"; eq "interrupted rc" $? 130
+eq "nothing left in lib" "$(ls -A lib | grep -v gitkeep)" ""
+eq "no temporary directories left" "$(ls -A "$WORK/tmp")" ""
+check "lock unchanged" cmp -s c3l.lock "$WORK/lock.before"
+check "project unchanged" cmp -s project.json "$WORK/project.before"
+
 section "search: the registry and the vendor snapshot"
 out="$(c3l search SQLite 2>&1)"; eq "search rc" $? 0
 has "vendor snapshot, by description, any case" "^vendor:sqlite3 .*SQLite 3 database" "$out"

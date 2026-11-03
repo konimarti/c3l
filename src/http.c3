@@ -5,7 +5,7 @@
 *>
 module c3l::http;
 
-import std::io, curl;
+import std::io, curl, c3l::sys;
 
 const usz MAX_BODY = 64 * 1024 * 1024;
 
@@ -36,6 +36,7 @@ struct Request
 	Part[] form;
 	String out_file;  // write the body here instead of into Response.body
 	long timeout;     // seconds
+	bool no_redirects;
 }
 
 fn Response get(String url, long timeout = 30) => request({ .method = "GET", .url = url, .timeout = timeout });
@@ -71,7 +72,9 @@ fn Response request(Request req)
 	curl::easy_setopt(h, CurlOption.CUSTOMREQUEST, req.method.zstr_tcopy());
 	curl::easy_setopt(h, CurlOption.USERAGENT, "c3l");
 	curl::easy_setopt(h, CurlOption.HTTPHEADER, headers);
-	curl::easy_setopt(h, CurlOption.FOLLOWLOCATION, 1L);
+	curl::easy_setopt(h, CurlOption.FOLLOWLOCATION, req.no_redirects ? 0L : 1L);
+	curl::easy_setopt(h, CurlOption.NOPROGRESS, 0L);
+	curl::easy_setopt(h, CurlOption.XFERINFOFUNCTION, &on_progress);
 	curl::easy_setopt(h, CurlOption.WRITEFUNCTION, &on_write);
 	curl::easy_setopt(h, CurlOption.WRITEDATA, &sink);
 	curl::easy_setopt(h, CurlOption.HEADERFUNCTION, &on_header);
@@ -105,6 +108,7 @@ fn Response request(Request req)
 	}
 
 	CurlResult res = curl::easy_perform(h);
+	if (catch sys::check_interrupt()) return { .error = "interrupted" };
 	if (sink.failed) return { .error = sink.to_file ? string::tformat("cannot write %s", req.out_file) : "response too large" };
 	if (res != CurlResult.OK)
 	{
@@ -134,6 +138,12 @@ fn usz on_header(char* ptr, usz size, usz nmemb, void* userdata) @private
 		sink.retry_after = line[12..].trim().tcopy();
 	}
 	return size * nmemb;
+}
+
+// Called while a transfer runs: non-zero aborts it.
+fn int on_progress(void* data, CurlOff dltotal, CurlOff dlnow, CurlOff ultotal, CurlOff ulnow) @private
+{
+	return sys::interrupted ? 1 : 0;
 }
 
 fn usz on_write(char* ptr, usz size, usz nmemb, void* userdata) @private

@@ -73,6 +73,18 @@ fn void Info.print(&self)
 
 fn bool Info.has(&self, String version) => self.versions.has_key(version);
 
+// The published versions.
+fn String[] Info.list(&self)
+{
+	List{String} out;
+	out.tinit();
+	self.versions.@each_entry(; String version, Object* v)
+	{
+		out.push(version);
+	};
+	return out.array_view();
+}
+
 // "sha256:<hex>" as the registry lists it, empty if it lists none.
 fn String Info.checksum(&self, String version)
 {

@@ -110,8 +110,9 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 
 *add* _namespace/name_[@_version_]
 	Install a library from the registry, compare the SHA-256 of the download with
-	the registry's checksum, write the lock line. A mismatch or any
-	failure restores the previous library file and _project.json_.
+	the registry's checksum, write the lock line. The version can also be given as a
+	separate argument. A mismatch or any failure restores the previous library file
+	and _project.json_.
 
 *add* vendor:_name_, *add* vendor
 	Install a library from c3c's vendor collection (the files of the _c3lang/vendor_
@@ -138,8 +139,9 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 	when asked for), or HEAD if there are none. The ref is resolved to a commit,
 	which is what the lockfile pins. *outdated* and *update* move a tag to the
 	highest release tag and follow the tip of *HEAD* and of branches; commits stay
-	put. In scp-style URLs (_git@host:path_) the *@* only starts a ref after the
-	last */*. The library is built with *git archive*, so no _.git_ is included, and without
+	put; a tag only moves within its major version. In scp-style URLs (_git@host:path_) the *@* only starts a ref after the
+	last */*. URLs with credentials (_https://user:token@host/..._) are refused: the
+	URL is written to the lockfile; see *PRIVATE REPOSITORIES*. The library is built with *git archive*, so no _.git_ is included, and without
 	line-ending conversion. A git library is identified by its commit and its files:
 	the lockfile pins the commit and records a hash of the files in the archive, and
 	*verify* and *sync* check both (*git archive* stores the commit id in the zip
@@ -168,14 +170,19 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 	Check installed files against the lockfile. Exit status 1 on any difference.
 
 *outdated*
-	Show locked libraries for which the registry (or git) has a higher version.
+	Show locked libraries for which the registry (or git) has a higher version: the
+	newest of the same major version, which *update* moves to, and a newer major
+	version if there is one. A library whose source cannot be reached is named, and
+	the exit status is 1.
 
 *update* [_name_[@_ref_] ...]
-	Update to the newest version, one library at a time, with rollback. With
-	_name_@_ref_ switch that library to an explicit version instead: a registry
-	version, or for git libraries a tag, branch, *HEAD* or full commit hash (for
-	example *c3l update lib@HEAD* moves a tag-locked library to HEAD). With
-	*--dry-run* only print what would change.
+	Update to the newest version of the same major version, one library at a time,
+	with rollback; a newer major version is only announced. With _name_@_ref_ switch
+	that library to an explicit version instead: a registry version, or for git
+	libraries a tag, branch, *HEAD* or full commit hash (for example *c3l update
+	lib@HEAD* moves a tag-locked library to HEAD). Moving to another major version
+	fails if a library that requires it asks for the old one. A name that is not in
+	the lockfile is an error. With *--dry-run* only print what would change.
 
 *sync*
 	Make the project match _c3l.lock_: reinstall missing or modified libraries at the
@@ -279,6 +286,30 @@ library is installed once. Git sources other than github.com, codeberg.org and t
 hosts of URLs given on the command line need *--allow-host* or an answer at the
 prompt. More than 200 libraries are refused.
 
+# PRIVATE REPOSITORIES
+
+c3l runs *git* for git libraries, so private repositories work with whatever gives
+git access: an ssh key (_git@github.com:me/lib_) or, for https URLs, a credential
+helper (for GitHub: *gh auth setup-git*). git is never allowed to ask on the
+terminal; when it fails, c3l shows what git said.
+
+The same repository as _https://host/path_, _ssh://git@host/path_ and
+_git@host:path_ counts as one source. Libraries should name their dependencies with
+https URLs, which work for everyone; to fetch them over ssh yourself, let git
+rewrite them:
+
+```
+git config --global url."git@github.com:".insteadOf https://github.com/
+```
+
+In CI, give git access to the other repositories: an ssh deploy key with the
+rewrite above, or a token (in GitHub Actions a personal access token; the
+built-in _GITHUB_TOKEN_ reads only the repository being built):
+
+```
+git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf https://github.com/
+```
+
 # LOCKFILE
 
 Tab separated, one library per line, sorted by name:
@@ -330,7 +361,8 @@ c3l completion fish > ~/.config/fish/completions/c3l.fish
 # EXIT STATUS
 
 0 on success, 1 when a command fails, 2 for a usage error (an unknown command or
-option, a wrong number of arguments).
+option, a wrong number of arguments), 130 when interrupted (SIGINT or SIGTERM;
+what the command changed so far is undone, a second signal stops at once).
 
 # ENVIRONMENT VARIABLES
 

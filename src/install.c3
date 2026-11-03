@@ -125,12 +125,15 @@ fn String Op.file_of(&self, String name) => project::lib_file(self.dir, name);
 fn void? Op.add(&self, Want w, Intent intent)
 {
 	Manifest m = self.install(w, intent)!;
-	if (!w.pin.len) self.follow(m.provides, m.requires)!;
+	if (w.pin.len) return;
+	self.check_dependents(m.provides)!;
+	self.follow(m.provides, m.requires)!;
 }
 
 // Install one library; its manifest, with `provides` set to the name it was installed as.
 fn Manifest? Op.install(&self, Want w, Intent intent)
 {
+	if (w.pin.len) intent = KEEP;  // a restore
 	switch (w.kind)
 	{
 		case REGISTRY: return self.install_registry(w, intent);
@@ -166,7 +169,7 @@ fn Manifest? Op.install_registry(&self, Want w, Intent intent)
 	if (!registry::download(w.origin, w.id, version, staged)) return log::fail("download of %s@%s from %s failed", w.id, version, w.origin)~;
 	String got = verify(staged, expected, string::tformat("%s@%s", w.id, version))!;
 	warn_provides(staged, name, w.id);
-	Manifest m = self.place({ .name = name, .kind = REGISTRY, .origin = w.origin, .id = w.id, .version = version, .pin = got, .hash = got }, staged, w.pin.len > 0 ? KEEP : intent)!;
+	Manifest m = self.place({ .name = name, .kind = REGISTRY, .origin = w.origin, .id = w.id, .version = version, .pin = got, .hash = got }, staged, intent)!;
 	log::info("installed %s %s (%s)", name, version, got);
 	return m;
 }
@@ -199,7 +202,7 @@ fn Manifest? Op.install_vendor(&self, Want w, Intent intent)
 	}
 	String got = verify(staged, expected, string::tformat("vendor:%s", name))!;
 	warn_provides(staged, name, string::tformat("vendor:%s", name));
-	Manifest m = self.place({ .name = name, .kind = VENDOR, .origin = w.origin, .id = name, .version = "latest", .pin = got, .hash = got }, staged, w.pin.len > 0 ? KEEP : intent)!;
+	Manifest m = self.place({ .name = name, .kind = VENDOR, .origin = w.origin, .id = name, .version = "latest", .pin = got, .hash = got }, staged, intent)!;
 	log::info("installed %s (%s)", name, got);
 	return m;
 }
@@ -230,7 +233,7 @@ fn Manifest? Op.install_git(&self, Want w, Intent intent)
 		return log::fail("the files of %s at commit %s differ from c3l.lock (expected %s, got %s)", url, rev.commit, w.hash, contents)~;
 	}
 	String pin = string::tformat("commit:%s", rev.commit);
-	Manifest m = self.place({ .name = name, .kind = GIT, .origin = url, .id = "-", .version = rev.label, .pin = pin, .hash = contents }, staged, w.pin.len > 0 ? KEEP : intent)!;
+	Manifest m = self.place({ .name = name, .kind = GIT, .origin = url, .id = "-", .version = rev.label, .pin = pin, .hash = contents }, staged, intent)!;
 	log::info("installed %s %s (commit %s)", name, rev.label, rev.commit[:12]);
 	return m;
 }
@@ -246,7 +249,7 @@ fn Manifest? Op.install_path(&self, Want w, Intent intent)
 	self.set_aside(name)!;
 	String dir = (String)self.dir.to_absolute_path(tmem) ?? log::fail("cannot enter %s", self.dir)~!;
 	sys::link(sys::relative(dir, abs), self.file_of(name))!;  // relative: the project can move
-	Manifest m = self.place({ .name = name, .kind = PATH, .origin = src, .id = "-", .version = "-", .pin = "-", .hash = "-" }, "", w.pin.len > 0 ? KEEP : intent)!;
+	Manifest m = self.place({ .name = name, .kind = PATH, .origin = src, .id = "-", .version = "-", .pin = "-", .hash = "-" }, "", intent)!;
 	log::info("linked %s -> %s", name, abs);
 	return m;
 }
@@ -379,10 +382,10 @@ fn Rev? resolve_rev(String url, String ref, String pin) @private
 	{
 		case HEAD:
 			r.commit = git::head(url)!;
-			if (!r.commit.len) return log::fail("cannot resolve HEAD of %s (not a reachable git repository?)", url)~;
+			if (!r.commit.len) return log::fail("cannot resolve HEAD of %s%s", url, git::because())~;
 		case BRANCH:
 			r.commit = git::branch_commit(url, r.name)!;
-			if (!r.commit.len) return log::fail("branch '%s' not found in %s", r.name, url)~;
+			if (!r.commit.len) return log::fail("branch '%s' not found in %s%s", r.name, url, git::because())~;
 		case COMMIT:
 			break;
 		case TAG: // a plain name: a tag, else a branch, else a full commit
@@ -392,7 +395,7 @@ fn Rev? resolve_rev(String url, String ref, String pin) @private
 			r = { .kind = BRANCH, .name = ref, .commit = git::branch_commit(url, ref)!, .label = string::tformat("branch:%s", ref) };
 			if (r.commit.len) return r;
 			if (is_short_commit(ref)) return log::fail("'%s' is not a tag or branch in %s; give a commit as its full 40-character hash", ref, url)~;
-			if (!git::is_commit(ref)) return log::fail("'%s' is not a tag, branch or full commit hash in %s", ref, url)~;
+			if (!git::is_commit(ref)) return log::fail("'%s' is not a tag, branch or full commit hash in %s%s", ref, url, git::because())~;
 			r = { .kind = COMMIT, .commit = ref, .label = short_commit(ref) };
 	}
 	if (r.kind == COMMIT && !git::is_commit(r.commit)) return log::fail("a commit must be given as the full 40-character hash")~;

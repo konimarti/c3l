@@ -5,7 +5,7 @@
 module c3l::publish;
 
 import std::io, std::os, std::sort, std::collections::list, std::collections::object, std::encoding::json;
-import c3l::log, c3l::sys, c3l::lock, c3l::semver, c3l::manifest, c3l::jsonedit, c3l::http, c3l::registry, c3l::git;
+import c3l::log, c3l::sys, c3l::lock, c3l::semver, c3l::manifest, c3l::jsonedit, c3l::http, c3l::registry, c3l::git, c3l::install;
 
 // From the command line.
 struct Settings
@@ -150,7 +150,7 @@ fn bool Package.resolve_version(&self, String option, String in_manifest)
 	return true;
 }
 
-// Consumers get the dependencies from vendor.c3l.requires in the published manifest.
+// Consumers get the dependencies from the c3l.lock in the package; a local directory cannot travel.
 fn void Package.check_dependencies(&self, Manifest m)
 {
 	Lock? l = lock::load(string::tformat("%s/c3l.lock", self.dir));
@@ -356,6 +356,11 @@ fn String[] packed(String[] files) @private
 fn void? Package.upload(&self, Settings s, String file, String sha)
 {
 	String base = registry::base(s.registry);
+	String host = install::host_of(base);
+	if (!base.starts_with("https://") && host != "localhost" && host != "127.0.0.1")
+	{
+		return log::fail("refusing to send the API token to %s: not https", base)~;
+	}
 	List{Part} form;
 	form.tinit();
 	form.push({ .name = "file", .file = file });
@@ -371,6 +376,7 @@ fn void? Package.upload(&self, Settings s, String file, String sha)
 		.headers = { string::tformat("Authorization: Bearer %s", token(s.token_file)!) },
 		.form = form.array_view(),
 		.timeout = 600,
+		.no_redirects = true,  // the token goes to this URL only
 	});
 	if (r.error.len) return log::fail("upload failed: cannot reach %s", base)~;
 	if (r.status != 201)

@@ -81,6 +81,8 @@ fn void damaged_lines_refused() @test
 		"x\tregistry\thttps://r\tns/x\t1.0.0\tsha256:zz\tsha256:zz\tdirect\t-\n",
 		"x\tregistry\thttps://r\t../x\t1.0.0\tsha256:" +++ "0000000000000000000000000000000000000000000000000000000000000000" +++ "\tsha256:0000000000000000000000000000000000000000000000000000000000000000\tdirect\t-\n",
 		"x\tpath\t../x\t-\t-\t-\t-\tdirect\tok,../evil\n",
+		"x\tgit\text::sh -c touch% http://h\t-\tHEAD\tcommit:0123456789abcdef0123456789abcdef01234567\tcommit:0123456789abcdef0123456789abcdef01234567\tdirect\t-\n",
+		"x\tgit\thttps://me:token@h/x\t-\tHEAD\tcommit:0123456789abcdef0123456789abcdef01234567\tcommit:0123456789abcdef0123456789abcdef01234567\tdirect\t-\n",
 	};
 	foreach (line : bad)
 	{
@@ -88,6 +90,9 @@ fn void damaged_lines_refused() @test
 		assert(@catch(lock::load(f)), "accepted: %s", line);
 		drop(f);
 	}
+	String why;
+	assert(@catch(lock::parse("x\tsvn\th\t-\t-\t-\t-\tdirect\t-\n", "c3l.lock", &why)));
+	assert(why.contains("unknown kind 'svn'"), "%s", why);
 	String good = string::tformat("%sx\tgit\thttps://h/x\t-\tHEAD\tcommit:%s\tcontent:%s\tdirect\t-\n", lock::HEADER, c40, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
 	String f = tmp_lock(good);
 	assert(@ok(lock::load(f)), "a git entry with the archive's content hash is valid");

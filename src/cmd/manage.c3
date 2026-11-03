@@ -17,29 +17,34 @@ fn void? add_run(Ctx* ctx)
 		return;
 	}
 	Options opts = options(ctx);
-	Want w;
-	String url = arg;
-	String ref;
+	// <source>@<ref>: the @ after the last '/' (git@host:path has one before it)
+	String source = arg;
+	String ref = ctx.arg(1);
 	String last = arg[(arg.rindex_of_char('/') ?? -1) + 1..];
 	if (arg.contains("/") && last.contains("@"))
 	{
+		if (ref.len) return log::fail("give the version either as %s or as a separate argument, not both", arg)~;
 		ref = last[last.index_of_char('@')!! + 1..];
-		url = arg[:arg.len - ref.len - 1];
+		source = arg[:arg.len - ref.len - 1];
 	}
+	Want w;
 	switch
 	{
 		case arg.starts_with("vendor:"):
-			if (arg.contains("@")) return log::fail("vendor libraries have no versions (the collection is one rolling release); use vendor:<name>")~;
+			if (ref.len || arg.contains("@")) return log::fail("vendor libraries have no versions (the collection is one rolling release); use vendor:<name>")~;
 			w = { .kind = VENDOR, .origin = registry::base(vendor::url()), .id = arg["vendor:".len..] };
-		case is_path_dep(arg):
+		case is_path_dep(arg):  // the whole argument: a directory name may contain '@'
+			if (ctx.arg(1).len) return log::fail("a local directory has no versions; it is linked as it is")~;
 			w = { .kind = PATH, .origin = arg };
-		case install::is_git_url(url):
-			if (ref.len && ctx.arg(1).len) return log::fail("give the version either as <url>@<ref> or as a separate argument, not both")~;
-			opts.hosts.push(install::host_of(url));
-			w = { .kind = GIT, .origin = url, .ref = ref.len ? ref : ctx.arg(1) };
-		case registry::is_id(arg[:arg.index_of_char('@') ?? arg.len]):
-			sz at = arg.index_of_char('@') ?? arg.len;
-			w = { .kind = REGISTRY, .origin = opts.registry, .id = arg[:at], .ref = at < arg.len ? arg[at + 1..] : "" };
+		case install::is_git_url(source):
+			if (!lock::valid_git_url(source))
+			{
+				return log::fail("'%s' is not a git URL c3l fetches from: use https://, ssh://, git://, file:// or git@host:path, without credentials (the URL is written to %s; for a private repository use an ssh key or a credential helper)", source, p.lock.file)~;
+			}
+			opts.hosts.push(install::host_of(source));
+			w = { .kind = GIT, .origin = source, .ref = ref };
+		case registry::is_id(source):
+			w = { .kind = REGISTRY, .origin = opts.registry, .id = source, .ref = ref };
 		default:
 			return log::fail("'%s' is neither <namespace>/<name>[@version], vendor:<name> nor a git URL", arg)~;
 	}
@@ -62,11 +67,7 @@ fn void? remove_run(Ctx* ctx)
 	{
 		return log::fail("'%s' is required by: %s. Remove those first, or use --force", name, string::join(tmem, needed, " "))~;
 	}
-	if (sys::exists(f))
-	{
-		sys::remove(f);
-		log::info("removed %s", f);
-	}
+	sys::remove(f);
 	unregister(&p, name);
 	p.lock.del(name);
 	p.lock.save()!;
@@ -118,12 +119,7 @@ fn void? update_run(Ctx* ctx)
 		sz at = arg.index_of_char('@') ?? arg.len;
 		String name = lib_name(arg[:at])!;
 		if (at + 1 == arg.len) return log::fail("empty version in '%s'", arg)~;
-		Entry*? e = p.lock.get(name);
-		if (catch e)
-		{
-			log::warn("%s is not in %s", name, p.lock.file);
-			continue;
-		}
+		Entry* e = p.lock.get(name) ?? log::fail("'%s' is not in %s", name, p.lock.file)~!;
 		todo.push(*e);
 		wants.push(at < arg.len ? arg[at + 1..] : "");
 	}
@@ -132,22 +128,25 @@ fn void? update_run(Ctx* ctx)
 	sz n;
 	foreach (i, e : todo)
 	{
+		sys::check_interrupt()!;
 		if (e.kind == PATH) continue;  // a linked directory is always current
 		if (e.kind == GIT) opts.hosts.push(install::host_of(e.origin));
 		String want = i < wants.len() ? wants[i] : "";
 		String shown = want;
 		if (!want.len)
 		{
-			String? newer = install::newer(&e);
+			Newer? newer = install::newer(&e);
 			if (catch newer)
 			{
-				log::warn("%s: cannot determine the newest version", e.name);
+				log::error("%s: cannot determine the newest version%s", e.name, e.kind == GIT ? git::because() : "");
+				failed.push(e.name);
 				continue;
 			}
-			if (!newer.len) continue;
-			shown = newer;
+			if (newer.major.len) log::info("%s %s is available, a new major version: 'c3l update %s@%s' moves to it", e.name, newer.major, e.name, newer.major);
+			if (!newer.next.len) continue;
+			shown = newer.next;
 			// a moving source (HEAD, branch, vendor) is fetched again at its locked label
-			want = newer.starts_with("HEAD@") ? e.version : newer;
+			want = newer.next.starts_with("HEAD@") ? e.version : newer.next;
 		}
 		if (ctx.flag_bool("dry-run"))
 		{
@@ -207,6 +206,7 @@ fn void? sync_run(Ctx* ctx)
 	failed.tinit();
 	foreach (&e : entries)
 	{
+		sys::check_interrupt()!;
 		Status st = install::status(e, dir);
 		if (st == OK)
 		{
@@ -301,7 +301,7 @@ fn bool? apply(Project* p, Options* opts, Want w, bool fail_fast)
 	if (catch e = op.add(w, KEEP))
 	{
 		op.rollback();
-		if (fail_fast) return e~;
+		if (fail_fast || sys::interrupted) return e~;
 		return false;
 	}
 	op.commit();

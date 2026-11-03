@@ -16,7 +16,11 @@ fn void? Op.follow(&self, String parent, Requirement[] reqs)
 	if (!reqs.len) return;
 	self.stack.push(parent);
 	defer (void)self.stack.remove_last();
-	foreach (r : reqs) self.resolve(parent, r)!;
+	foreach (r : reqs)
+	{
+		sys::check_interrupt()!;
+		self.resolve(parent, r)!;
+	}
 }
 
 fn void? Op.resolve(&self, String parent, Requirement r)
@@ -51,6 +55,7 @@ fn void? Op.resolve(&self, String parent, Requirement r)
 			self.trust(vendor::url())!;
 			w = { .kind = VENDOR, .origin = registry::base(vendor::url()), .id = r.source["vendor:".len..] };
 		case is_git_url(r.source):
+			if (!lock::valid_git_url(r.source)) return log::fail("%s requires '%s' from '%s', which is not a git URL c3l fetches from", parent, r.name, r.source)~;
 			self.trust(r.source)!;
 			w = { .kind = GIT, .origin = r.source, .ref = git_ref(r.version) };
 		case registry::is_id(r.source):
@@ -97,6 +102,25 @@ fn void? Op.satisfy(&self, String parent, Entry e, Requirement r)
 	log::info("  %s %s -> %s (required by %s)", e.name, e.version, want, parent);
 	Manifest m = self.install({ .kind = REGISTRY, .origin = e.origin, .id = e.id, .ref = want }, KEEP)!;
 	self.follow(m.provides, m.requires)!;
+}
+
+<*
+ `name` was just installed at a new version: the libraries that require it
+ must accept that major (the same rule as above, seen from the other side).
+*>
+fn void? Op.check_dependents(&self, String name)
+{
+	String version = plain_version(self.proj.lock.get(name).version ?? "");
+	if (!semver::valid(version)) return;
+	foreach (d : self.proj.lock.dependents(name))
+	{
+		foreach (r : (manifest::load(self.file_of(d)) ?? (Manifest){}).requires)
+		{
+			String want = plain_version(r.version);
+			if (r.name != name || !semver::valid(want) || semver::major(want) == semver::major(version)) continue;
+			return log::fail("version conflict: %s needs %s %s (major %s), not %s; update or remove %s first", d, name, want, semver::major(want), version, d)~;
+		}
+	}
 }
 
 fn bool Op.same_source(&self, Entry e, Requirement r)
@@ -154,6 +178,7 @@ fn void? Op.trust(&self, String url)
 	{
 		io::eprintf("A dependency wants to fetch from '%s' (%s). Allow? [y/N] ", host, url);
 		String answer = io::treadline() ?? "";
+		sys::check_interrupt()!;
 		if (answer.starts_with("y") || answer.starts_with("Y"))
 		{
 			self.opts.hosts.push(host);

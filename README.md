@@ -55,8 +55,8 @@ Shell completion: `source <(c3l completion bash)` (also `zsh`, `fish`).
 | `why <name>` | which libraries require `<name>` |
 | `list [--tree]` | libraries and state: `ok`, `modified`, `missing`, `untracked`; `dep` marks pulled-in libraries |
 | `verify` | check files against the lock, exit 1 on problems |
-| `outdated` | show newer versions |
-| `update [name[@ref]...]` | update all, or switch one to a version, tag, branch or commit |
+| `outdated` | show newer versions (exit 1 if a source cannot be reached) |
+| `update [name[@ref]...]` | update all within their major version, or switch one to a version, tag, branch or commit |
 | `sync` | restore from the lock. One failure does not stop the others (exit 1 and a summary) |
 | `search <text\|tag:x>` | search the registry and c3c's vendor collection (a list built into c3l) |
 | `info <ns/name>` | the registry record of a library |
@@ -133,6 +133,14 @@ c3po and c3l share the `lib/` layout. c3l follows dependencies declared in
 `vendor.c3po.sources`, and `c3l migrate` locks the commits from a
 `project.lock.json`, then `c3l sync` rebuilds them as verified archives. c3l
 never writes c3po's files.
+
+## Private repositories
+
+c3l runs `git`, so private repositories work with whatever gives git access: an
+ssh key (`git@github.com:me/lib`) or a credential helper for https URLs (`gh auth
+setup-git`). URLs with credentials in them are refused, they would end up in
+`c3l.lock`. The ssh and https URLs of a repository count as the same source;
+libraries should use https URLs. See `man c3l` for CI.
 
 ## Publishing
 

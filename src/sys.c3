@@ -4,41 +4,81 @@
 module c3l::sys;
 
 import std::io, std::os, std::sort, std::collections::list, std::hash::sha256, std::encoding::hex;
-import std::compression::zip, libc, c3l::log;
+import std::compression::zip, libc, serp, c3l::log;
 
 // The compiler to call: $C3C or c3c on PATH.
 fn String c3c() => env::tget_var("C3C") ?? "c3c";
 
 enum Stderr
 {
-	DISCARD,
-	MERGE,  // into the captured output
+	APART,  // in Output.err
+	MERGE,  // into Output.out
 }
 
 struct Output
 {
 	int code;
 	String out;
+	String err;
+}
+
+// The first line the program wrote to stderr (where git says what went wrong), for messages.
+fn String Output.reason(&self)
+{
+	String err = self.err.trim();
+	return err[:err.index_of_char('\n') ?? err.len].trim().strip_prefix("fatal: ");
+}
+
+bool interrupted;
+bool reported @private;
+
+<*
+ SIGINT and SIGTERM end the command like a failure, so that rollback and
+ cleanup run: a running child (also signalled on Ctrl-C) fails, and run() and
+ http transfers fail once the flag is set. A second signal exits at once.
+*>
+fn void catch_signals()
+{
+	libc::signal(libc::SIGINT, &on_signal);
+	libc::signal(libc::SIGTERM, &on_signal);
+}
+
+fn void on_signal(CInt sig) @private
+{
+	if (interrupted) libc::_exit(128 + sig);
+	interrupted = true;
+}
+
+// A failure (reported once) after a signal.
+fn void? check_interrupt()
+{
+	if (!interrupted) return;
+	if (reported) return serp::FAILED~;
+	reported = true;
+	return log::fail("interrupted")~;
 }
 
 <*
- Run a program found on PATH and wait for it; its stdout is returned.
- Fails only when the program cannot be started.
+ Run a program found on PATH and wait for it; its stdout is returned, and its
+ stderr (kept in a temporary file, so neither stream can block the other).
+ Fails when the program cannot be started or c3l was interrupted.
 *>
-fn Output? run(String[] argv, Stderr err = DISCARD)
+fn Output? run(String[] argv, Stderr err = APART)
 {
+	check_interrupt()!;
 	SpawnOptions options = INHERIT_ENV;
 	ProcessStdio stderr = process::INHERIT;
-	File devnull;
+	File errors;
 	switch (err)
 	{
-		case DISCARD:
-			devnull = file::open("/dev/null", "w") ?? log::fail("cannot open /dev/null")~!;
-			stderr = process::bind(libc::fileno(devnull.file));
+		case APART:
+			errors = { .file = libc::tmpfile() };
+			if (!errors.file) return log::fail("cannot create a temporary file")~;
+			stderr = process::bind(libc::fileno(errors.file));
 		case MERGE:
 			options |= STDERR_TO_STDOUT;
 	}
-	defer if (err == DISCARD) (void)devnull.close();
+	defer if (err == APART) (void)errors.close();
 
 	Process? p = process::spawn(argv, options, {}, process::INHERIT, process::CAPTURE, stderr);
 	if (catch p) return log::fail("'%s' is required for this command but was not found", argv[0])~;
@@ -52,8 +92,16 @@ fn Output? run(String[] argv, Stderr err = DISCARD)
 		if (n <= 0) break;
 		out.append(buf[:n]);
 	}
-	int code = p.join() ?? -1;
-	return { code, out.str_view() };
+	Output o = { .code = p.join() ?? -1, .out = out.str_view() };
+	if (err == APART)
+	{
+		DString msg = dstring::temp();
+		libc::rewind(errors.file);
+		(void)io::copy_to(&errors, &msg);
+		o.err = msg.str_view();
+	}
+	check_interrupt()!;
+	return o;
 }
 
 // Replace `file` with `data` (written next to it, then renamed).
@@ -152,7 +200,7 @@ fn String relative(String from, String to)
 fn String? temp_dir(String base = "", String prefix = "c3l")
 {
 	if (!base.len) base = (String)path::temp_directory(tmem) ?? "/tmp";
-	ZString dir = mkdtemp(string::tformat("%s/%s.XXXXXXXX", base, prefix).zstr_tcopy());
+	ZString dir = mkdtemp(string::tformat("%s/%s.XXXXXX", base, prefix).zstr_tcopy());
 	if (!dir) return log::fail("cannot create a temporary directory")~;
 	return dir.str_view();
 }

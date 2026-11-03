@@ -57,9 +57,12 @@ struct Asset
 	String digest;  // sha256:<hex>, empty if GitHub lists none
 }
 
+Asset[] cached @private;  // read once per command: the GitHub API allows 60 requests an hour
+
 // UNREACHABLE when the GitHub API cannot be read.
 fn Asset[]? assets()
 {
+	if (cached.len) return cached;
 	Response r = http::get(api());
 	Object* o = r.ok() ? json::tparse(r.body) ?? null : null;
 	Object* list = o && o.is_map() ? o.get("assets") ?? null : null;
@@ -74,7 +77,8 @@ fn Asset[]? assets()
 		if (!name.ends_with(".c3l")) continue;
 		out.push({ name.strip_suffix(".c3l"), a.get_string("digest") ?? "" });
 	}
-	return out.array_view();
+	cached = out.array_view();
+	return cached;
 }
 
 // NOT_LISTED when there is no such library.

@@ -3,7 +3,7 @@
 *>
 module c3l::install;
 
-import std::io, std::compression::zip, c3l::lock, c3l::sys, c3l::semver, c3l::project;
+import std::io, std::collections::list, std::compression::zip, c3l::lock, c3l::sys, c3l::semver, c3l::project;
 import c3l::registry, c3l::vendor, c3l::git;
 
 enum Status : char (String name)
@@ -49,37 +49,64 @@ fn Status status(Entry* e, String dir)
 
 faultdef UNKNOWN;
 
-<*
- The newer version of a library, "" when it is up to date, UNKNOWN when the
- source cannot tell. A tag or registry version is compared as semver; a moving
- source (HEAD, a branch, the vendor collection) is newer when its tip is not the
- locked one, shown as HEAD@<short id>.
-*>
-fn String? newer(Entry* e)
+struct Newer
 {
-	String latest;
+	String next;   // what update moves to; empty when up to date
+	String major;  // a newer major version, taken only when asked for (name@version)
+}
+
+<*
+ What is newer than the locked version, UNKNOWN when the source cannot tell.
+ Tags and registry versions are compared as semver; a moving source (HEAD, a
+ branch, the vendor collection) is newer when its tip is not the locked one,
+ shown as HEAD@<short id>.
+*>
+fn Newer? newer(Entry* e)
+{
 	switch (e.kind)
 	{
 		case REGISTRY:
-			latest = registry::info(e.origin, e.id).latest ?? UNKNOWN~!;
-			if (!latest.len) return UNKNOWN~;
+			Info info = registry::info(e.origin, e.id) ?? UNKNOWN~!;
+			return pick(e.version, info.list());
 		case VENDOR:
 			String digest = vendor::find(e.id).digest ?? UNKNOWN~!;
 			if (!digest.len) return UNKNOWN~;
-			return digest == e.pin ? "" : string::tformat("HEAD@%s", digest.strip_prefix("sha256:")[:12]);
+			return { .next = digest == e.pin ? "" : string::tformat("HEAD@%s", digest.strip_prefix("sha256:")[:12]) };
 		case GIT:
 			String tip;
 			switch
 			{
 				case e.version == "HEAD": tip = git::head(e.origin)!;
 				case e.version.starts_with("branch:"): tip = git::branch_commit(e.origin, e.version["branch:".len..])!;
-				case e.version.starts_with("commit:"): return "";
-				default: latest = git::highest(git::tags(e.origin)!, semver::prerelease(e.version));
+				case e.version.starts_with("commit:"): return {};
+				default:
+					Ref[] tags = git::tags(e.origin)!;
+					if (!tags.len) return UNKNOWN~;
+					List{String} names;
+					names.tinit();
+					foreach (t : tags) names.push(t.name);
+					return pick(e.version, names.array_view());
 			}
-			if (!latest.len && !tip.len) return UNKNOWN~;
-			if (tip.len) return string::tformat("commit:%s", tip) == e.pin ? "" : string::tformat("HEAD@%s", tip[:12]);
+			if (!tip.len) return UNKNOWN~;
+			return { .next = string::tformat("commit:%s", tip) == e.pin ? "" : string::tformat("HEAD@%s", tip[:12]) };
 		case PATH:
-			return "";
+			return {};
 	}
-	return semver::newer(latest, e.version) ? latest : "";
+}
+
+<*
+ Of `versions`, the newest one above `current` with the same major, and the
+ newest with a higher major. Prereleases only when `current` is one.
+*>
+fn Newer pick(String current, String[] versions)
+{
+	Newer n;
+	bool pre = semver::prerelease(current);
+	foreach (v : versions)
+	{
+		if (!semver::newer(v, current) || (!pre && semver::prerelease(v))) continue;
+		String* best = semver::major(v) == semver::major(current) ? &n.next : &n.major;
+		if (!best.len || semver::compare(v, *best) > 0) *best = v;
+	}
+	return n;
 }

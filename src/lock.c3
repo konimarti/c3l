@@ -83,11 +83,16 @@ fn Lock? parse(String text, String file, String* why)
 	{
 		if (!line.len || line.starts_with("#")) continue;
 		String[] col = line.tsplit("\t");
-		Kind? kind = runtime::@enum_lookup(Kind, "name", col.len == 9 ? col[1] : "");
-		Role? role = runtime::@enum_lookup(Role, "name", col.len == 9 ? col[7] : "");
-		if (catch kind, role)
+		if (col.len != 9)
 		{
 			*why = string::tformat("%s line %d does not have 9 columns (written by an older c3l?). Delete it and run 'c3l add' again, or restore the libraries with an older c3l first.", file, i + 1);
+			return INVALID~;
+		}
+		Kind? kind = runtime::@enum_lookup(Kind, "name", col[1]);
+		Role? role = runtime::@enum_lookup(Role, "name", col[7]);
+		if (catch kind, role)
+		{
+			*why = string::tformat("%s line %d: unknown kind '%s' or role '%s'", file, i + 1, col[1], col[7]);
 			return INVALID~;
 		}
 		Entry e = {
@@ -130,6 +135,7 @@ fn String Entry.problem(&self)
 			if (!is_digest(self.pin) || !is_digest(self.hash)) return "checksum";
 			if (self.kind == REGISTRY ? !valid_id(self.id) : !valid_name(self.id)) return "id";
 		case GIT:
+			if (!valid_git_url(self.origin)) return "git URL";
 			if (!is_commit_pin(self.pin) || !(is_commit_pin(self.hash) || is_content(self.hash))) return "commit";
 		case PATH:
 			break;
@@ -150,6 +156,37 @@ fn bool valid_id(String s)
 {
 	String[] parts = s.tsplit("/");
 	return parts.len == 2 && valid_name(parts[0]) && valid_name(parts[1]);
+}
+
+<*
+ A git URL c3l fetches from: http(s)://, ssh://, git:// or file:// URLs,
+ git@host:path, or a local path. Nothing git would run (ext::), and no
+ credentials in http(s) URLs: the URL is written to the lockfile.
+*>
+fn bool valid_git_url(String s)
+{
+	if (s.starts_with("/") || s.starts_with("./") || s.starts_with("../")) return true;
+	if (s.starts_with("git@")) return s.contains(":");
+	sz? i = s.index_of("://");
+	if (catch i) return false;
+	String scheme = s[:i].to_lower_tcopy();
+	String rest = s[i + 3..];
+	sz end = rest.len;  // of the authority: at the path, query or fragment
+	foreach (j, c : rest)
+	{
+		if (c != '/' && c != '?' && c != '#') continue;
+		end = j;
+		break;
+	}
+	switch (scheme)
+	{
+		case "http":
+		case "https": return !rest[:end].contains("@");
+		case "ssh":
+		case "git":
+		case "file": return true;
+		default: return false;
+	}
 }
 
 // A full git commit id: 40 hex digits.
@@ -239,7 +276,7 @@ fn String[] Lock.dependents(&self, String name)
 	out.tinit();
 	foreach (e : self.entries)
 	{
-		if (e.name != name && array_has(e.requires, name)) out.push(e.name);
+		if (e.name != name && array::contains(e.requires, name)) out.push(e.name);
 	}
 	return out.array_view();
 }
@@ -260,10 +297,4 @@ fn String[] Lock.orphans(&self)
 	out.tinit();
 	foreach (e : self.entries) if (!reached.contains(e.name)) out.push(e.name);
 	return out.array_view();
-}
-
-fn bool array_has(String[] list, String s) @private
-{
-	foreach (x : list) if (x == s) return true;
-	return false;
 }

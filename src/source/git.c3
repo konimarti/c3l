@@ -78,7 +78,7 @@ fn String? checkout(String url, String commit, String ref, String dir)
 	bool cloned = ref.len
 		? run(dir, { "clone", "-q", "--depth", "1", "--branch", ref, "--end-of-options", url, "src" })
 		: run(dir, { "clone", "-q", "--end-of-options", url, "src" });
-	if (!cloned) return log::fail("git clone of %s failed", url)~;
+	if (!cloned) return log::fail("git clone of %s failed%s", url, because())~;
 	if (!run(src, { "checkout", "-q", commit }))
 	{
 		return log::fail("commit %s is not in %s (rewritten or deleted upstream?)", commit, url)~;
@@ -97,30 +97,48 @@ fn void? archive(String dir, String out)
 {
 	String info = string::tformat("%s/.git/info", dir);
 	(void)path::mkdir(info, true);
-	file::save(string::tformat("%s/attributes", info), "* -text -filter -ident -working-tree-encoding\n") ?? log::fail("cannot write %s", info)~!;
+	// export-subst would fill in placeholders that depend on how the commit was fetched
+	String attributes = "* -text -filter -ident -working-tree-encoding -export-subst\n";
+	file::save(string::tformat("%s/attributes", info), attributes) ?? log::fail("cannot write %s", info)~!;
 	env::set_var("TZ", "UTC");
 	String abs = (String)out.to_absolute_path(tmem) ?? out;
 	if (!run(dir, { "-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive", "--format=zip", "-0", "-o", abs, "HEAD" }))
 	{
-		return log::fail("git archive failed")~;
+		return log::fail("git archive failed%s", because())~;
 	}
 }
 
 <*
- A git URL for comparing: scheme and host lowercased (the whole URL on
- github.com and codeberg.org, which ignore case), no trailing "/" or ".git".
+ A git URL for comparing: the host and path of the repository, whatever the
+ protocol (https://host/p, ssh://git@host/p and git@host:p are the same), the
+ host lowercased (the path too on github.com and codeberg.org, which ignore
+ case), no trailing "/" or ".git". Local paths and file:// URLs stay as they are.
 *>
 fn String canonical(String url)
 {
 	String u = url.strip_suffix("/").strip_suffix(".git");
-	sz? scheme = u.index_of("://");
-	if (catch scheme) return u;  // git@host:path, local paths
-	String rest = u[scheme + 3..];
+	String rest;
+	if (u.starts_with("git@"))
+	{
+		rest = u["git@".len..];
+		sz? colon = rest.index_of_char(':');
+		if (catch colon) return u;
+		rest = string::tformat("%s/%s", rest[:colon], rest[colon + 1..]);
+	}
+	else
+	{
+		sz? scheme = u.index_of("://");
+		if (catch scheme) return u;
+		if (u[:scheme].to_lower_tcopy() == "file") return u;
+		rest = u[scheme + 3..];
+	}
 	sz end = rest.index_of_char('/') ?? rest.len;
-	String host = rest[:end].to_lower_tcopy();
+	String host = rest[:end];
+	if (try at = host.rindex_of_char('@')) host = host[at + 1..];  // ssh://git@host
+	host = host[:host.index_of_char(':') ?? host.len].to_lower_tcopy();  // a port
 	String path = rest[end..];
 	if (host == "github.com" || host == "codeberg.org") path = path.to_lower_tcopy();
-	return string::tformat("%s://%s%s", u[:scheme].to_lower_tcopy(), host, path);
+	return host.tconcat(path);
 }
 
 fn bool is_repo(String dir) => run(dir, { "rev-parse", "--is-inside-work-tree" });
@@ -132,27 +150,50 @@ fn String[] lines(String dir, String[] args)
 	return o.code ? {} : o.out.tsplit("\n", skip_empty: true);
 }
 
+String failure @private;  // what git said when the last command failed
+
+const String[] AUTH_ERRORS @private = {
+	"Permission denied", "Repository not found", "could not read Username", "Authentication failed",
+};
+
+// "; git: <what it said>" when the last git command failed, else "": for the end of a message.
+fn String because()
+{
+	if (!failure.len) return "";
+	foreach (s : AUTH_ERRORS)
+	{
+		if (failure.contains(s)) return string::tformat("; git: %s (a private repository needs git access: an ssh key, or a credential helper such as 'gh auth setup-git')", failure);
+	}
+	return string::tformat("; git: %s", failure);
+}
+
 // git -C dir args..., true when it exits with 0
 fn bool run(String dir, String[] args) @private => git(dir, args).code == 0;
 
-fn Output git(String dir, String[] args) @private
+fn Output git(String dir, String[] args) @private => exec({ "-C", dir }, args) ?? (Output){ .code = 1 };
+
+<*
+ git with `args`: never asks on the terminal (c3l runs git several times per
+ library), never runs a command named by a URL (ext::).
+*>
+fn Output? exec(String[] pre, String[] args) @private
 {
 	List{String} argv;
 	argv.tinit();
-	argv.push_all({ "git", "-C", dir });
+	argv.push_all({ "git", "-c", "protocol.ext.allow=never" });
+	argv.push_all(pre);
 	argv.push_all(args);
-	return sys::run(argv.array_view()) ?? (Output){ .code = 1 };
+	env::set_var("GIT_TERMINAL_PROMPT", "0");
+	Output o = sys::run(argv.array_view())!;
+	failure = o.code ? o.reason() : "";
+	return o;
 }
 
 fn bool is_commit(String s) => lock::is_commit(s);
 
 fn Ref[]? ls_remote(String[] args) @private
 {
-	List{String} argv;
-	argv.tinit();
-	argv.push_all({ "git", "ls-remote" });
-	argv.push_all(args);
-	Output o = sys::run(argv.array_view())!;
+	Output o = exec({ "ls-remote" }, args)!;
 	List{Ref} out;
 	out.tinit();
 	if (o.code) return {};

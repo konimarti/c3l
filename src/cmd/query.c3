@@ -5,7 +5,7 @@
 module c3l;
 
 import std::io, std::os, std::collections::list, serp;
-import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::install, c3l::registry, c3l::vendor;
+import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::install, c3l::registry, c3l::vendor, c3l::git;
 
 fn void? init_run(Ctx* ctx)
 {
@@ -34,7 +34,7 @@ fn void? list_run(Ctx* ctx)
 		String[] orphans = p.lock.orphans();
 		foreach (e : p.lock.entries)
 		{
-			bool orphan = has(orphans, e.name);
+			bool orphan = array::contains(orphans, e.name);
 			if (e.role != DIRECT && !orphan) continue;
 			io::printfn("%s %s%s", e.name, e.version, orphan ? " (not needed; 'c3l prune' removes it)" : "");
 			print_tree(&p.lock, e.name, "  ", { e.name });
@@ -49,7 +49,7 @@ fn void? list_run(Ctx* ctx)
 		if (e.kind == REGISTRY) where = string::tformat("%s (%s)", e.id, e.origin);
 		if (e.kind == VENDOR) where = string::tformat("vendor:%s", e.id);
 		String st = install::status(e, dir).name;
-		if (!has(deps, e.name) && !(p.libmode && e.role == DEP)) st = string::tformat("%s,not-in-project", st);
+		if (!array::contains(deps, e.name) && !(p.libmode && e.role == DEP)) st = string::tformat("%s,not-in-project", st);
 		if (e.role == DEP) st = string::tformat("%s,dep", st);
 		io::printfn("%-20s %-8s %-12s %-10s %s", e.name, e.kind.name, e.version, st, where);
 	}
@@ -69,7 +69,7 @@ fn void print_tree(Lock* l, String name, String indent, String[] path)
 	foreach (r : l.get(name).requires ?? {})
 	{
 		String version = l.get(r).version ?? "(not installed)";
-		if (has(path, r))
+		if (array::contains(path, r))
 		{
 			io::printfn("%s%s %s (cycle)", indent, r, version);
 			continue;
@@ -125,7 +125,7 @@ fn void print_why(Lock* l, String name, String indent, String[] seen)
 {
 	foreach (d : l.dependents(name))
 	{
-		if (has(seen, d))
+		if (array::contains(seen, d))
 		{
 			io::printfn("%s%s requires %s (cycle)", indent, d, name);
 			continue;
@@ -139,13 +139,24 @@ fn void? outdated_run(Ctx* ctx)
 {
 	Project p = project::find()!;
 	sz n;
+	List{String} unknown;
+	unknown.tinit();
 	foreach (&e : p.lock.entries)
 	{
-		String newer = install::newer(e) ?? "";
-		if (!newer.len) continue;
-		io::printfn("%-20s %-12s -> %s", e.name, e.version, newer);
+		sys::check_interrupt()!;
+		Newer? newer = install::newer(e);
+		if (catch newer)
+		{
+			log::error("%s: cannot determine the newest version%s", e.name, e.kind == GIT ? git::because() : "");
+			unknown.push(e.name);
+			continue;
+		}
+		if (!newer.next.len && !newer.major.len) continue;
+		String major = newer.major.len ? string::tformat("(new major version: %s)", newer.major) : "";
+		io::printfn("%-20s %-12s -> %-12s %s", e.name, e.version, newer.next.len ? newer.next : e.version, major);
 		n++;
 	}
+	if (unknown.len()) return log::fail("could not check %s", string::join(tmem, unknown.array_view(), " "))~;
 	if (!n) log::info("everything is up to date");
 }
 
@@ -187,12 +198,6 @@ fn void? info_run(Ctx* ctx)
 
 // The registry for new installs and lookups: --registry > $C3L_REGISTRY > www.c3pkg.eu
 fn String registry_url(Ctx* ctx) => registry::base(ctx.flag_string("registry"));
-
-fn bool has(String[] list, String s)
-{
-	foreach (x : list) if (x == s) return true;
-	return false;
-}
 
 fn String[] with(String[] list, String s)
 {

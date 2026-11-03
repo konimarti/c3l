@@ -4,7 +4,7 @@
 // c3l - reproducible dependencies for C3 projects.
 module c3l;
 
-import std::io, serp, c3l::registry;
+import std::io, serp, c3l::registry, c3l::sys;
 
 const String VERSION = "1.1.0";
 
@@ -71,7 +71,9 @@ fn int main(String[] args)
 		.flag({ .name = "docs-url", .kind = STRING, .value_name = "URL", .desc = "documentation URL" })
 		.flag({ .name = "git-url", .kind = STRING, .value_name = "URL", .desc = "repository URL" }));
 	app.add(serp::cmd("version", "print the version", &version_run).accepts(serp::no_args()));
-	return app.execute(args);
+	sys::catch_signals();
+	int status = app.execute(args);
+	return sys::interrupted ? 130 : status;
 }
 
 fn void? version_run(Ctx* ctx)
