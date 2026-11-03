@@ -35,6 +35,8 @@ c3l is written in C3. Building needs `c3c` (0.8.6+) and libcurl; its own
 dependencies are vendored in `vendor/`. At run time it calls `c3c` (to read
 the project) and `git` (git libraries and publishing).
 
+Shell completion: `source <(c3l completion bash)` (also `zsh`, `fish`).
+
 ## Commands
 
 | | |

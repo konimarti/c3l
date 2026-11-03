@@ -6,7 +6,9 @@ C3L(1)
 
 # SYNOPSIS
 
-*c3l* [*--registry* _URL_] [*--dry-run*] [*--frozen*] [*--strict*] _COMMAND_ [_ARGS_]
+*c3l* [_OPTIONS_] _COMMAND_ [_ARGS_] [_OPTIONS_]
+
+*c3l* *--version* | *--help* | *help* [_COMMAND_]
 
 # DESCRIPTION
 
@@ -58,8 +60,9 @@ command. The publishing options, from *--version* to *--offline*, follow *check*
 	With *remove*: remove the library even if another library requires it.
 
 *--allow-host* _HOST_
-	Trust _HOST_ for git dependencies named by a library's manifest. Local paths
-	and *file://* URLs are the host _file_. Can be repeated. See *DEPENDENCIES*.
+	Trust _HOST_ for git or registry dependencies named by a library's _c3l.lock_ or
+	_manifest.json_. Local paths and *file://* URLs are the host _file_. Can be
+	repeated. See *DEPENDENCIES*.
 
 *--registry-type* _static|c3pkg_
 	Override the detected registry type. See *PUBLISHING*.
@@ -97,6 +100,10 @@ command. The publishing options, from *--version* to *--offline*, follow *check*
 	Print the usage text, of *c3l* or of the command it follows.
 
 # COMMANDS
+
+Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remove* is
+*rm*, *r* and *delete*; *update* is *u*; *sync* is *pull* and *p*; *list* is *ls* and *l*;
+*search* is *s*.
 
 *init* [_name_]
 	Create _c3l.lock_. With _name_ and outside a project, run *c3c init* first.
@@ -188,6 +195,13 @@ command. The publishing options, from *--version* to *--offline*, follow *check*
 
 *version*
 	Print the version.
+
+*help* [_command_]
+	Print the usage text of *c3l* or of _command_.
+
+*completion* _bash_|_zsh_|_fish_
+	Print a shell completion script, for example
+	*c3l completion bash > /etc/bash_completion.d/c3l*.
 
 *migrate*
 	Convert a c3po _project.lock.json_ into _c3l.lock_. The same commits are locked
@@ -288,6 +302,11 @@ from two origins is an error (git URLs that differ only in a trailing _/_ or _.g
 in case on github.com and codeberg.org, are the same origin). A file with another number
 of columns is refused, and so is a line with an invalid name, checksum or commit: a
 lockfile can come from someone else's repository.
+
+# EXIT STATUS
+
+0 on success, 1 when a command fails, 2 for a usage error (an unknown command or
+option, a wrong number of arguments).
 
 # ENVIRONMENT VARIABLES
 

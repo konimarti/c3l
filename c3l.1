@@ -5,7 +5,7 @@
 .nh
 .ad l
 .\" Begin generated content:
-.TH "C3L" "1" "2026-11-02"
+.TH "C3L" "1" "2026-11-03"
 .P
 .SH NAME
 .P
@@ -13,7 +13,9 @@
 .P
 .SH SYNOPSIS
 .P
-\fBc3l\fR [\fB--registry\fR \fIURL\fR] [\fB--dry-run\fR] [\fB--frozen\fR] [\fB--strict\fR] \fICOMMAND\fR [\fIARGS\fR]
+\fBc3l\fR [\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR] [\fIOPTIONS\fR]
+.P
+\fBc3l\fR \fB--version\fR | \fB--help\fR | \fBhelp\fR [\fICOMMAND\fR]
 .P
 .SH DESCRIPTION
 .P
@@ -78,8 +80,9 @@ With \fBremove\fR: remove the library even if another library requires it.\&
 .RE
 \fB--allow-host\fR \fIHOST\fR
 .RS 4
-Trust \fIHOST\fR for git dependencies named by a library'\&s manifest.\& Local paths
-and \fBfile://\fR URLs are the host \fIfile\fR.\& Can be repeated.\& See \fBDEPENDENCIES\fR.\&
+Trust \fIHOST\fR for git or registry dependencies named by a library'\&s \fIc3l.\&lock\fR or
+\fImanifest.\&json\fR.\& Local paths and \fBfile://\fR URLs are the host \fIfile\fR.\& Can be
+repeated.\& See \fBDEPENDENCIES\fR.\&
 .P
 .RE
 \fB--registry-type\fR \fIstatic|c3pkg\fR
@@ -140,6 +143,10 @@ Print the usage text, of \fBc3l\fR or of the command it follows.\&
 .P
 .RE
 .SH COMMANDS
+.P
+Some commands have short names: \fBadd\fR is also \fBfetch\fR, \fBf\fR, \fBget\fR and \fBg\fR; \fBremove\fR is
+\fBrm\fR, \fBr\fR and \fBdelete\fR; \fBupdate\fR is \fBu\fR; \fBsync\fR is \fBpull\fR and \fBp\fR; \fBlist\fR is \fBls\fR and \fBl\fR;
+\fBsearch\fR is \fBs\fR.\&
 .P
 \fBinit\fR [\fIname\fR]
 .RS 4
@@ -264,6 +271,17 @@ whether the latest one suits this C3 release and platform.\&
 Print the version.\&
 .P
 .RE
+\fBhelp\fR [\fIcommand\fR]
+.RS 4
+Print the usage text of \fBc3l\fR or of \fIcommand\fR.\&
+.P
+.RE
+\fBcompletion\fR \fIbash\fR|\fIzsh\fR|\fIfish\fR
+.RS 4
+Print a shell completion script, for example
+\fBc3l completion bash > /etc/bash_completion.\&d/c3l\fR.\&
+.P
+.RE
 \fBmigrate\fR
 .RS 4
 Convert a c3po \fIproject.\&lock.\&json\fR into \fIc3l.\&lock\fR.\& The same commits are locked
@@ -373,6 +391,11 @@ from two origins is an error (git URLs that differ only in a trailing \fI/\fR or
 in case on github.\&com and codeberg.\&org, are the same origin).\& A file with another number
 of columns is refused, and so is a line with an invalid name, checksum or commit: a
 lockfile can come from someone else'\&s repository.\&
+.P
+.SH EXIT STATUS
+.P
+0 on success, 1 when a command fails, 2 for a usage error (an unknown command or
+option, a wrong number of arguments).\&
 .P
 .SH ENVIRONMENT VARIABLES
 .P
