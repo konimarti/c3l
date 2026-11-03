@@ -5,15 +5,17 @@
 .nh
 .ad l
 .\" Begin generated content:
-.TH "C3L" "1" "2026-11-02"
+.TH "C3L" "1" "2026-11-03"
 .P
 .SH NAME
 .P
-\fBc3l\fR - reproducible dependencies for C3 projects, on top of \fBc3c fetch\fR.\&
+\fBc3l\fR - reproducible dependencies for C3 projects, for any \fBc3c fetch\fR registry.\&
 .P
 .SH SYNOPSIS
 .P
-\fBc3l\fR [\fB--registry\fR \fIURL\fR] [\fB--dry-run\fR] [\fB--frozen\fR] [\fB--strict\fR] \fICOMMAND\fR [\fIARGS\fR]
+\fBc3l\fR [\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR] [\fIOPTIONS\fR]
+.P
+\fBc3l\fR \fB--version\fR | \fB--help\fR | \fBhelp\fR [\fICOMMAND\fR]
 .P
 .SH DESCRIPTION
 .P
@@ -25,25 +27,29 @@ kept as \fI.\&c3l\fR zip files in the first entry of \fIdependency-search-paths\
 .P
 .SH REQUIREMENTS
 .P
-\fBbash\fR 3.\&2 or newer, \fBc3c\fR with \fBfetch\fR, and POSIX tools (\fBawk\fR, \fBsed\fR, \fBgrep\fR, \fBcut\fR,
-\fBtr\fR, \fBsort\fR, \fBfind\fR, \fBcp\fR and so on), with \fBsha256sum\fR or \fBshasum\fR and \fBmktemp\fR.\& Some
-commands need more: \fBgit\fR (git libraries, \fBcheck\fR, \fBpack\fR, \fBpublish\fR), \fBunzip\fR
-(\fBadd\fR, \fBsync\fR, \fBupdate\fR, \fBlist\fR, \fBverify\fR), \fBzip\fR (\fBpack\fR, \fBpublish\fR), \fBcurl\fR
-(\fBpublish\fR, \fBsearch\fR) and, optionally, \fBjq\fR (\fBsearch\fR).\& No Python is needed.\&
+\fBc3l\fR is linked against \fBlibcurl\fR.\& At run time it calls \fBc3c\fR (to read the project
+with \fBc3c project view\fR, for \fBinit\fR and for the compile check of \fBcheck\fR) and \fBgit\fR
+(git libraries, \fBcheck\fR, \fBpack\fR, \fBpublish\fR).\& It talks to registries itself, with the
+protocol \fBc3c fetch\fR uses, so any \fBc3c\fR that can build the project will do.\&
 .P
 .SH OPTIONS
 .P
-Options may appear before or after the command.\&
+The options from \fB--registry\fR to \fB--registry-type\fR may appear before or after the
+command.\& The publishing options, from \fB--version\fR to \fB--offline\fR, follow \fBcheck\fR,
+\fBpack\fR or \fBpublish\fR.\&
 .P
 \fB--registry\fR \fIURL\fR, \fB--registry=\fR\fIURL\fR
 .RS 4
-Use this registry for the command.\& Overrides \fBC3L_REGISTRY\fR and the registry
-recorded in \fIc3l.\&lock\fR.\& Only matters for registry libraries and for \fBsearch\fR.\&
+Use this registry base URL for the command (as \fBc3c --fetch-url\fR takes it, path
+included).\& Overrides \fBC3L_REGISTRY\fR.\& It picks the registry for \fBadd\fR, \fBsearch\fR, \fBinfo\fR
+and \fBpublish\fR; libraries already in \fIc3l.\&lock\fR are always fetched from the registry
+recorded for them.\&
 .P
 .RE
 \fB--dry-run\fR
 .RS 4
-Only print what \fBupdate\fR would change.\& Has no effect on other commands.\&
+Only print what \fBupdate\fR or \fBprune\fR would change, or stop \fBpublish\fR before the
+upload.\&
 .P
 .RE
 \fB--frozen\fR
@@ -72,21 +78,22 @@ go on with the others and report the failures at the end (exit status 1).\&
 With \fBremove\fR: remove the library even if another library requires it.\&
 .P
 .RE
-\fB--tree\fR
-.RS 4
-With \fBlist\fR: print the dependency graph instead of the table.\&
-.P
-.RE
 \fB--allow-host\fR \fIHOST\fR
 .RS 4
-Trust \fIHOST\fR for git dependencies named by a library'\&s manifest.\& Local paths
-and \fBfile://\fR URLs are the host \fIfile\fR.\& See \fBDEPENDENCIES\fR.\&
+Trust \fIHOST\fR for git or registry dependencies named by a library'\&s \fIc3l.\&lock\fR or
+\fImanifest.\&json\fR.\& Local paths and \fBfile://\fR URLs are the host \fIfile\fR.\& Can be
+repeated.\& See \fBDEPENDENCIES\fR.\&
+.P
+.RE
+\fB--registry-type\fR \fIstatic|c3pkg\fR
+.RS 4
+Override the detected registry type.\& See \fBPUBLISHING\fR.\&
 .P
 .RE
 \fB--version\fR \fIX.\&Y.\&Z\fR, \fB--version=\fR\fIX.\&Y.\&Z\fR
 .RS 4
-For \fBcheck\fR, \fBpack\fR and \fBpublish\fR: the version to publish.\& Without an argument
-(or when the next word does not start with a digit), print the version.\&
+After \fBcheck\fR, \fBpack\fR or \fBpublish\fR: the version to publish.\& Before any command,
+\fB--version\fR prints the version of \fBc3l\fR.\&
 .P
 .RE
 \fB--token-file\fR \fIFILE\fR
@@ -125,22 +132,21 @@ Skip the compile check in \fBcheck\fR, \fBpack\fR and \fBpublish\fR.\&
 Do not query the registry in \fBcheck\fR (the registry is always skipped by \fBpack\fR).\&
 .P
 .RE
-\fB--registry-type\fR \fIstatic|c3pkg\fR
+\fB--tree\fR
 .RS 4
-Override the detected registry type.\& See \fBPUBLISHING\fR.\&
+After \fBlist\fR: print the dependency graph instead of the table.\&
 .P
 .RE
 \fB-h\fR, \fB--help\fR
 .RS 4
-Print the usage text.\&
-.P
-.RE
-\fB-v\fR, \fB--version\fR
-.RS 4
-Print the version.\&
+Print the usage text, of \fBc3l\fR or of the command it follows.\&
 .P
 .RE
 .SH COMMANDS
+.P
+Some commands have short names: \fBadd\fR is also \fBfetch\fR, \fBf\fR, \fBget\fR and \fBg\fR; \fBremove\fR is
+\fBrm\fR, \fBr\fR and \fBdelete\fR; \fBupdate\fR is \fBu\fR; \fBsync\fR is \fBpull\fR and \fBp\fR; \fBlist\fR is \fBls\fR and \fBl\fR;
+\fBsearch\fR is \fBs\fR.\&
 .P
 \fBinit\fR [\fIname\fR]
 .RS 4
@@ -149,15 +155,29 @@ Create \fIc3l.\&lock\fR.\& With \fIname\fR and outside a project, run \fBc3c ini
 .RE
 \fBadd\fR \fInamespace/name\fR[@\fIversion\fR]
 .RS 4
-Install a library from the registry with \fBc3c fetch\fR, compare the SHA-256 of the
-download with the registry'\&s checksum, write the lock line.\& A mismatch or any
-failure restores the previous library file and \fIproject.\&json\fR.\&
+Install a library from the registry, compare the SHA-256 of the download with
+the registry'\&s checksum, write the lock line.\& The version can also be given as a
+separate argument.\& A mismatch or any failure restores the previous library file
+and \fIproject.\&json\fR.\&
+.P
+.RE
+\fBadd\fR vendor:\fIname\fR, \fBadd\fR vendor
+.RS 4
+Install a library from c3c'\&s vendor collection (the files of the \fIc3lang/vendor\fR
+release \fIlatest\fR, what \fBc3c vendor-fetch\fR downloads).\& The collection has no
+versions, so the lock pins the SHA-256 that GitHub lists for the file (kind
+\fIvendor\fR, version \fIlatest\fR).\& \fBsync\fR fails if the file changed upstream; \fBoutdated\fR
+shows such a change and \fBupdate\fR re-pins it.\& If no digest is listed, c3l warns and
+records the download.\& Plain \fBadd vendor\fR lists the collection.\& A library may
+require one with \fI"source": "vendor:name"\fR.\&
 .P
 .RE
 \fBadd\fR \fI.\&/dir\fR
 .RS 4
 Link a local library directory (\fI.\&/dir\fR, \fI.\&.\&/dir\fR or an absolute path with a
-\fImanifest.\&json\fR) into \fIlib/\fR with a symlink, so edits show up in the next build.\&
+\fImanifest.\&json\fR) into \fIlib/\fR with a relative symlink, so edits show up in the next
+build and the project and the directory can move together.\& \fBverify\fR checks where
+the link points.\&
 Recorded in the lockfile as kind \fIpath\fR; \fBsync\fR re-creates the link, \fBupdate\fR skips
 it, and its own dependencies are followed.\& A library that depends on a local
 directory cannot be published.\&
@@ -167,17 +187,18 @@ directory cannot be published.\&
 .RS 4
 Install from a git repository.\& \fIref\fR is a tag, a branch, \fBHEAD\fR, or a full
 40-character commit hash; it can also be given as a separate argument.\& Without
-a \fIref\fR the highest semantic version tag is used, or HEAD if there are none.\&
-The ref is resolved to a commit, which is what the lockfile pins.\& \fBoutdated\fR
-and \fBupdate\fR follow the tip of \fBHEAD\fR and of branches; tags and commits stay
-put.\& In scp-style URLs (\fIgit@host:path\fR) the \fB@\fR only starts a ref after the
-last \fB/\fR.\& The library is built with \fBgit archive\fR, so no \fI.\&git\fR is included, and without
-line-ending conversion.\& A git library is identified by its commit: the lockfile
-pins it, and \fBverify\fR and \fBsync\fR check that the installed file is an archive of
-that commit (\fBgit archive\fR stores the commit id in the zip comment).\& Edits made
-inside the installed file are therefore not detected for git libraries, unlike
-for registry libraries, which are checked against their SHA-256.\& This needs
-\fBgit\fR and \fBunzip\fR.\& The repository needs a \fImanifest.\&json\fR at its root.\&
+a \fIref\fR the highest release tag is used (prerelease tags such as \fIv1.\&0.\&0-rc.\&1\fR only
+when asked for), or HEAD if there are none.\& The ref is resolved to a commit,
+which is what the lockfile pins.\& \fBoutdated\fR and \fBupdate\fR move a tag to the
+highest release tag and follow the tip of \fBHEAD\fR and of branches; commits stay
+put; a tag only moves within its major version.\& In scp-style URLs (\fIgit@host:path\fR) the \fB@\fR only starts a ref after the
+last \fB/\fR.\& URLs with credentials (\fIhttps://user:token@host/.\&.\&.\&\fR) are refused: the
+URL is written to the lockfile; see \fBPRIVATE REPOSITORIES\fR.\& The library is built with \fBgit archive\fR, so no \fI.\&git\fR is included, and without
+line-ending conversion.\& A git library is identified by its commit and its files:
+the lockfile pins the commit and records a hash of the files in the archive, and
+\fBverify\fR and \fBsync\fR check both (\fBgit archive\fR stores the commit id in the zip
+comment).\& The hash covers names and contents only, so it does not depend on the
+git version that built the archive.\& This needs \fBgit\fR.\& The repository needs a \fImanifest.\&json\fR at its root.\&
 .P
 .RE
 \fBremove\fR \fIname\fR
@@ -213,16 +234,21 @@ Check installed files against the lockfile.\& Exit status 1 on any difference.\&
 .RE
 \fBoutdated\fR
 .RS 4
-Show locked libraries for which the registry (or git) has a higher version.\&
+Show locked libraries for which the registry (or git) has a higher version: the
+newest of the same major version, which \fBupdate\fR moves to, and a newer major
+version if there is one.\& A library whose source cannot be reached is named, and
+the exit status is 1.\&
 .P
 .RE
 \fBupdate\fR [\fIname\fR[@\fIref\fR] .\&.\&.\&]
 .RS 4
-Update to the newest version, one library at a time, with rollback.\& With
-\fIname\fR@\fIref\fR switch that library to an explicit version instead: a registry
-version, or for git libraries a tag, branch, \fBHEAD\fR or full commit hash (for
-example \fBc3l update lib@HEAD\fR moves a tag-locked library to HEAD).\& With
-\fB--dry-run\fR only print what would change.\&
+Update to the newest version of the same major version, one library at a time,
+with rollback; a newer major version is only announced.\& With \fIname\fR@\fIref\fR switch
+that library to an explicit version instead: a registry version, or for git
+libraries a tag, branch, \fBHEAD\fR or full commit hash (for example \fBc3l update
+lib@HEAD\fR moves a tag-locked library to HEAD).\& Moving to another major version
+fails if a library that requires it asks for the old one.\& A name that is not in
+the lockfile is an error.\& With \fB--dry-run\fR only print what would change.\&
 .P
 .RE
 \fBsync\fR
@@ -238,12 +264,31 @@ atomically.\&
 .RE
 \fBsearch\fR \fItext\fR | \fBtag:\fR\fIname\fR
 .RS 4
-Search the registry (the \fI/search\fR endpoint, else \fBc3c fetch-list\fR).\&
+Search the registry (its \fI/search\fR API, else its \fIindex.\&json\fR) and c3c'\&s vendor
+collection, by name and description.\& The vendor list is the one built into this
+c3l, so a library added to the collection since is missing; \fBadd vendor\fR lists the
+collection as it is now.\& \fBtag:\fR searches the registry only.\&
 .P
 .RE
 \fBinfo\fR \fInamespace/name\fR
 .RS 4
-Run \fBc3c fetch-info\fR.\&
+Show the registry record of a library: its versions and their checksums, and
+whether the latest one suits this C3 release and platform.\&
+.P
+.RE
+\fBversion\fR
+.RS 4
+Print the version.\&
+.P
+.RE
+\fBhelp\fR [\fIcommand\fR]
+.RS 4
+Print the usage text of \fBc3l\fR or of \fIcommand\fR.\&
+.P
+.RE
+\fBcompletion\fR \fIbash\fR|\fIzsh\fR|\fIfish\fR
+.RS 4
+Print a shell completion script.\& See \fBSHELL COMPLETION\fR.\&
 .P
 .RE
 \fBmigrate\fR
@@ -264,7 +309,8 @@ Exit status 1 on any problem.\&
 .RS 4
 Write \fIname-version.\&c3l\fR (or \fB--output\fR): a zip with \fImanifest.\&json\fR at its
 root and the repository files (git: tracked and untracked-not-ignored; not
-\fI.\&git\fR).\& The archive is deterministic, the same tree gives the same bytes.\&
+\fI.\&git\fR, \fIlib/\fR, \fIobj/\fR or \fIbuild/\fR), \fIc3l.\&lock\fR included.\& The archive is
+deterministic, the same tree gives the same bytes.\&
 .P
 .RE
 \fBpublish\fR [\fIdir\fR]
@@ -277,11 +323,10 @@ checksum with the uploaded file.\& With \fB--dry-run\fR stop before the upload.\
 .P
 \fBpublish\fR needs a registry with an upload API.\& Registry types: \fIc3pkg\fR (www.\&c3pkg.\&eu;
 detected by probing \fI/api/v1/packages\fR) and \fIstatic\fR (read-only, anything else).\&
-A new type is one set of functions in the script.\&
 .P
 For c3pkg: create an API token under Settings, API tokens, and give it to c3l with
 \fB--token-file\fR \fIFILE\fR, \fBC3L_TOKEN\fR or \fBC3PKG_TOKEN\fR.\& It is sent as
-\fIAuthorization: Bearer\fR from a private temporary file, never on the command line.\&
+\fIAuthorization: Bearer\fR header and never appears on a command line.\&
 .P
 The package name is \fIprovides\fR in \fImanifest.\&json\fR of the library directory (see
 \fBc3c init-lib\fR).\& The version is, in this order: \fB--version\fR, a semantic version tag on
@@ -299,28 +344,27 @@ with \fB--strict\fR).\&
 .P
 A library directory (a \fImanifest.\&json\fR and no \fIproject.\&json\fR) works too: \fBadd\fR installs
 into \fI.\&/lib\fR (keep it out of git; it is never packed), lists only the dependencies you
-asked for in the manifest'\&s \fIdependencies\fR, and writes \fIc3l.\&lock\fR, from which \fBpublish\fR
-fills in \fIvendor.\&c3l.\&requires\fR.\&
+asked for in the manifest'\&s \fIdependencies\fR, and writes \fIc3l.\&lock\fR.\& Commit the lock: it is
+how the library declares its dependencies, and it travels with the library, in its git
+archive and in the package \fBpack\fR builds.\&
 .P
 c3c lists a library'\&s dependencies by name only and does not install them
 transitively: every one must be in \fIproject.\&json\fR.\& \fBadd\fR and \fBupdate\fR therefore
 follow the dependencies a library declares and add them all, flat, to \fIlib\fR and
 \fIproject.\&json\fR, as one transaction.\&
 .P
-A library declares them in its \fImanifest.\&json\fR (c3c ignores the \fIvendor\fR key):
+A library declares them in its \fIc3l.\&lock\fR: each direct entry is a requirement, from
+the source it names (a registry the consumer has no library from yet needs
+\fB--allow-host\fR), at least at the locked version for registry libraries, at the locked
+tag, branch or commit for git libraries (\fBupdate\fR moves a tag like any other version).\&
+Apps and libraries alike, \fIc3l.\&lock\fR is the only file c3l writes dependencies to.\&
 .P
-.nf
-.RS 4
-"vendor": { "c3l": { "requires": [
-    { "name": "vk", "source": "tonis2/vk", "version": "1\&.0\&.1" } ] } }
-.fi
-.RE
-.P
-\fIsource\fR is a registry id or a git URL.\& \fIversion\fR is the minimum for registry
-libraries, a tag, branch or commit for git libraries.\& \fBpublish\fR writes this block
-from the library'\&s own \fIc3l.\&lock\fR.\& c3l also reads c3po'\&s \fIvendor.\&c3po.\&sources\fR and
-c3c'\&s plain \fIdependencies\fR names (no source: a warning, and \fBverify\fR fails until
-the library is added).\&
+c3l also reads, but never writes, \fIvendor.\&c3l.\&requires\fR in a library'\&s \fImanifest.\&json\fR
+(packages published by c3l 1.\&1), c3po'\&s \fIvendor.\&c3po.\&sources\fR (\fIc3po-version\fR 1) and
+c3c'\&s plain \fIdependencies\fR names (no source: a warning, and \fBverify\fR fails until the
+library is added).\& For each name the first wins, in this order: \fIvendor.\&c3l.\&requires\fR,
+\fIc3l.\&lock\fR, \fIvendor.\&c3po.\&sources\fR, \fIdependencies\fR.\& Dependencies that \fIproject.\&json\fR lists for a
+single target are part of the project too (\fBlist\fR, \fBverify\fR, \fBsync --frozen\fR).\&
 .P
 Versions are chosen as in Go (minimum version selection): the highest of all
 requested minimums, never newer.\& Different major versions are an error.\& A cycle,
@@ -329,6 +373,34 @@ library is installed once.\& Git sources other than github.\&com, codeberg.\&org
 hosts of URLs given on the command line need \fB--allow-host\fR or an answer at the
 prompt.\& More than 200 libraries are refused.\&
 .P
+.SH PRIVATE REPOSITORIES
+.P
+c3l runs \fBgit\fR for git libraries, so private repositories work with whatever gives
+git access: an ssh key (\fIgit@github.\&com:me/lib\fR) or, for https URLs, a credential
+helper (for GitHub: \fBgh auth setup-git\fR).\& git is never allowed to ask on the
+terminal; when it fails, c3l shows what git said.\&
+.P
+The same repository as \fIhttps://host/path\fR, \fIssh://git@host/path\fR and
+\fIgit@host:path\fR counts as one source.\& Libraries should name their dependencies with
+https URLs, which work for everyone; to fetch them over ssh yourself, let git
+rewrite them:
+.P
+.nf
+.RS 4
+git config --global url\&."git@github\&.com:"\&.insteadOf https://github\&.com/
+.fi
+.RE
+.P
+In CI, give git access to the other repositories: an ssh deploy key with the
+rewrite above, or a token (in GitHub Actions a personal access token; the
+built-in \fIGITHUB_TOKEN\fR reads only the repository being built):
+.P
+.nf
+.RS 4
+git config --global url\&."https://x-access-token:${TOKEN}@github\&.com/"\&.insteadOf https://github\&.com/
+.fi
+.RE
+.P
 .SH LOCKFILE
 .P
 Tab separated, one library per line, sorted by name:
@@ -336,29 +408,72 @@ Tab separated, one library per line, sorted by name:
 .nf
 .RS 4
 # c3l\&.lock v1
-@registry	https://www\&.c3pkg\&.eu
-box2d	registry	jecokef902/box2d	1\&.0\&.0	sha256:4945\&.\&.\&.	sha256:4945\&.\&.\&.
-hex	git	https://github\&.com/konimarti/hex\&.c3l	v0\&.1\&.1	commit:3fa9\&.\&.\&.	commit:3fa9\&.\&.\&.
+box2d	registry	https://www\&.c3pkg\&.eu	jecokef902/box2d	1\&.0\&.0	sha256:4945\&.\&.\&.	sha256:4945\&.\&.\&.	direct	-
+hex	git	https://github\&.com/konimarti/hex\&.c3l	-	v0\&.1\&.1	commit:3fa9\&.\&.\&.	commit:3fa9\&.\&.\&.	direct	-
 .fi
 .RE
 .P
-Columns: name, kind (\fIregistry\fR or \fIgit\fR), source, version, pin (checksum or
-commit), SHA-256 of the installed file (registry) or the commit again (git), role
+Columns: name, kind (\fIregistry\fR, \fIgit\fR, \fIvendor\fR or \fIpath\fR), origin, id, version, pin (checksum
+or commit), what the installed file is checked against (the SHA-256 again for registry and
+vendor libraries; for git \fIcontent:\fR and a SHA-256 over the names and contents of the
+files in the archive, or the commit again in locks written by c3l 1.\&1), role
 (\fIdirect\fR: added by you; \fIdep\fR: required by another library) and the comma
-separated names the library requires (\fI-\fR for none).\& The format is still version 1;
-lines with only six columns are read as \fIdirect\fR.\&
+separated names the library requires (\fI-\fR for none).\&
+.P
+The origin is where the library is fetched from: the registry base URL (what
+\fBc3c --fetch-url\fR gets, no trailing slash), the git repository URL, or the directory.\&
+The id is \fInamespace/name\fR for a registry and \fI-\fR otherwise.\& Every line names its own
+origin, so one project can mix registries.\& Library names stay unique: the same name
+from two origins is an error (git URLs that differ only in a trailing \fI/\fR or \fI.\&git\fR, or
+in case on github.\&com and codeberg.\&org, are the same origin).\& A file with another number
+of columns is refused, and so is a line with an invalid name, checksum or commit: a
+lockfile can come from someone else'\&s repository.\&
+.P
+.SH SHELL COMPLETION
+.P
+\fBc3l completion\fR prints a script that completes commands and options.\&
+.P
+bash: add to \fI~/.\&bashrc\fR, or save the script in \fI/etc/bash_completion.\&d/c3l\fR:
+.P
+.nf
+.RS 4
+source <(c3l completion bash)
+.fi
+.RE
+.P
+zsh: add to \fI~/.\&zshrc\fR, after \fBcompinit\fR:
+.P
+.nf
+.RS 4
+source <(c3l completion zsh)
+.fi
+.RE
+.P
+fish:
+.P
+.nf
+.RS 4
+c3l completion fish > ~/\&.config/fish/completions/c3l\&.fish
+.fi
+.RE
+.P
+.SH EXIT STATUS
+.P
+0 on success, 1 when a command fails, 2 for a usage error (an unknown command or
+option, a wrong number of arguments), 130 when interrupted (SIGINT or SIGTERM;
+what the command changed so far is undone, a second signal stops at once).\&
 .P
 .SH ENVIRONMENT VARIABLES
 .P
 \fIC3L_REGISTRY\fR
 .RS 4
-Registry base URL.\& Overridden by \fB--registry\fR, overrides the lockfile.\&
+Registry base URL for new installs.\& Overridden by \fB--registry\fR.\&
 Default: https://www.\&c3pkg.\&eu
 .P
 .RE
 \fIC3L_ALLOWED_HOSTS\fR
 .RS 4
-Space separated git hosts that dependencies may fetch from, in addition to
+Comma or space separated git hosts that dependencies may fetch from, in addition to
 github.\&com and codeberg.\&org.\&
 .P
 .RE
@@ -379,7 +494,7 @@ Same as \fB--registry-type\fR.\&
 .RE
 \fIC3C\fR
 .RS 4
-The c3c executable.\& It needs \fBfetch\fR support (0.\&8.\&6 or a nightly).\&
+The c3c executable.\&
 .P
 .RE
 \fIC3L_LOCK\fR
@@ -387,9 +502,10 @@ The c3c executable.\& It needs \fBfetch\fR support (0.\&8.\&6 or a nightly).\&
 Lockfile name.\& Default: \fIc3l.\&lock\fR.\&
 .P
 .RE
-\fIDEBUGC3L\fR
+\fIC3L_VENDOR_URL\fR, \fIC3L_VENDOR_API\fR
 .RS 4
-Trace all shell statements.\&
+Where the vendor collection and its asset list are read from.\& Default: the
+\fIlatest\fR release of \fIgithub.\&com/c3lang/vendor\fR.\&
 .P
 .RE
 .SH SEE ALSO

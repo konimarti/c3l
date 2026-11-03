@@ -26,14 +26,20 @@ sure it is the *same bytes* everywhere, and update on purpose.
 
 ## Install
 
+Binaries for Linux (x64) and macOS (Apple silicon) are on the
+[releases page](https://github.com/konimarti/c3l/releases); they need libcurl.
+From source:
+
 ```sh
 git clone https://github.com/konimarti/c3l && cd c3l
-make PREFIX=~/.local install        # or copy ./c3l into your PATH
+make PREFIX=~/.local install        # or copy build/c3l into your PATH
 ```
 
-c3l is one bash script (3.2+). It needs `c3c` (0.8.6+), `sha256sum` or
-`shasum`, and the usual POSIX tools. `git`, `unzip`, `zip` and `curl` are
-needed only by some commands; c3l tells you which one is missing.
+c3l is written in C3. Building needs `c3c` (0.8.5+) and libcurl; its own
+dependencies are vendored in `vendor/`. At run time it calls `c3c` (to read
+the project) and `git` (git libraries and publishing).
+
+Shell completion: `source <(c3l completion bash)` (also `zsh`, `fish`).
 
 ## Commands
 
@@ -41,18 +47,19 @@ needed only by some commands; c3l tells you which one is missing.
 |---|---|
 | `init [name]` | create `c3l.lock` (and a project with `c3c init name`) |
 | `add <ns/name[@ver]>` | install from the registry |
-| `add <git-url>[@ref]` | install from git. No ref: highest semver tag, else HEAD. Tags and commits stay pinned; branches and `HEAD` follow the tip on `update` |
+| `add <git-url>[@ref]` | install from git. No ref: highest release tag, else HEAD. The lock pins the commit and a hash of the files; `update` moves tags to the newest release tag and follows branches and `HEAD` |
 | `add vendor:<name>` | install from c3c's vendor collection (raylib, sdl3, sqlite3, …); `add vendor` lists it |
-| `add ./dir` | symlink a local library into `lib/` (never publishable) |
+| `add ./dir` | link a local library into `lib/` with a relative symlink (never publishable) |
 | `remove <name>` | remove a library; refuses if another needs it (`--force`) |
 | `prune` | remove dependencies nothing needs any more (`--dry-run`) |
 | `why <name>` | which libraries require `<name>` |
 | `list [--tree]` | libraries and state: `ok`, `modified`, `missing`, `untracked`; `dep` marks pulled-in libraries |
 | `verify` | check files against the lock, exit 1 on problems |
-| `outdated` | show newer versions |
-| `update [name[@ref]...]` | update all, or switch one to a version, tag, branch or commit |
+| `outdated` | show newer versions (exit 1 if a source cannot be reached) |
+| `update [name[@ref]...]` | update all within their major version, or switch one to a version, tag, branch or commit |
 | `sync` | restore from the lock. One failure does not stop the others (exit 1 and a summary) |
-| `search <text\|tag:x>`, `info <ns/name>` | registry lookups |
+| `search <text\|tag:x>` | search the registry and c3c's vendor collection (a list built into c3l) |
+| `info <ns/name>` | the registry record of a library |
 | `migrate` | convert a c3po `project.lock.json` into `c3l.lock` |
 | `check`, `pack`, `publish` | publish a library, see [Publishing](#publishing) |
 
@@ -71,7 +78,7 @@ Options (before or after the command):
 | `--strict` | with `add`/`update`: C3 release or platform mismatch, or a dependency cycle, is an error |
 | `--force` | with `remove`: remove even if needed |
 | `--allow-host HOST` | trust a git or registry host named by a dependency (`file` for local paths) |
-| `-h`, `-v` | help, version |
+| `-h`, `--version` | help, version |
 
 Publishing options are listed under [Publishing](#publishing).
 
@@ -96,16 +103,19 @@ c3l why dcc           # who requires dcc?
 c3l remove app && c3l prune
 ```
 
-A library declares its dependencies in `manifest.json`:
+Apps and libraries work the same way: `c3l.lock` is the only place c3l writes
+dependencies to. A library declares its dependencies by being managed with c3l:
+run `c3l add` in the library directory and commit its `c3l.lock`. It travels
+with the library, in the git archive or in the package `c3l pack` builds, and
+whoever installs the library gets what that lock lists as direct dependencies,
+from the same sources, at least at the locked registry versions (git: the locked
+tag, branch or commit; `update` moves a tag like any other version).
 
-```json
-"vendor": { "c3l": { "requires": [
-    { "name": "vk", "source": "tonis2/vk", "version": "1.0.1" } ] } }
-```
-
-`source` is a registry id or git URL. `version` is a minimum (registry) or a
-tag, branch or commit (git). A registry dependency may add `"registry": "<base URL>"`;
-without it the default registry is used. `c3l publish` writes this block for you.
+c3l also reads, but never writes: `vendor.c3l.requires` in a manifest (packages
+published by c3l 1.1), c3po's `vendor.c3po.sources`, and plain `dependencies`
+names (no source: a warning). For each name the first of these wins:
+`vendor.c3l.requires`, `c3l.lock`, `vendor.c3po.sources`, `dependencies`.
+Dependencies listed only for one target in `project.json` count too.
 
 Rules:
 
@@ -124,6 +134,14 @@ c3po and c3l share the `lib/` layout. c3l follows dependencies declared in
 `project.lock.json`, then `c3l sync` rebuilds them as verified archives. c3l
 never writes c3po's files.
 
+## Private repositories
+
+c3l runs `git`, so private repositories work with whatever gives git access: an
+ssh key (`git@github.com:me/lib`) or a credential helper for https URLs (`gh auth
+setup-git`). URLs with credentials in them are refused, they would end up in
+`c3l.lock`. The ssh and https URLs of a repository count as the same source;
+libraries should use https URLs. See `man c3l` for CI.
+
 ## Publishing
 
 c3l publishes to registries with an upload API, currently
@@ -141,12 +159,14 @@ c3l publish --description "My library" --license MIT --tags "gpu,vulkan"
 - **Package**: built from git-tracked files, deterministically.
 - **Checks**: valid `manifest.json`, clean working tree (`--allow-dirty`), library compiles (`--no-build`), version not yet published, a `--description` on first publish.
 - **Token**: create it in the registry under Settings, API tokens. Never pass it as a command-line argument.
-- **Dependencies**: `c3l add` them inside the library directory. They go into `manifest.json` automatically. Local `./dir` dependencies are refused.
+- **Dependencies**: `c3l add` them inside the library directory and commit `c3l.lock`; it is packed with the library. Local `./dir` dependencies are refused.
 
-Other options: `--license`, `--tags`, `--docs-url`, `--git-url`, `--c3-version`, `--output`, `--offline`, `--registry-type`.
+Other options, given after `check`, `pack` or `publish`: `--license`, `--tags`, `--docs-url`, `--git-url`, `--c3-version`, `--output`, `--offline`. Before or after the command: `--registry-type`.
 
 ## Tests
 
-`make test` runs an offline suite. `LIVE=1 make test` adds a smoke test against www.c3pkg.eu.
+`make test` builds c3l, runs the unit tests (`c3c test`), checks `vendor/`
+against `c3l.lock` and runs the offline suite `test/run.sh` against the binary.
+`LIVE=1 make test` adds a smoke test against www.c3pkg.eu.
 
 MIT. See LICENSE.

@@ -2,17 +2,19 @@
 # Copyright (C) 2025-2026 Koni Marti <koni.marti@gmail.com>. All Rights Reserved.
 # This file is licensed under the MIT.
 #
-# c3l test suite. Offline: a static fake registry (python http.server) and local
-# git repositories. Needs c3c with `fetch` support in PATH (or $C3C), git, python3.
+# c3l test suite: drives the c3l binary. Offline: a static fake registry (python
+# http.server), a fake c3pkg API and local git repositories. Needs c3c in PATH (or
+# $C3C), git, python3. The pure logic has unit tests in test/unit (c3c test).
 #
-#   test/run.sh            run all tests
-#   LIVE=1 test/run.sh     additionally smoke-test against www.c3pkg.eu
+#   make test                       build, unit tests, then this suite
+#   C3L=path/to/c3l test/run.sh     run this suite against another binary
+#   LIVE=1 test/run.sh              additionally smoke-test against www.c3pkg.eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-C3L="$HERE/../c3l"
+C3L="${C3L:-$HERE/../build/c3l}"
+[[ -x "$C3L" ]] || { echo "build c3l first (make)"; exit 1; }
 export C3C="${C3C:-c3c}"
 command -v "$C3C" >/dev/null || { echo "SKIP: c3c not found"; exit 0; }
-"$C3C" --help 2>&1 | grep -q fetch-info || { echo "SKIP: c3c has no fetch support"; exit 0; }
 command -v python3 >/dev/null || { echo "SKIP: python3 needed"; exit 0; }
 command -v git >/dev/null || { echo "SKIP: git needed"; exit 0; }
 
@@ -45,16 +47,18 @@ newproj() { # dir
 	"$C3C" init app >/dev/null && cd app || exit 1
 }
 sha() { sha256sum "$1" | cut -d' ' -f1; }
-
-#
-section "semver"
-# shellcheck disable=SC1090
-source "$C3L"
-for t in "1.0.0 1.0.0 0" "1.0.1 1.0.0 1" "1.0.0 1.0.1 -1" "1.10.0 1.9.0 1" "v2.0 1.9.9 1" \
-	"1.0.0 1.0.0-rc.1 1" "1.0.0-rc.1 1.0.0 -1" "1.0.0-rc.2 1.0.0-rc.10 -1" "1.0.0-alpha 1.0.0-alpha.1 -1" \
-	"1.0.0-alpha.1 1.0.0-beta -1" "1.0.0-1 1.0.0-alpha -1" "1.0.0+b1 1.0.0+b2 0"; do
-	set -- $t; eq "semver_cmp $1 $2" "$(semver_cmp "$1" "$2")" "$3"
-done
+flat() { # JSON5-ish manifest on stdin -> "path<TAB>value" per scalar
+	python3 -c '
+import json, re, sys
+def walk(v, p):
+    if isinstance(v, dict):
+        for k, x in v.items(): walk(x, f"{p}.{k}" if p else k)
+    elif isinstance(v, list):
+        for i, x in enumerate(v): walk(x, f"{p}[{i}]")
+    else:
+        print(f"{p}\t{v}")
+walk(json.loads(re.sub(r",(\s*[}\]])", r"\1", re.sub(r"(?m)^\s*//.*$", "", sys.stdin.read()))), "")'
+}
 
 #
 section "init, add, list, verify"
@@ -159,57 +163,24 @@ has "hexdump still in project" '"hexdump"' "$(cat project.json)"
 check "verify ok" c3l verify
 
 section "unpacked (c3c default) copy is replaced by a file"
-newproj p2
-c3l init >/dev/null 2>&1
-"$C3C" --fetch-url "$C3L_REGISTRY" fetch acme/alpha@1.0.0 >/dev/null 2>&1
-check "c3c unpacked it" test -d lib/alpha.c3l
-c3l add acme/alpha@1.0.0 >/dev/null 2>&1; eq "add over dir rc" $? 0
-check "now a file" test -f lib/alpha.c3l
-check "verify ok" c3l verify
-has "untracked shows for foreign dep" "alpha" "$(c3l list)"
+if "$C3C" --help 2>&1 | grep -q '^  fetch '; then
+	newproj p2
+	c3l init >/dev/null 2>&1
+	"$C3C" --fetch-url "$C3L_REGISTRY" fetch acme/alpha@1.0.0 >/dev/null 2>&1
+	check "c3c unpacked it" test -d lib/alpha.c3l
+	c3l add acme/alpha@1.0.0 >/dev/null 2>&1; eq "add over dir rc" $? 0
+	check "now a file" test -f lib/alpha.c3l
+	check "verify ok" c3l verify
+	has "untracked shows for foreign dep" "alpha" "$(c3l list)"
+else
+	echo "  skipped: this c3c has no 'fetch' (new in 0.8.6)"
+fi
 
 section "untracked dependency is reported"
 cp project.json "$WORK/p2.json"
 sed -i.bak 's/"dependencies":  *\[/"dependencies": [ "stranger",/' project.json && rm -f project.json.bak
 has "untracked" "stranger .*untracked" "$(c3l list)"
 check_not "verify flags it" c3l verify
-
-section "deps_edit: json5, comments, multi-line, target-level"
-newproj p3
-cat > project.json5 <<'EOF'
-{
-  // top comment with "dependencies": [ "decoy" ]
-  "langrev": "1",
-  "dependency-search-paths": [ "lib" ],
-  "dependencies": [
-    "one", // first
-    "two"
-  ],
-  "targets": {
-    "app": { "type": "executable", "dependencies": [ "targetonly" ] },
-  },
-}
-EOF
-rm -f project.json
-PROJECT=project.json5
-check "add three" deps_edit add three
-eq "deps after add" "$(deps_list | tr '\n' ' ')" "one two three "
-check "add is idempotent" deps_edit add three
-eq "deps still" "$(deps_list | tr '\n' ' ')" "one two three "
-check "del two" deps_edit del two
-eq "deps after del" "$(deps_list | tr '\n' ' ')" "one three "
-has "target-level untouched" '"targetonly"' "$(cat project.json5)"
-has "comment untouched" 'decoy' "$(cat project.json5)"
-check "del missing is a no-op" deps_edit del nothere
-check "del all" bash -c "source '$C3L'; PROJECT=project.json5; deps_edit del one && deps_edit del three"
-eq "empty" "$(deps_list | tr '\n' ' ')" ""
-newproj p4
-cat > project.json <<'EOF'
-{ "dependency-search-paths": [ "lib" ], "targets": { "app": { "type": "executable" } } }
-EOF
-PROJECT=project.json
-check "add when key is missing" deps_edit add first
-eq "created" "$(deps_list | tr '\n' ' ')" "first "
 
 section "registry under a base path, with trailing slash"
 mkdir -p "$REG/c3/v1"; python3 "$HERE/fakereg.py" "$REG/c3/v1" publish acme/zed 1.0.0 >/dev/null
@@ -248,9 +219,9 @@ check "restored" test -f lib/gitlib.c3l
 c3l update >/dev/null 2>&1; eq "git update rc" $? 0
 has "updated to v0.2.0" "v0.2.0" "$(grep '^gitlib' c3l.lock)"
 check_not "no such tag fails" c3l add "file://$GR" v9.9.9
-# a git library is identified by its commit: the lock pins it, verify checks the
-# commit id that `git archive` stores in the zip
-check "lock records the commit as hash" grep -q '^gitlib.*commit:\([0-9a-f]*\).*commit:' c3l.lock
+# a git library is identified by its commit and its files: the lock pins the commit,
+# verify checks the commit id that `git archive` stores in the zip and the contents
+check "lock records the commit and the contents" grep -qE '^gitlib.*	commit:[0-9a-f]{40}	content:[0-9a-f]{64}	' c3l.lock
 check "verify ok" c3l verify
 git -C "$GR" archive --format=zip -o "$PWD/lib/gitlib.c3l" "$C1"
 out="$(c3l verify 2>&1)"; eq "verify rejects an archive of another commit" $? 1
@@ -407,10 +378,7 @@ eq "gitlib is a dep, git kind" "$(awk -F'\t' '$1=="gitlib"{print $2 "/" $8}' c3l
 check "c3po verify" c3l verify
 
 
-section "review fixes: trust list, git constraint operators, vendor block placement"
-eq "git ref: >= stripped" "$(git_ref_of '>=1.2.0')" "1.2.0"
-eq "git ref: caret stripped" "$(git_ref_of '^v1.2.0')" "v1.2.0"
-eq "git ref: plain tag kept" "$(git_ref_of 'v1.2.0')" "v1.2.0"
+section "review fixes: trust list"
 newproj pr1
 c3l init >/dev/null 2>&1
 out="$(C3L_ALLOWED_HOSTS="example.org,file" c3l add acme/viapo 2>&1)"; eq "comma separated C3L_ALLOWED_HOSTS rc" $? 0
@@ -450,15 +418,15 @@ mkdir -p src; printf 'module demo;\nfn int answer() => 42;\n' > src/demo.c3
 git init -q .; git add -A; git commit -qm init
 pc() { c3l --registry "$PR" "$@"; }
 
-out="$(pc --offline check 2>&1)"; eq "untagged without version rc" $? 1
+out="$(pc check --offline 2>&1)"; eq "untagged without version rc" $? 1
 has "asks for a version" "no version" "$out"
-git tag v1.1; out="$(pc --offline check 2>&1)"; eq "non-semver tag ignored" $? 1
+git tag v1.1; out="$(pc check --offline 2>&1)"; eq "non-semver tag ignored" $? 1
 git tag v1.0.0
-out="$(pc --offline check 2>&1)"; eq "tagged check rc" $? 0
+out="$(pc check --offline 2>&1)"; eq "tagged check rc" $? 0
 has "version from tag" "from git tag v1.0.0" "$out"
 has "compile check ran" "compiles" "$out"
-check_not "--version 1.0 rejected" pc --offline --version 1.0 check
-check_not "build metadata rejected" pc --offline --version 1.0.0+b1 check
+check_not "--version 1.0 rejected" pc check --offline --version 1.0
+check_not "build metadata rejected" pc check --offline --version 1.0.0+b1
 
 c3l pack --output "$WORK/a.c3l" >/dev/null 2>&1; eq "pack rc" $? 0
 c3l pack --output "$WORK/b.c3l" >/dev/null 2>&1
@@ -467,66 +435,64 @@ has "archive manifest has version" '"version" : "1.0.0"' "$(unzip -p "$WORK/a.c3
 check_not "git metadata not packed" bash -c "unzip -l '$WORK/a.c3l' | grep -q '\.git/'"
 
 echo dirty >> README.md
-out="$(pc --offline check 2>&1)"; eq "dirty tree rc" $? 1
+out="$(pc check --offline 2>&1)"; eq "dirty tree rc" $? 1
 has "dirty message" "not clean" "$out"
-check "--allow-dirty passes" pc --offline --allow-dirty check
+check "--allow-dirty passes" pc check --offline --allow-dirty
 git checkout -q README.md
 
 # review fixes: unpacked junk is not "dirty"; modes do not depend on umask; nested .c3l is kept
-mkdir -p obj tests; echo x > obj/a.o; printf '# c3l.lock v1\n' > c3l.lock
-check "untracked obj/ and c3l.lock are not dirt" pc --offline --no-build check
+mkdir -p obj tests; echo x > obj/a.o
+check "untracked obj/ is not dirt" pc check --offline --no-build
+printf '# c3l.lock v1\n' > c3l.lock
+out="$(pc check --offline --no-build 2>&1)"; eq "an uncommitted c3l.lock is dirt rc" $? 1
+has "the lock is named" "c3l.lock is part of the package, commit it" "$out"
 echo x > tests/fixture.c3l; echo y > newfile.c3
-check_not "untracked packaged file is dirt" pc --offline --no-build check
+check_not "untracked packaged file is dirt" pc check --offline --no-build
 rm newfile.c3
 ( umask 002; c3l pack --no-build --allow-dirty --output "$WORK/u2.c3l" >/dev/null 2>&1 )
 ( umask 077; c3l pack --no-build --allow-dirty --output "$WORK/u7.c3l" >/dev/null 2>&1 )
 eq "pack independent of umask" "$(sha "$WORK/u2.c3l")" "$(sha "$WORK/u7.c3l")"
 has "nested .c3l kept" "tests/fixture.c3l" "$(unzip -l "$WORK/u2.c3l")"
-check_not "obj/ and c3l.lock not packed" bash -c "unzip -l '$WORK/u2.c3l' | grep -q -e obj/ -e c3l.lock"
+check_not "obj/ not packed" bash -c "unzip -l '$WORK/u2.c3l' | grep -q obj/"
 rm -rf obj c3l.lock tests
-out="$(pc --offline check --version 2>&1)"; eq "--version without value rc" $? 1
+out="$(pc check --offline --version 2>&1)"; eq "--version without value rc" $? 2
 has "--version message" "needs a value" "$out"
 
-# publishing a library that has dependencies: vendor.c3l.requires comes from its own c3l.lock
-printf '# c3l.lock v1\ndcb\tregistry\thttp://example.invalid/v1\tacme/dcb\t1.2.0\tsha256:aa\tsha256:aa\tdirect\t-\ndcc\tregistry\thttp://example.invalid/v1\tacme/dcc\t1.0.0\tsha256:bb\tsha256:bb\tdep\t-\ngl\tgit\thttps://github.com/o/gl\t-\tv0.3.0\tcommit:x\tcommit:x\tdirect\t-\n' > c3l.lock
-c3l pack --no-build --output "$WORK/withdeps.c3l" >/dev/null 2>&1; eq "pack with a lockfile rc" $? 0
-man="$(unzip -p "$WORK/withdeps.c3l" manifest.json)"
-has "requires has the registry dependency and its registry" '"source": "acme/dcb", "registry": "http://example.invalid/v1", "version": "1.2.0"' "$man"
-has "requires has the git dependency" '"source": "https://github.com/o/gl", "version": "v0.3.0"' "$man"
-check_not "transitive-only libs are not listed" grep -q acme/dcc <<< "$man"
-check_not "c3l.lock itself is not packed" bash -c "unzip -l '$WORK/withdeps.c3l' | grep -q c3l.lock"
+# publishing a library that has dependencies: its c3l.lock is packed, the manifest is left alone
+printf '# c3l.lock v1\ndcb\tregistry\thttp://example.invalid/v1\tacme/dcb\t1.2.0\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tdirect\t-\ndcc\tregistry\thttp://example.invalid/v1\tacme/dcc\t1.0.0\tsha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tsha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tdep\t-\ngl\tgit\thttps://github.com/o/gl\t-\tv0.3.0\tcommit:cccccccccccccccccccccccccccccccccccccccc\tcommit:cccccccccccccccccccccccccccccccccccccccc\tdirect\t-\n' > c3l.lock
+c3l pack --no-build --allow-dirty --output "$WORK/withdeps.c3l" >/dev/null 2>&1; eq "pack with a lockfile rc" $? 0
+check "c3l.lock is packed" cmp -s c3l.lock <(unzip -p "$WORK/withdeps.c3l" c3l.lock)
+check_not "no vendor block is written" bash -c "unzip -p '$WORK/withdeps.c3l' manifest.json | grep -q vendor"
 has "repo manifest untouched" '"provides" : "demo"' "$(cat manifest.json)"
-check_not "no requires without a lock" bash -c "unzip -p '$WORK/a.c3l' manifest.json | grep -q requires"
 rm -f c3l.lock
 sed -i 's|"provides" : "demo",|"provides" : "demo",\n  "dependencies" : [ "nowhere", "demo" ],|' manifest.json
-out="$(pc --offline --no-build --allow-dirty check 2>&1)"; eq "undeclared dependency is a warning, not an error" $? 0
+out="$(pc check --offline --no-build --allow-dirty 2>&1)"; eq "undeclared dependency is a warning, not an error" $? 0
 has "warns where-from is missing" "'nowhere' is in the manifest's dependencies but nothing says where to get it" "$out"
 has "warns about self dependency" "demo lists itself as a dependency" "$out"
 git checkout -q manifest.json
 
-# vendor block goes to the top level even if a nested "version" comes first
-printf '# c3l.lock v1\ndcb\tregistry\thttp://example.invalid\tacme/dcb\t1.2.0\tsha256:aa\tsha256:aa\tdirect\t-\n' > c3l.lock
+# the version goes to the top level even if a nested "version" comes first
+printf '# c3l.lock v1\ndcb\tregistry\thttp://example.invalid\tacme/dcb\t1.2.0\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tdirect\t-\n' > c3l.lock
 sed -i 's|"provides" : "demo",|"targets-note" : { "version" : "9" },\n  "provides" : "demo",|' manifest.json
 c3l pack --no-build --allow-dirty --output "$WORK/nested.c3l" >/dev/null 2>&1; eq "pack with a nested version rc" $? 0
-flat="$(unzip -p "$WORK/nested.c3l" manifest.json | ( source "$C3L"; json_flatten ))"
-has "vendor block at top level" "^vendor.c3l.requires\[0\].source	acme/dcb" "$flat"
+flat="$(unzip -p "$WORK/nested.c3l" manifest.json | flat)"
 has "nested version untouched" "^targets-note.version	9" "$flat"
 has "top-level version set" "^version	" "$flat"
 rm -f c3l.lock; git checkout -q manifest.json
 
-out="$(pc --token-file "$WORK/token" publish 2>&1)"; eq "new package needs description rc" $? 1
+out="$(pc publish --token-file "$WORK/token" 2>&1)"; eq "new package needs description rc" $? 1
 has "description message" "description is required" "$out"
 out="$(pc publish --description "Demo" 2>&1)"; eq "no token rc" $? 1
 has "no token message" "no API token" "$out"
-out="$(pc --token-file "$WORK/badtoken" publish --description Demo 2>&1)"; eq "bad token rc" $? 1
+out="$(pc publish --token-file "$WORK/badtoken" --description Demo 2>&1)"; eq "bad token rc" $? 1
 has "bad token message" "rejected the token" "$out"
-out="$(pc --token-file "$WORK/token" --dry-run publish --description Demo 2>&1)"; eq "dry run rc" $? 0
+out="$(pc --dry-run publish --token-file "$WORK/token" --description Demo 2>&1)"; eq "dry run rc" $? 0
 has "dry run text" "would publish demo 1.0.0" "$out"
 check_not "dry run uploaded nothing" curl -fs "$PR/api/v1/packages/demo/versions"
-out="$(pc --token-file "$WORK/token" publish --description Demo --license MIT 2>&1)"; eq "publish rc" $? 0
+out="$(pc publish --token-file "$WORK/token" --description Demo --license MIT 2>&1)"; eq "publish rc" $? 0
 has "publish ok and verified" "registry checksum matches" "$out"
 check_not "token not printed" grep -q c3p_test <<< "$out"
-out="$(pc --token-file "$WORK/token" publish 2>&1)"; eq "republish rc" $? 1
+out="$(pc publish --token-file "$WORK/token" 2>&1)"; eq "republish rc" $? 1
 has "immutable" "already published" "$out"
 out="$(C3L_TOKEN=c3p_test pc publish --version 1.0.1 2>&1)"; eq "token from env, --version rc" $? 0
 has "tag vs --version warning" "says 1.0.0, but --version says 1.0.1" "$out"
@@ -536,20 +502,20 @@ has "C3PKG_TOKEN publishes" "registry checksum matches" "$out"
 out="$(C3PKG_TOKEN=c3p_wrong pc publish --version 1.0.3 2>&1)"; eq "wrong C3PKG_TOKEN rc" $? 1
 has "wrong C3PKG_TOKEN rejected" "rejected the token" "$out"
 out="$(C3L_TOKEN=c3p_wrong C3PKG_TOKEN=c3p_test pc publish --version 1.0.3 2>&1)"; eq "C3L_TOKEN wins over C3PKG_TOKEN rc" $? 1
-out="$(C3L_TOKEN=c3p_wrong C3PKG_TOKEN=c3p_test pc --token-file "$WORK/token" publish --version 1.0.3 2>&1)"; eq "--token-file wins over both rc" $? 0
+out="$(C3L_TOKEN=c3p_wrong C3PKG_TOKEN=c3p_test pc publish --token-file "$WORK/token" --version 1.0.3 2>&1)"; eq "--token-file wins over both rc" $? 0
 
 # manifest.json disagrees with the tag: warn, the tag wins
 sed -i 's|"provides" : "demo",|"provides" : "demo",\n  "version" : "0.0.9",|' manifest.json
 git commit -qam "manifest version"; git tag v1.2.0
-out="$(pc --token-file "$WORK/token" --c3-version 0.7.1 publish 2>&1)"; eq "publish with mismatching manifest rc" $? 0
+out="$(pc publish --token-file "$WORK/token" --c3-version 0.7.1 2>&1)"; eq "publish with mismatching manifest rc" $? 0
 has "manifest mismatch warning" "manifest.json says version 0.0.9, publishing 1.2.0" "$out"
 curl -fs "$PR/download/me/demo@1.2.0" > "$WORK/dl.c3l"
 has "archive carries tag version" '"version" : "1.2.0"' "$(unzip -p "$WORK/dl.c3l" manifest.json)"
 has "repo manifest untouched" '"version" : "0.0.9"' "$(cat manifest.json)"
 
-out="$(c3l --registry "$C3L_REGISTRY" --token-file "$WORK/token" publish 2>&1)"; eq "static registry publish rc" $? 1
+out="$(c3l --registry "$C3L_REGISTRY" publish --token-file "$WORK/token" 2>&1)"; eq "static registry publish rc" $? 1
 has "read-only message" "read-only" "$out"
-out="$(c3l --registry "http://127.0.0.1:$PKG429" --token-file "$WORK/token" --registry-type c3pkg publish --version 3.0.0 --description D 2>&1)"; eq "rate limit rc" $? 1
+out="$(c3l --registry "http://127.0.0.1:$PKG429" --registry-type c3pkg publish --token-file "$WORK/token" --version 3.0.0 --description D 2>&1)"; eq "rate limit rc" $? 1
 has "rate limit message" "retry in 7 seconds" "$out"
 
 section "version from project.json; manifest.json wins; tag and --version win over both"
@@ -557,18 +523,18 @@ rm -rf "$WORK/pubver"; mkdir -p "$WORK/pubver"; cd "$WORK/pubver" && "$C3C" init
 mkdir -p src; printf 'module vdemo;\nfn int answer() => 42;\n' > src/vdemo.c3
 printf '{ "version": "0.3.0", "authors": [], "sources": ["src/**"] }\n' > project.json
 git init -q .; git add -A; git commit -qm init
-out="$(pc --offline --no-build check 2>&1)"; eq "project.json version used rc" $? 0
+out="$(pc check --offline --no-build 2>&1)"; eq "project.json version used rc" $? 0
 has "version from project.json" "vdemo 0.3.0 (from project.json" "$out"
 sed -i 's|"provides" : "vdemo",|"provides" : "vdemo",\n  "version" : "0.4.0",|' manifest.json; git commit -qam manifest
-out="$(pc --offline --no-build check 2>&1)"; eq "manifest and project.json differ rc" $? 0
+out="$(pc check --offline --no-build 2>&1)"; eq "manifest and project.json differ rc" $? 0
 has "manifest.json wins" "vdemo 0.4.0 (from manifest.json" "$out"
 has "project.json mismatch warned" "project.json says version 0.3.0, publishing 0.4.0" "$out"
 git tag v1.0.0
-out="$(pc --offline --no-build check 2>&1)"
+out="$(pc check --offline --no-build 2>&1)"
 has "tag wins over both" "vdemo 1.0.0 (from git tag v1.0.0" "$out"
 has "manifest warned about" "manifest.json says version 0.4.0, publishing 1.0.0" "$out"
 has "project.json warned about" "project.json says version 0.3.0, publishing 1.0.0" "$out"
-out="$(pc --offline --no-build --version 2.0.0 check 2>&1)"; has "--version wins" "vdemo 2.0.0 (from --version" "$out"
+out="$(pc check --offline --no-build --version 2.0.0 2>&1)"; has "--version wins" "vdemo 2.0.0 (from --version" "$out"
 c3l pack --no-build --output "$WORK/vd.c3l" >/dev/null 2>&1
 has "archive manifest gets the chosen version" '"version" : "1.0.0"' "$(unzip -p "$WORK/vd.c3l" manifest.json)"
 has "project.json untouched" '"version": "0.3.0"' "$(cat project.json)"
@@ -598,7 +564,7 @@ out="$(c3l init 2>&1)"; eq "init in a library directory rc" $? 0
 out="$(c3l add acme/lmb 2>&1)"; eq "add in a library directory rc" $? 0
 check "dependency in lib/" test -f lib/lmb.c3l
 check "transitive dependency in lib/" test -f lib/lmc.c3l
-flat="$(json_flatten < manifest.json 2>/dev/null || ( source "$C3L"; json_flatten < manifest.json ))"
+flat="$(flat < manifest.json)"
 has "manifest.json lists the direct dependency" "^dependencies\[0\]	lmb" "$flat"
 check_not "manifest.json does not list the transitive one" grep -q '"lmc"' manifest.json
 eq "lock has both" "$(awk -F'\t' '$0 !~ /^#/ && $1 !~ /^@/' c3l.lock | wc -l)" "2"
@@ -609,8 +575,15 @@ out="$(c3l check 2>&1)"; eq "check with installed dependencies rc" $? 0
 has "compile check sees lib/" "compiles" "$out"
 c3l pack --no-build --output "$WORK/lm.c3l" >/dev/null 2>&1
 check_not "installed dependencies are not packed" bash -c "unzip -l '$WORK/lm.c3l' | grep -q 'lib/'"
-has "requires written from the lock" 'acme/lmb' "$(unzip -p "$WORK/lm.c3l" manifest.json)"
-check "untracked c3l.lock and ignored lib/ do not make the tree dirty" c3l --offline --no-build check
+has "the lock is packed" 'acme/lmb' "$(unzip -p "$WORK/lm.c3l" c3l.lock)"
+check "a committed c3l.lock and ignored lib/ do not make the tree dirty" c3l check --offline --no-build
+publish acme/lm 0.1.1 --from="$WORK/lm.c3l" >/dev/null
+newproj lmcons
+c3l init >/dev/null 2>&1
+out="$(c3l add acme/lm 2>&1)"; eq "add a published library that has a lock rc" $? 0
+has "its locked dependency follows" "lmb installed for lm" "$out"
+check "and that one's dependency too" test -f lib/lmc.c3l
+cd "$WORK/libm/lm.c3l" || exit 1
 rm -f lib/lmb.c3l lib/lmc.c3l
 c3l sync >/dev/null 2>&1; eq "sync in a library directory rc" $? 0
 check "sync restored lib/lmc.c3l" test -f lib/lmc.c3l
@@ -644,7 +617,7 @@ check "remove leaves the directory alone" test -f ../pl/manifest.json
 # a library depending on a local directory cannot be published
 c3l add ../pl >/dev/null 2>&1; cp c3l.lock "$WORK/pl.lock"
 cd "$WORK/libm/lm.c3l" && cp "$WORK/pl.lock" c3l.lock
-out="$(c3l --offline --no-build check 2>&1)"; eq "publishing a path dependency fails rc" $? 1
+out="$(c3l check --offline --no-build 2>&1)"; eq "publishing a path dependency fails rc" $? 1
 has "path dependency explained" "is a local directory" "$out"
 rm -f c3l.lock
 
@@ -741,7 +714,7 @@ out="$(c3l add vendor 2>&1)"; has "lists the collection" "vendor:vz" "$out"
 out="$(c3l add vendor:vz 2>&1)"; eq "add vendor rc" $? 0
 check "installed" test -f lib/vz.c3l
 has "registered" '"vz"' "$(cat project.json)"
-VSUM="sha256:$(sha vz 2>/dev/null || sha lib/vz.c3l)"
+VSUM="sha256:$(sha lib/vz.c3l)"
 eq "lock line" "$(awk -F'\t' '$1=="vz"{print $2 " " $3 " " $4 " " $5 " " $6}' c3l.lock)" "vendor $C3L_VENDOR_URL vz latest $VSUM"
 check "verify" c3l verify
 has "list shows vendor:" "vz .*vendor:vz" "$(c3l list)"
@@ -755,7 +728,7 @@ check "sync --frozen is clean" c3l sync --frozen
 vendor_make vz two
 rm -f lib/vz.c3l
 out="$(c3l sync 2>&1)"; eq "changed upstream: sync fails rc" $? 1
-has "mismatch explained" "checksum mismatch for vendor:vz" "$out"
+has "mismatch explained" "vendor:vz changed upstream" "$out"
 check_not "nothing left behind" test -e lib/vz.c3l
 out="$(c3l outdated 2>&1)"; has "outdated sees the change" "vz .*latest.*-> HEAD@" "$out"
 c3l update >/dev/null 2>&1; eq "update rc" $? 0
@@ -774,13 +747,225 @@ eq "vz came in as a dep" "$(awk -F'\t' '$1=="vz"{print $2 "/" $8}' c3l.lock)" "v
 eq "vuser requires vz" "$(awk -F'\t' '$1=="vuser"{print $9}' c3l.lock)" "vz"
 unset C3L_VENDOR_URL C3L_VENDOR_API
 
+section "git contents, path links, URL spellings, release tags"
+newproj gc1
+c3l init >/dev/null 2>&1
+c3l add "file://$GR" >/dev/null 2>&1
+python3 - lib/gitlib.c3l <<'PY'
+import sys, zipfile
+f = sys.argv[1]; z = zipfile.ZipFile(f); comment = z.comment
+items = [(i, z.read(i)) for i in z.infolist()]; z.close()
+w = zipfile.ZipFile(f, "w"); w.comment = comment
+for i, d in items: w.writestr(i, b"module evil;\n" if i.filename.endswith(".c3") else d)
+w.close()
+PY
+out="$(c3l verify 2>&1)"; eq "a file changed inside a git archive is found rc" $? 1
+has "reported as modified" "gitlib: modified" "$out"
+c3l sync >/dev/null 2>&1; check "sync restores it" c3l verify
+out="$(c3l add "file://$GR/" 2>&1)"; eq "same repository, other spelling rc" $? 0
+out="$(c3l add "file://$GR" "$(git -C "$GR" rev-parse HEAD | cut -c1-12)" 2>&1)"; eq "short commit rc" $? 1
+has "short commit explained" "full 40-character hash" "$out"
+publish acme/nm 1.0.0 --c3po="other|file://$GR" >/dev/null
+out="$(c3l --allow-host file add acme/nm 2>&1)"; eq "required name differs from the library rc" $? 1
+has "name mismatch explained" "but that library is 'gitlib'" "$out"
+check "the installed gitlib is untouched" c3l verify
+PR1="$WORK/prerel"; mkdir -p "$PR1"; cd "$PR1" || exit 1
+git init -q . && git config commit.gpgsign false
+echo '{ "provides": "prerel" }' > manifest.json; git add -A && git commit -qm a && git tag v0.2.0
+echo '// next' >> manifest.json; git commit -qam b && git tag v0.10.0-rc.1
+newproj gc2
+c3l init >/dev/null 2>&1
+out="$(c3l add "file://$PR1" 2>&1)"; has "release tag preferred over a prerelease" "installed prerel v0.2.0" "$out"
+check_not "a prerelease is not offered as an update" bash -c "$C3L outdated | grep -q prerel"
+mkdir -p "$WORK/mv/pathlib/src" "$WORK/mv/app"
+printf '{ "provides": "pathlib", "sources": ["src/**"] }\n' > "$WORK/mv/pathlib/manifest.json"
+cd "$WORK/mv/app" && "$C3C" init proj >/dev/null && cd proj || exit 1
+c3l init >/dev/null 2>&1; c3l add ../../pathlib >/dev/null 2>&1
+check_not "the link is relative" bash -c "readlink lib/pathlib.c3l | grep -q '^/'"
+cp -a "$WORK/mv" "$WORK/mv2"; cd "$WORK/mv2/app/proj" || exit 1
+check "a moved project with its local library verifies" c3l verify
+rm -rf "$WORK/mv2/pathlib"
+has "a missing local library is missing" "pathlib: missing" "$(c3l verify 2>&1)"
+publish acme/tp 1.0.0 >/dev/null; publish acme/tc 1.0.0 --requires=acme/tp:1.0.0 >/dev/null
+newproj gc3
+c3l init >/dev/null 2>&1; c3l add acme/tc >/dev/null 2>&1; c3l remove tc >/dev/null 2>&1
+has "the tree shows what nothing needs" "tp 1.0.0 (not needed" "$(c3l list --tree)"
+
+section "a library shared through git passes on what its c3l.lock requires"
+LG="$WORK/lockedlib"; mkdir -p "$LG/src"; cd "$LG" || exit 1
+printf '{ "provides": "lockedlib", "sources": ["src/**"] }\n' > manifest.json
+printf 'module lockedlib;\n' > src/lockedlib.c3
+printf 'lib/\n' > .gitignore
+publish acme/lup 1.0.0 >/dev/null
+c3l init >/dev/null 2>&1; c3l add acme/lup@1.0.0 >/dev/null 2>&1
+check "the library has its dependency" test -f lib/lup.c3l
+check_not "nothing is written into manifest.json but the name" grep -q vendor manifest.json
+git init -q . && git config commit.gpgsign false && git add -A && git commit -qm one && git tag v1.0.0
+newproj lg1
+c3l init >/dev/null 2>&1
+out="$(c3l --allow-host file add "file://$LG" 2>&1)"; eq "add a library with a lock rc" $? 0
+has "its locked dependency is installed" "lup installed for lockedlib" "$out"
+has "at least the locked version" "^lup	registry	.*	1.0.0	.*	dep	" "$(cat c3l.lock)"
+newproj tg1
+python3 - <<'PY'
+p = "project.json"; s = open(p).read()
+open(p, "w").write(s.replace('"type": "executable"', '"type": "executable", "dependencies": [ "targetonly" ]', 1))
+PY
+c3l init >/dev/null 2>&1
+has "a target's dependency is seen" "targetonly .*untracked" "$(c3l list)"
+check_not "and verify reports it" c3l verify
+
+section "update arguments, rollback, --force, limits, migrate errors"
+publish acme/up 1.0.0 >/dev/null; publish acme/up 1.1.0 >/dev/null
+newproj rv1
+c3l init >/dev/null 2>&1
+c3l add acme/up@1.0.0 >/dev/null 2>&1
+out="$(c3l update up.c3l@1.1.0 2>&1)"; eq "update name.c3l@version rc" $? 0
+has "switched" "^up	registry	.*	1.1.0	" "$(cat c3l.lock)"
+out="$(c3l update up@ 2>&1)"; eq "empty version rc" $? 1
+: > c3l.lock
+c3l add acme/nope >/dev/null 2>&1
+check "an empty lockfile is kept on rollback" test -e c3l.lock
+c3l add acme/up >/dev/null 2>&1
+BAD="$(printf 'a%.0s' $(seq 64))"
+sed -i "s/^\(up	.*	\)sha256:[0-9a-f]*	sha256:[0-9a-f]*/\1sha256:$BAD	sha256:$BAD/" c3l.lock
+rm -f lib/up.c3l; cp c3l.lock "$WORK/lock.bad"; touch -d 2001-01-01 c3l.lock
+out="$(c3l sync --frozen 2>&1)"; eq "frozen sync with a failing restore rc" $? 1
+check "--frozen leaves the lockfile alone" cmp -s c3l.lock "$WORK/lock.bad"
+eq "--frozen does not touch the lockfile" "$(date -r c3l.lock +%Y)" "2001"
+check_not "no backup debris" bash -c "ls -A lib | grep -q c3l-backup"
+newproj rv4
+printf '{ "langrev": "1", "sources": ["src/**"], "targets": { "app": { "type": "executable" } } }\n' > project.json
+cp project.json "$WORK/project.rv4"
+c3l add acme/nope >/dev/null 2>&1
+check "a failed add also takes back the \"lib\" it added" cmp -s project.json "$WORK/project.rv4"
+publish acme/fa 1.0.0 >/dev/null; publish acme/fb 1.0.0 --requires=acme/fa:1.0.0 >/dev/null
+newproj rv2
+c3l init >/dev/null 2>&1
+out="$(C3L_MAX_DEPS=0 c3l add acme/fb 2>&1)"; eq "dependency limit rc" $? 1
+has "limit explained" "more than 0 transitive libraries" "$out"
+check_not "limit rolled back" test -e lib/fb.c3l
+c3l add acme/fb >/dev/null 2>&1
+out="$(c3l remove fa 2>&1)"; eq "required library rc" $? 1
+c3l remove --force fa >/dev/null 2>&1; eq "remove --force rc" $? 0
+check_not "removed with --force" test -e lib/fa.c3l
+newproj rv3
+printf '{"packages":[{"name":"a","repo":"o/a","origin":"gitlab","commit":"COMMIT"},{"name":"b","repo":"o/b","origin":"github"}]}\n' | sed "s/COMMIT/0123456789abcdef0123456789abcdef01234567/" > project.lock.json
+out="$(c3l migrate 2>&1)"; eq "migrate with bad entries rc" $? 0
+has "unknown origin skipped" "unknown c3po origin 'gitlab'" "$out"
+has "entry without commit skipped" "skipping a c3po entry" "$out"
+out="$(c3l migrate 2>&1)"; eq "migrate twice rc" $? 1
+rm -f project.lock.json c3l.lock
+out="$(c3l migrate 2>&1)"; eq "migrate without c3po lock rc" $? 1
+
+section "hostile names, pins and URLs are refused"
+# a git library whose "provides" escapes lib/
+EV="$WORK/evilrepo"; mkdir -p "$EV"; cd "$EV" || exit 1
+git init -q . && git config commit.gpgsign false
+echo '{ "provides": "/../../escaped" }' > manifest.json
+git add -A && git commit -qm one
+newproj red1
+c3l init >/dev/null 2>&1
+out="$(c3l add "file://$EV" 2>&1)"; eq "provides with a path rc" $? 1
+has "provides explained" "not a valid library name" "$out"
+check_not "nothing written outside lib/" test -e ../escaped.c3l
+check_not "no staging debris" bash -c "ls -A lib | grep -v '^.gitkeep$' | grep -q ."
+# a dependency name that would forge lock lines
+publish acme/inj 1.0.0 --deps=$'ok,a\nevil\tgit\t/\t-\tHEAD' >/dev/null
+out="$(c3l add acme/inj 2>&1)"; eq "forged name rc" $? 1
+has "forged name explained" "not a valid library name" "$out"
+check_not "no forged lock line" grep -q "^evil" c3l.lock
+check_not "rolled back" test -e lib/inj.c3l
+# a lock whose pin is a git option
+printf '%s\nx\tgit\tfile://%s\t-\tHEAD\tcommit:--upload-pack=touch %s/PWNED;false\tcommit:x\tdirect\t-\n' "$(head -n1 c3l.lock)" "$GR" "$WORK" > c3l.lock
+out="$(c3l sync 2>&1)"; eq "option as pin rc" $? 1
+has "damaged lock explained" "invalid commit" "$out"
+check_not "no command ran" test -e "$WORK/PWNED"
+# a trusted-looking host that is not
+publish acme/hb 1.0.0 --c3po="hx|http://127.0.0.1:$PORT?@github.com/x" >/dev/null
+newproj red2
+c3l init >/dev/null 2>&1
+out="$(c3l add acme/hb </dev/null 2>&1)"; eq "disguised host rc" $? 1
+has "real host named" "host '127.0.0.1' is not trusted" "$out"
+out="$(c3l remove ../../etc 2>&1)"; eq "path as a name rc" $? 1
+
 section "cli"
 has "help" "reproducible dependencies" "$(c3l help)"
-has "version" "c3l 1" "$(c3l version)"
+has "version" "^c3l [0-9][0-9.]*$" "$(c3l version)"
 check_not "unknown command" c3l frobnicate
 cd "$WORK" && mkdir -p empty && cd empty
 check_not "outside project" c3l list
 out="$(c3l list 2>&1)"; has "plain directory: project hint" "no project.json found" "$out"
+section "update stays in its major version; a new major is asked for and checked"
+newproj maj
+c3l init >/dev/null 2>&1
+for v in 1.0.0 1.1.0 2.0.0; do publish acme/mj "$v" >/dev/null; done
+publish acme/mjuser 1.0.0 --requires=acme/mj:1.0.0 >/dev/null
+c3l add acme/mjuser >/dev/null 2>&1
+has "outdated: next and new major" "^mj .*1.0.0 .*-> 1.1.0 .*(new major version: 2.0.0)" "$(c3l outdated)"
+out="$(c3l update 2>&1)"; eq "update rc" $? 0
+has "update stays in major 1" "	1.1.0	" "$(grep '^mj	' c3l.lock)"
+has "new major announced" "mj 2.0.0 is available" "$out"
+cp c3l.lock "$WORK/lock.before"
+out="$(c3l update mj@2.0.0 2>&1)"; eq "major conflict rc" $? 1
+has "dependent named" "version conflict: mjuser needs mj 1.0.0" "$out"
+check "conflict rolled back" cmp -s c3l.lock "$WORK/lock.before"
+check "verify after rollback" c3l verify
+
+section "arguments are checked: version argument, unknown names, unreachable sources"
+newproj args
+c3l init >/dev/null 2>&1
+c3l add acme/mj 1.0.0 >/dev/null 2>&1; eq "version as a second argument rc" $? 0
+has "that version installed" "	1.0.0	" "$(grep '^mj	' c3l.lock)"
+check_not "version in both forms" c3l add acme/mj@1.0.0 1.1.0
+check_not "vendor library with a version" c3l add vendor:mj 1.0
+out="$(c3l update nosuch 2>&1)"; eq "update unknown rc" $? 1
+has "unknown named" "'nosuch' is not in" "$out"
+sed -i "s|$C3L_REGISTRY|http://127.0.0.1:1|" c3l.lock
+out="$(c3l outdated 2>&1)"; eq "outdated unreachable rc" $? 1
+has "unknown is not up to date" "mj: cannot determine the newest version" "$out"
+
+section "git: what git says, URLs with credentials, export-subst"
+newproj gitmsg
+c3l init >/dev/null 2>&1
+out="$(c3l add "file://$WORK/no-such-repo" 2>&1)"; eq "missing repo rc" $? 1
+has "git's reason shown" "; git: .*does not appear to be a git repository" "$out"
+out="$(c3l add "https://me:secret@github.com/me/lib" 2>&1)"; eq "credentials rc" $? 1
+has "credentials explained" "without credentials" "$out"
+check_not "no secret in the lock" grep -q secret c3l.lock
+ES="$WORK/es"; mkdir -p "$ES/src"; cd "$ES" || exit 1
+git init -q . && git config commit.gpgsign false
+echo '{ "provides": "es", "targets": {} }' > manifest.json
+echo '* export-subst' > .gitattributes
+echo '// $Format:%H %d$' > src/es.c3
+git add -A && git commit -qm one
+cd "$WORK/gitmsg/app" || exit 1
+c3l add "file://$ES" >/dev/null 2>&1; eq "export-subst add rc" $? 0
+has "placeholders kept" 'Format:%H %d' "$(python3 -c "import zipfile;print(zipfile.ZipFile('lib/es.c3l').read('src/es.c3').decode())")"
+
+section "an interrupted install undoes itself"
+mkdir -p "$WORK/slowbin" "$WORK/tmp"
+printf '#!/bin/sh\nsleep 2\nexec %s "$@"\n' "$(command -v git)" > "$WORK/slowbin/git"; chmod +x "$WORK/slowbin/git"
+newproj intr
+c3l init >/dev/null 2>&1
+cp c3l.lock "$WORK/lock.before"; cp project.json "$WORK/project.before"
+TMPDIR="$WORK/tmp" PATH="$WORK/slowbin:$PATH" "$C3L" add "file://$GR" >/dev/null 2>&1 &
+P=$!; sleep 0.5; kill -TERM "$P"; wait "$P"; eq "interrupted rc" $? 130
+eq "nothing left in lib" "$(ls -A lib | grep -v gitkeep)" ""
+eq "no temporary directories left" "$(ls -A "$WORK/tmp")" ""
+check "lock unchanged" cmp -s c3l.lock "$WORK/lock.before"
+check "project unchanged" cmp -s project.json "$WORK/project.before"
+
+section "search: the registry and the vendor snapshot"
+out="$(c3l search SQLite 2>&1)"; eq "search rc" $? 0
+has "vendor snapshot, by description, any case" "^vendor:sqlite3 .*SQLite 3 database" "$out"
+has "count includes vendor" "(1 of 1 shown)" "$out"
+out="$(c3l search alpha 2>&1)"; has "registry index.json" "^acme/alpha .*test lib alpha" "$out"
+out="$(c3l search tag:db 2>&1)"
+if grep -q vendor: <<< "$out"; then fail "tag search lists vendor libraries: $out"; else ok; fi
+out="$(c3l --registry http://127.0.0.1:1 search sdl3 2>&1)"; eq "unreachable registry rc" $? 1
+has "vendor shown without the registry" "vendor:sdl3_ttf" "$out"
+
 if [[ -n "$LIVE" ]]; then
 	section "live: www.c3pkg.eu"
 	unset C3L_REGISTRY
