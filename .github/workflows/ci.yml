@@ -56,7 +56,10 @@ jobs:
           vcpkg install curl:x64-windows-static
           lib="$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static/lib"
           cp "$lib/libcurl.lib" "$lib/curl.lib"  # vcpkg names it libcurl.lib; the curl binding links "curl"
-          echo "C3FLAGS=--wincrt=static -L $lib -l zlib -l ws2_32 -l crypt32 -l bcrypt -l advapi32 -l normaliz -l secur32 -l iphlpapi -l wldap32" >> "$GITHUB_ENV"
+          # what static libcurl needs besides itself, as vcpkg's libcurl.pc lists it
+          deps=$(tr -d "\r" < "$lib/pkgconfig/libcurl.pc" | sed -n "s/^Libs.private: *//p" | tr ' ' '\n' | sed -n 's/^-l\(.*\)/-l \1/p' | tr '\n' ' ')
+          ls "$lib"; echo "libcurl needs: $deps"
+          echo "C3FLAGS=--wincrt=static -L $lib $deps" >> "$GITHUB_ENV"
 
       - name: Build
         run: if [ "$RUNNER_OS" = Windows ]; then c3c build c3l $C3FLAGS; else make; fi
