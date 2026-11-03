@@ -57,7 +57,7 @@ Shell completion: `source <(c3l completion bash)` (also `zsh`, `fish`).
 | `list [--tree]` | libraries and state: `ok`, `modified`, `missing`, `untracked`; `dep` marks pulled-in libraries |
 | `verify` | check files against the lock, exit 1 on problems |
 | `outdated` | show newer versions (exit 1 if a source cannot be reached) |
-| `update [name[@ref]...]` | update all within their major version, or switch one to a version, tag, branch or commit |
+| `update [name[@ref]...]` | update all to their newest compatible version, or switch one to a version, tag, branch or commit |
 | `sync` | restore from the lock. One failure does not stop the others (exit 1 and a summary) |
 | `search <text\|tag:x>` | search the registry and c3c's vendor collection (a list built into c3l) |
 | `info <ns/name>` | the registry record of a library |
@@ -120,7 +120,7 @@ Dependencies listed only for one target in `project.json` count too.
 
 Rules:
 
-- If two libraries want different versions of a third, the highest minimum wins. Different major versions are an error.
+- If two libraries want different versions of a third, the highest minimum wins. Versions that are not compatible are an error: as in Cargo, a different major version, and below 1.0 a different minor (0.3 and 0.4), since a 0.y release may break the one before.
 - Everything is installed flat into `lib/`.
 - Cycles are warnings (`--strict` makes them errors).
 - If anything fails, nothing is changed.

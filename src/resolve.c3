@@ -1,7 +1,7 @@
 <*
  Following what libraries require. Each library is installed once (the lock is
  the memory); a registry library is raised to the highest minimum asked for, a
- different major version is an error; a cycle is a warning (an error with
+ version that is not compatible (another major; below 1.0 another minor) is an error; a cycle is a warning (an error with
  --strict), never a loop.
 *>
 module c3l::install;
@@ -96,10 +96,10 @@ fn void? Op.satisfy(&self, String parent, Entry e, Requirement r)
 	}
 	String want = plain_version(r.version);
 	if (!semver::valid(want) || !semver::valid(e.version)) return;
-	if (semver::major(want) != semver::major(e.version))
+	if (semver::compat(want) != semver::compat(e.version))
 	{
-		return log::fail("version conflict on %s: %s is installed, and major versions %s and %s cannot be used together; update or remove one side:\n  %s: %s asks for %s (being added)%s",
-			e.name, e.version, semver::major(e.version), semver::major(want), self.path_to(e.name), parent, want, self.holders(e.name, parent))~;
+		return log::fail("version conflict on %s: %s is installed, and %s and %s are not compatible; update or remove one side:\n  %s: %s asks for %s (being added)%s",
+			e.name, e.version, semver::compat(e.version), semver::compat(want), self.path_to(e.name), parent, want, self.holders(e.name, parent))~;
 	}
 	if (semver::compare(e.version, want) >= 0) return;
 	log::info("  %s %s -> %s (required by %s)", e.name, e.version, want, parent);
@@ -118,9 +118,9 @@ fn void? Op.check_dependents(&self, String name)
 	foreach (d : self.proj.lock.dependents(name))
 	{
 		String want = plain_version(self.asked(d, name));
-		if (!semver::valid(want) || semver::major(want) == semver::major(version)) continue;
-		return log::fail("version conflict on %s: %s is major %s, but not every library that requires it takes that; update or remove them first:%s",
-			name, version, semver::major(version), self.holders(name))~;
+		if (!semver::valid(want) || semver::compat(want) == semver::compat(version)) continue;
+		return log::fail("version conflict on %s: %s (%s) does not suit every library that requires it; update or remove them first:%s",
+			name, version, semver::compat(version), self.holders(name))~;
 	}
 }
 

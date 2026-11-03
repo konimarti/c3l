@@ -149,7 +149,7 @@ fn void? update_run(Ctx* ctx)
 				failed.push(e.name);
 				continue;
 			}
-			if (newer.major.len) log::info("%s %s is available, a new major version: 'c3l update %s@%s' moves to it", e.name, newer.major, e.name, newer.major);
+			if (newer.breaking.len) log::info("%s %s is available, not compatible with %s: 'c3l update %s@%s' moves to it", e.name, newer.breaking, semver::compat(e.version), e.name, newer.breaking);
 			if (!newer.next.len) continue;
 			shown = newer.next;
 			// a moving source (HEAD, branch, vendor) is fetched again at its locked label

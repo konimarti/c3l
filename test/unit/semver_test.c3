@@ -45,7 +45,10 @@ fn void newer_and_major()
 {
 	assert(semver::newer("1.1.0", "v1.0.9"));
 	assert(!semver::newer("main", "1.0.0"));
-	assert(semver::major("v12.3.4") == "12");
-	assert(semver::major("3") == "3");
+	String[2][] compat = {
+		{ "v12.3.4", "12.x" }, { "3", "3.x" }, { "1.0.0-rc.1", "1.x" }, { "0.3.9", "0.3.x" }, { "0.3", "0.3.x" },
+		{ "0.0.5", "0.0.5" }, { "0", "0.0.0" }, { "01.2.3", "1.x" },
+	};
+	foreach (c : compat) assert(semver::compat(c[0]) == c[1], "%s: %s", c[0], semver::compat(c[0]));
 	assert(semver::prerelease("v1.0.0-rc.1") && !semver::prerelease("1.0.0+b1") && !semver::prerelease("main"));
 }

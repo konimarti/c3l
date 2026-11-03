@@ -144,7 +144,7 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 	when asked for), or HEAD if there are none. The ref is resolved to a commit,
 	which is what the lockfile pins. *outdated* and *update* move a tag to the
 	highest release tag and follow the tip of *HEAD* and of branches; commits stay
-	put; a tag only moves within its major version. In scp-style URLs (_git@host:path_) the *@* only starts a ref after the
+	put; a tag only moves to a compatible version (see *DEPENDENCIES*). In scp-style URLs (_git@host:path_) the *@* only starts a ref after the
 	last */*. URLs with credentials (_https://user:token@host/..._) are refused: the
 	URL is written to the lockfile; see *PRIVATE REPOSITORIES*. The library is built with *git archive*, so no _.git_ is included, and without
 	line-ending conversion. A git library is identified by its commit and its files:
@@ -176,17 +176,17 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 
 *outdated*
 	Show locked libraries for which the registry (or git) has a higher version: the
-	newest of the same major version, which *update* moves to, and a newer major
-	version if there is one. A library whose source cannot be reached is named, and
+	newest compatible version, which *update* moves to, and a newer version that
+	is not compatible, if there is one (see *DEPENDENCIES*). A library whose source cannot be reached is named, and
 	the exit status is 1.
 
 *update* [_name_[@_ref_] ...]
-	Update to the newest version of the same major version, one library at a time,
-	with rollback; a newer major version is only announced. With _name_@_ref_ switch
+	Update to the newest compatible version, one library at a time, with
+	rollback; a newer version that is not compatible is only announced. With _name_@_ref_ switch
 	that library to an explicit version instead: a registry version, or for git
 	libraries a tag, branch, *HEAD* or full commit hash (for example *c3l update
-	lib@HEAD* moves a tag-locked library to HEAD). Moving to another major version
-	fails if a library that requires it asks for the old one. A name that is not in
+	lib@HEAD* moves a tag-locked library to HEAD). Moving to a version that is not
+	compatible fails if a library that requires it asks for the old one. A name that is not in
 	the lockfile is an error. With *--dry-run* only print what would change.
 
 *sync*
@@ -285,7 +285,10 @@ _c3l.lock_, _vendor.c3po.sources_, _dependencies_. Dependencies that _project.js
 single target are part of the project too (*list*, *verify*, *sync --frozen*).
 
 Versions are chosen as in Go (minimum version selection): the highest of all
-requested minimums, never newer. Different major versions are an error. A cycle,
+requested minimums, never newer. Versions that are not compatible are an
+error, with the libraries on both sides named. Compatible means, as in Cargo,
+the same major version, and below 1.0 the same minor (0.3.1 and 0.3.5, not 0.3
+and 0.4: a 0.y release may break the one before); 0.0.z only matches itself. A cycle,
 or a library requiring itself, is a warning (an error with *--strict*); each
 library is installed once. Git sources other than github.com, codeberg.org and the
 hosts of URLs given on the command line need *--allow-host* or an answer at the

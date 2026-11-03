@@ -78,12 +78,29 @@ fn bool prerelease(String v)
 // a > b, both valid versions.
 fn bool newer(String a, String b) => valid(a) && valid(b) && compare(a, b) > 0;
 
-// The major number: "v1.2.3" -> "1".
-fn String major(String v)
+<*
+ The versions `v` is compatible with, as Cargo sees it: the same major from 1.0
+ on ("1.x"), the same minor below it ("0.3.x": a 0.y release may break the one
+ before), only itself below 0.1 ("0.0.5"). Missing parts count as 0.
+*>
+fn String compat(String v)
 {
 	if (v.starts_with("v")) v = v[1..];
-	if (try i = v.index_of_char('.')) return v[:i];
-	return v;
+	String core, pre, build;
+	(void)split(v, &core, &pre, &build);
+	String[] p = core.tsplit(".");
+	String[3] n;
+	foreach (i, &x : n) *x = i < p.len ? number(p[i]) : "0";
+	if (n[0] != "0") return string::tformat("%s.x", n[0]);
+	if (n[1] != "0") return string::tformat("0.%s.x", n[1]);
+	return string::tformat("0.0.%s", n[2]);
+}
+
+// "007" -> "7", "0" -> "0"
+fn String number(String s) @private
+{
+	while (s.len > 1 && s[0] == '0') s = s[1..];
+	return s;
 }
 
 <*

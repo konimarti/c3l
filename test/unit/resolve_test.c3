@@ -62,9 +62,11 @@ fn void newer_versions() @test
 {
 	String[] v = { "1.2.0", "1.10.0", "2.0.0", "2.1.0-rc.1", "0.9.0", "junk" };
 	Newer n = install::pick("1.3.0", v);
-	assert(n.next == "1.10.0" && n.major == "2.0.0", "%s %s", n.next, n.major);
+	assert(n.next == "1.10.0" && n.breaking == "2.0.0", "%s %s", n.next, n.breaking);
 	n = install::pick("2.0.0", v);
-	assert(!n.next.len && !n.major.len, "prereleases only for a prerelease");
+	assert(!n.next.len && !n.breaking.len, "prereleases only for a prerelease");
 	n = install::pick("v2.1.0-rc.0", v);
 	assert(n.next == "2.1.0-rc.1");
+	n = install::pick("0.3.0", { "0.3.4", "0.4.0", "0.10.1", "1.0.0" });
+	assert(n.next == "0.3.4" && n.breaking == "1.0.0", "below 1.0 a minor is not compatible: %s %s", n.next, n.breaking);
 }

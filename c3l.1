@@ -196,7 +196,7 @@ a \fIref\fR the highest release tag is used (prerelease tags such as \fIv1.\&0.\
 when asked for), or HEAD if there are none.\& The ref is resolved to a commit,
 which is what the lockfile pins.\& \fBoutdated\fR and \fBupdate\fR move a tag to the
 highest release tag and follow the tip of \fBHEAD\fR and of branches; commits stay
-put; a tag only moves within its major version.\& In scp-style URLs (\fIgit@host:path\fR) the \fB@\fR only starts a ref after the
+put; a tag only moves to a compatible version (see \fBDEPENDENCIES\fR).\& In scp-style URLs (\fIgit@host:path\fR) the \fB@\fR only starts a ref after the
 last \fB/\fR.\& URLs with credentials (\fIhttps://user:token@host/.\&.\&.\&\fR) are refused: the
 URL is written to the lockfile; see \fBPRIVATE REPOSITORIES\fR.\& The library is built with \fBgit archive\fR, so no \fI.\&git\fR is included, and without
 line-ending conversion.\& A git library is identified by its commit and its files:
@@ -240,19 +240,19 @@ Check installed files against the lockfile.\& Exit status 1 on any difference.\&
 \fBoutdated\fR
 .RS 4
 Show locked libraries for which the registry (or git) has a higher version: the
-newest of the same major version, which \fBupdate\fR moves to, and a newer major
-version if there is one.\& A library whose source cannot be reached is named, and
+newest compatible version, which \fBupdate\fR moves to, and a newer version that
+is not compatible, if there is one (see \fBDEPENDENCIES\fR).\& A library whose source cannot be reached is named, and
 the exit status is 1.\&
 .P
 .RE
 \fBupdate\fR [\fIname\fR[@\fIref\fR] .\&.\&.\&]
 .RS 4
-Update to the newest version of the same major version, one library at a time,
-with rollback; a newer major version is only announced.\& With \fIname\fR@\fIref\fR switch
+Update to the newest compatible version, one library at a time, with
+rollback; a newer version that is not compatible is only announced.\& With \fIname\fR@\fIref\fR switch
 that library to an explicit version instead: a registry version, or for git
 libraries a tag, branch, \fBHEAD\fR or full commit hash (for example \fBc3l update
-lib@HEAD\fR moves a tag-locked library to HEAD).\& Moving to another major version
-fails if a library that requires it asks for the old one.\& A name that is not in
+lib@HEAD\fR moves a tag-locked library to HEAD).\& Moving to a version that is not
+compatible fails if a library that requires it asks for the old one.\& A name that is not in
 the lockfile is an error.\& With \fB--dry-run\fR only print what would change.\&
 .P
 .RE
@@ -372,7 +372,10 @@ library is added).\& For each name the first wins, in this order: \fIvendor.\&c3
 single target are part of the project too (\fBlist\fR, \fBverify\fR, \fBsync --frozen\fR).\&
 .P
 Versions are chosen as in Go (minimum version selection): the highest of all
-requested minimums, never newer.\& Different major versions are an error.\& A cycle,
+requested minimums, never newer.\& Versions that are not compatible are an
+error, with the libraries on both sides named.\& Compatible means, as in Cargo,
+the same major version, and below 1.\&0 the same minor (0.\&3.\&1 and 0.\&3.\&5, not 0.\&3
+and 0.\&4: a 0.\&y release may break the one before); 0.\&0.\&z only matches itself.\& A cycle,
 or a library requiring itself, is a warning (an error with \fB--strict\fR); each
 library is installed once.\& Git sources other than github.\&com, codeberg.\&org and the
 hosts of URLs given on the command line need \fB--allow-host\fR or an answer at the

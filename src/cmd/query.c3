@@ -151,9 +151,9 @@ fn void? outdated_run(Ctx* ctx)
 			unknown.push(e.name);
 			continue;
 		}
-		if (!newer.next.len && !newer.major.len) continue;
-		String major = newer.major.len ? string::tformat("(new major version: %s)", newer.major) : "";
-		io::printfn("%-20s %-12s -> %-12s %s", e.name, e.version, newer.next.len ? newer.next : e.version, major);
+		if (!newer.next.len && !newer.breaking.len) continue;
+		String breaking = newer.breaking.len ? string::tformat("(not compatible: %s)", newer.breaking) : "";
+		io::printfn("%-20s %-12s -> %-12s %s", e.name, e.version, newer.next.len ? newer.next : e.version, breaking);
 		n++;
 	}
 	if (unknown.len()) return log::fail("could not check %s", string::join(tmem, unknown.array_view(), " "))~;

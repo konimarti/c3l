@@ -213,10 +213,12 @@ check "verify ok" c3l verify
 c3l remove gitlib >/dev/null 2>&1
 c3l add "file://$GR" v0.1.0 >/dev/null 2>&1; eq "git add tag rc" $? 0
 has "older commit pinned" "commit:$C1" "$(grep '^gitlib' c3l.lock)"
-has "outdated sees v0.2.0" "v0.1.0 .*-> v0.2.0" "$(c3l outdated)"
+has "outdated sees v0.2.0, not compatible below 1.0" "v0.1.0 .*(not compatible: v0.2.0)" "$(c3l outdated)"
 rm lib/gitlib.c3l; c3l sync >/dev/null 2>&1; eq "git sync rc" $? 0
 check "restored" test -f lib/gitlib.c3l
 c3l update >/dev/null 2>&1; eq "git update rc" $? 0
+has "update keeps the compatible v0.1.0" "v0.1.0" "$(grep '^gitlib' c3l.lock)"
+c3l update gitlib@v0.2.0 >/dev/null 2>&1; eq "git update to a tag rc" $? 0
 has "updated to v0.2.0" "v0.2.0" "$(grep '^gitlib' c3l.lock)"
 check_not "no such tag fails" c3l add "file://$GR" v9.9.9
 # a git library is identified by its commit and its files: the lock pins the commit,
@@ -898,13 +900,13 @@ check_not "unknown command" c3l frobnicate
 cd "$WORK" && mkdir -p empty && cd empty
 check_not "outside project" c3l list
 out="$(c3l list 2>&1)"; has "plain directory: project hint" "no project.json found" "$out"
-section "update stays in its major version; a new major is asked for and checked"
+section "update stays with compatible versions (same major; below 1.0 same minor)"
 newproj maj
 c3l init >/dev/null 2>&1
 for v in 1.0.0 1.1.0 2.0.0; do publish acme/mj "$v" >/dev/null; done
 publish acme/mjuser 1.0.0 --requires=acme/mj:1.0.0 >/dev/null
 c3l add acme/mjuser >/dev/null 2>&1
-has "outdated: next and new major" "^mj .*1.0.0 .*-> 1.1.0 .*(new major version: 2.0.0)" "$(c3l outdated)"
+has "outdated: next and the incompatible one" "^mj .*1.0.0 .*-> 1.1.0 .*(not compatible: 2.0.0)" "$(c3l outdated)"
 out="$(c3l update 2>&1)"; eq "update rc" $? 0
 has "update stays in major 1" "	1.1.0	" "$(grep '^mj	' c3l.lock)"
 has "new major announced" "mj 2.0.0 is available" "$out"
@@ -913,6 +915,11 @@ out="$(c3l update mj@2.0.0 2>&1)"; eq "major conflict rc" $? 1
 has "dependent named" "mjuser -> mj: mjuser asks for 1.0.0" "$out"
 check "conflict rolled back" cmp -s c3l.lock "$WORK/lock.before"
 check "verify after rollback" c3l verify
+for v in 0.3.0 0.3.5 0.4.0; do publish acme/zz "$v" >/dev/null; done
+c3l add acme/zz@0.3.0 >/dev/null 2>&1
+has "0.x: a new minor is not compatible" "^zz .*0.3.0 .*-> 0.3.5 .*(not compatible: 0.4.0)" "$(c3l outdated)"
+c3l update zz >/dev/null 2>&1
+has "0.x: update stays in 0.3" "	0.3.5	" "$(grep '^zz	' c3l.lock)"
 
 section "arguments are checked: version argument, unknown names, unreachable sources"
 newproj args

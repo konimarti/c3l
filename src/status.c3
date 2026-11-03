@@ -48,7 +48,7 @@ faultdef UNKNOWN;
 struct Newer
 {
 	String next;   // what update moves to; empty when up to date
-	String major;  // a newer major version, taken only when asked for (name@version)
+	String breaking;  // a newer version that is not compatible (semver::compat), taken only when asked for
 }
 
 <*
@@ -91,8 +91,8 @@ fn Newer? newer(Entry* e)
 }
 
 <*
- Of `versions`, the newest one above `current` with the same major, and the
- newest with a higher major. Prereleases only when `current` is one.
+ Of `versions`, the newest one above `current` that is compatible with it
+ (semver::compat), and the newest that is not. Prereleases only when `current` is one.
 *>
 fn Newer pick(String current, String[] versions)
 {
@@ -101,7 +101,7 @@ fn Newer pick(String current, String[] versions)
 	foreach (v : versions)
 	{
 		if (!semver::newer(v, current) || (!pre && semver::prerelease(v))) continue;
-		String* best = semver::major(v) == semver::major(current) ? &n.next : &n.major;
+		String* best = semver::compat(v) == semver::compat(current) ? &n.next : &n.breaking;
 		if (!best.len || semver::compare(v, *best) > 0) *best = v;
 	}
 	return n;
