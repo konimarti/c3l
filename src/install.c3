@@ -362,7 +362,7 @@ struct Rev
 	String label;   // what the lock records as version
 }
 
-fn Rev? resolve_rev(String url, String ref, String pin) @private
+fn Rev? resolve_rev(String url, String ref, String pin)
 {
 	Ref[]? tags = NOT_FOUND~;  // fetched once, when needed
 	if (!ref.len && !pin.len)

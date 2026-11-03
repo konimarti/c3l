@@ -861,6 +861,22 @@ has "entry without commit skipped" "skipping a c3po entry" "$out"
 out="$(c3l migrate 2>&1)"; eq "migrate twice rc" $? 1
 rm -f project.lock.json c3l.lock
 out="$(c3l migrate 2>&1)"; eq "migrate without c3po lock rc" $? 1
+# c3l 0.x: .c3l.deps, libraries cloned as directories
+newproj rv5
+git clone -q --depth 1 --branch v0.1.0 "file://$GR" lib/gitlib.c3l 2>/dev/null
+printf 'gitlib.c3l lib/gitlib.c3l file://%s v0.1.0\nbroken\n' "$GR" > .c3l.deps
+out="$(c3l migrate 2>&1)"; eq "0.x migrate rc" $? 0
+has "0.x tag resolved to its commit" "^gitlib	git	file://$GR	-	v0.1.0	commit:$C1" "$(cat c3l.lock)"
+has "bad 0.x line skipped" "skipping a .c3l.deps line" "$out"
+check ".c3l.deps left alone" test -f .c3l.deps
+c3l sync >/dev/null 2>&1; eq "sync after 0.x migrate rc" $? 0
+check "clone replaced by an archive" test -f lib/gitlib.c3l
+check "verified" c3l verify
+newproj rv6
+printf 'gitlib.c3l lib/gitlib.c3l file://%s v9.9.9\n' "$GR" > .c3l.deps
+out="$(c3l migrate 2>&1)"; eq "0.x tag that is gone rc" $? 1
+has "unresolvable tag explained" "fix or remove the line for gitlib in .c3l.deps" "$out"
+check_not "no lock written" test -e c3l.lock
 
 section "hostile names, pins and URLs are refused"
 # a git library whose "provides" escapes lib/

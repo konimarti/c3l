@@ -229,8 +229,10 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 	Print a shell completion script. See *SHELL COMPLETION*.
 
 *migrate*
-	Convert a c3po _project.lock.json_ into _c3l.lock_. The same commits are locked
-	as git libraries; run *sync* afterwards to rebuild them as verified archives.
+	Convert a c3po _project.lock.json_, or the _.c3l.deps_ of c3l 0.x, into
+	_c3l.lock_. The libraries are locked as git libraries: c3po's commits, or the
+	commit each 0.x tag points to now. The old file is not touched; run *sync*
+	afterwards to rebuild the libraries as verified archives.
 
 *check* [_dir_]
 	Verify that the library in _dir_ (default: .) can be published, without

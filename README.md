@@ -55,7 +55,7 @@ c3l list --tree                        # what is installed, and why
 | `list [--tree]`, `why <name>`, `verify` | what is installed, who needs it, whether it matches the lock |
 | `search <text>`, `info <ns/name>` | look up libraries |
 | `check`, `pack`, `publish` | publish a library |
-| `migrate` | import a c3po `project.lock.json` |
+| `migrate` | import a c3po `project.lock.json` or a c3l 0.x `.c3l.deps` |
 
 `c3l help <command>` and `man c3l` have the details;
 `source <(c3l completion bash)` (or `zsh`, `fish`) completes commands.
@@ -100,7 +100,7 @@ c3l publish --description "My library" --license MIT
 - Private git repositories work with whatever gives git access: an ssh key or a
   credential helper. `man c3l` shows how in CI.
 - On Windows, linking a local library needs Developer Mode.
-- c3l follows the dependencies in c3po manifests, and `c3l migrate` imports a
-  c3po lock.
+- c3l follows the dependencies in c3po manifests. `c3l migrate` imports a
+  c3po lock or the `.c3l.deps` of c3l 0.x.
 
 MIT, see LICENSE. `make test` runs the tests.

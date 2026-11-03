@@ -309,8 +309,10 @@ Print a shell completion script.\& See \fBSHELL COMPLETION\fR.\&
 .RE
 \fBmigrate\fR
 .RS 4
-Convert a c3po \fIproject.\&lock.\&json\fR into \fIc3l.\&lock\fR.\& The same commits are locked
-as git libraries; run \fBsync\fR afterwards to rebuild them as verified archives.\&
+Convert a c3po \fIproject.\&lock.\&json\fR, or the \fI.\&c3l.\&deps\fR of c3l 0.\&x, into
+\fIc3l.\&lock\fR.\& The libraries are locked as git libraries: c3po'\&s commits, or the
+commit each 0.\&x tag points to now.\& The old file is not touched; run \fBsync\fR
+afterwards to rebuild the libraries as verified archives.\&
 .P
 .RE
 \fBcheck\fR [\fIdir\fR]

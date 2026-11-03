@@ -246,16 +246,64 @@ fn void? sync_run(Ctx* ctx)
 	log::info("in sync with %s", p.lock.file);
 }
 
+// Import what an older tool locked: c3po's project.lock.json, or c3l 0.x's .c3l.deps.
+fn void? migrate_run(Ctx* ctx)
+{
+	Project p = project::find()!;
+	bool c3po = file::exists("project.lock.json");
+	if (!c3po && !file::exists(".c3l.deps")) return log::fail("nothing to migrate: no project.lock.json (c3po) or .c3l.deps (c3l 0.x)")~;
+	if (p.lock.exists()) return log::fail("%s already exists", p.lock.file)~;
+	String dir = p.lib_dir()!;
+	if (c3po)
+	{
+		migrate_c3po(&p, dir)!;
+	}
+	else
+	{
+		migrate_deps(&p, dir)!;
+	}
+	p.lock.save()!;
+	log::info("the libraries already in %s are not verified yet; run 'c3l sync' to rebuild them as verified archives", dir);
+}
+
+<*
+ c3l 0.x kept .c3l.deps: one line per library, "name.c3l dir/name.c3l url [tag]",
+ cloned at the tag (none: HEAD). The tag is resolved to its commit now; the file is
+ left alone.
+*>
+fn void? migrate_deps(Project* p, String dir) @private
+{
+	String text = (String)file::load_temp(".c3l.deps") ?? log::fail("cannot read .c3l.deps")~!;
+	foreach (line : text.tsplit("\n"))
+	{
+		String[] f = line.trim().tsplit(" ", skip_empty: true);
+		if (!f.len) continue;
+		String name = f[0].strip_suffix(".c3l");
+		String url = f.len > 2 ? f[2] : "";
+		String tag = f.len > 3 ? f[3] : "HEAD";
+		if (!lock::valid_name(name) || !lock::valid_git_url(url) || !git::valid_ref(tag))
+		{
+			log::warn("skipping a .c3l.deps line that is not 'name.c3l path url [tag]': %s", line.trim());
+			continue;
+		}
+		Rev rev = install::resolve_rev(url, tag, "") ?? log::fail("fix or remove the line for %s in .c3l.deps", name)~!;
+		String pin = string::tformat("commit:%s", rev.commit);
+		String file = project::lib_file(dir, name);
+		Manifest m = manifest::load(file) ?? (Manifest){ .provides = name };
+		p.lock.put({
+			.name = name, .kind = GIT, .origin = url, .id = "-", .version = rev.label,
+			.pin = pin, .hash = pin, .role = DIRECT, .requires = m.require_names(),
+		});
+		log::info("imported %s (%s, commit %s) from .c3l.deps", name, rev.label, rev.commit[:12]);
+	}
+}
+
 <*
  c3po (Ecoral360/c3po) keeps project.lock.json: {"packages": [{name, repo, origin,
  ref, commit}]}. Lock the same commits as git libraries; c3po's files are not touched.
 *>
-fn void? migrate_run(Ctx* ctx)
+fn void? migrate_c3po(Project* p, String dir) @private
 {
-	Project p = project::find()!;
-	if (!file::exists("project.lock.json")) return log::fail("no project.lock.json (c3po) found")~;
-	if (p.lock.exists()) return log::fail("%s already exists", p.lock.file)~;
-	String dir = p.lib_dir()!;
 	String text = (String)file::load_temp("project.lock.json") ?? log::fail("cannot read project.lock.json")~!;
 	Object* root = json::tparse(text) ?? log::fail("project.lock.json is not valid JSON")~!;
 	Object* packages = root.is_map() ? root.get("packages") ?? null : null;
@@ -293,8 +341,6 @@ fn void? migrate_run(Ctx* ctx)
 		});
 		log::info("imported %s (%s, commit %s) from project.lock.json", name, label, commit[:12]);
 	}
-	p.lock.save()!;
-	log::info("libraries restored by c3po have no commit stamp; run 'c3l sync' to rebuild them as verified archives");
 }
 
 <*
