@@ -26,12 +26,16 @@ sure it is the *same bytes* everywhere, and update on purpose.
 
 ## Install
 
+Binaries for Linux (x64) and macOS (Apple silicon) are on the
+[releases page](https://github.com/konimarti/c3l/releases); they need libcurl.
+From source:
+
 ```sh
 git clone https://github.com/konimarti/c3l && cd c3l
 make PREFIX=~/.local install        # or copy build/c3l into your PATH
 ```
 
-c3l is written in C3. Building needs `c3c` (0.8.6+) and libcurl; its own
+c3l is written in C3. Building needs `c3c` (0.8.5+) and libcurl; its own
 dependencies are vendored in `vendor/`. At run time it calls `c3c` (to read
 the project) and `git` (git libraries and publishing).
 

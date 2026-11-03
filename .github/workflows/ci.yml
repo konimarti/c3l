@@ -1,0 +1,77 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+
+env:
+  C3C_RELEASE: v0.8.5_1
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-22.04, target: linux-x64, c3c: c3-linux.tar.gz }
+          - { os: macos-14, target: macos-aarch64, c3c: c3-macos.zip }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install c3c
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$C3C_RELEASE" -R c3lang/c3c -p '${{ matrix.c3c }}' -D "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP"
+          case '${{ matrix.c3c }}' in *.zip) unzip -q '${{ matrix.c3c }}' ;; *) tar xzf '${{ matrix.c3c }}' ;; esac
+          echo "$RUNNER_TEMP/c3" >> "$GITHUB_PATH"
+
+      - name: Install libcurl
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+
+      - run: make
+
+      - name: Test
+        if: runner.os == 'Linux'
+        run: make test
+
+      # test/run.sh needs GNU tools; on macOS run the unit tests and a smoke test
+      - name: Test
+        if: runner.os == 'macOS'
+        run: c3c test && build/c3l verify && build/c3l version
+
+      - name: Tag matches the version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: test "c3l ${GITHUB_REF_NAME#v}" = "$(build/c3l version)"
+
+      - name: Package
+        run: |
+          mkdir c3l-${{ matrix.target }}
+          cp build/c3l c3l.1 README.md LICENSE c3l-${{ matrix.target }}/
+          tar czf c3l-${{ matrix.target }}.tar.gz c3l-${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c3l-${{ matrix.target }}
+          path: c3l-${{ matrix.target }}.tar.gz
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum c3l-*.tar.gz > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --generate-notes c3l-*.tar.gz SHA256SUMS
