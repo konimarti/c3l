@@ -53,10 +53,11 @@ fn String? temp_dir(String base = "", String prefix = "c3l")
 
 <*
  A directory symbolic link. Windows creates them only in Developer Mode or for
- an administrator.
+ an administrator, and resolves a target only with '\' separators.
 *>
 fn void? link(String target, String link)
 {
+	target = target.treplace("/", "\\");
 	if (createSymbolicLinkW(link.to_temp_wstring()!, target.to_temp_wstring()!, SYMBOLIC_LINK_DIRECTORY | SYMBOLIC_LINK_UNPRIVILEGED)) return;
 	return log::fail("cannot link %s; Windows creates symbolic links only in Developer Mode (Settings, System, For developers) or for an administrator", link)~;
 }
