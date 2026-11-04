@@ -66,3 +66,15 @@ fn void unknown_c3po_version_is_not_followed() @test
 	m = manifest::parse(`{ "provides": "x", "vendor": { "c3po": { "c3po-version": 1, "sources": [ { "name": "a", "source": "https://h/a" } ] } } }`)!!;
 	assert(m.requires.len == 1 && !m.notes.len);
 }
+
+fn void c3po_sources_at_the_locked_commit() @test
+{
+	String text = `{ "provides": "x", "vendor": { "c3po": { "sources": [ { "name": "a", "source": "https://h/a" }, { "name": "b", "source": "https://h/b" } ] } } }`;
+	String sha = "0123456789abcdef0123456789abcdef01234567";
+	String c3po_lock = string::tformat(`{ "packages": [ { "name": "a", "commit": "%s" }, { "name": "b", "commit": "short" } ] }`, sha);
+	Manifest m = manifest::parse(text, "", c3po_lock)!!;
+	assert(m.requires.len == 2);
+	assert(m.requires[0].version == sha, "a: %s", m.requires[0].version);
+	assert(m.requires[1].version == "", "b: not a commit, so any version");
+	assert(manifest::parse(text)!!.requires[0].version == "", "without project.lock.json: any version");
+}

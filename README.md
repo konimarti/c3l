@@ -92,7 +92,8 @@ c3l publish --description "My library" --license MIT
 - `check` makes sure the library compiles, the working tree is committed and
   the version is new. Published versions cannot change.
 - The package is built from the files git tracks, the same bytes every time,
-  with `c3l.lock`, so its dependencies come along.
+  with `c3l.lock`, so its dependencies come along. Libraries in `lib/` are not
+  packed; `check` stops if the library needs one that `c3l.lock` doesn't list.
 - `c3l pack` writes the package without uploading it.
 
 ## Submodules

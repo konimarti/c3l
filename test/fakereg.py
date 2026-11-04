@@ -2,7 +2,7 @@
 """Build a static c3c-fetch registry tree (see the c3c fetch protocol) for tests.
 
   fakereg.py ROOT publish ns/name VERSION [--badsum] [--no-checksum] [--not-latest]
-                 [--requires=ns/x:1.0.0,ns/y] [--reqreg=URL] [--deps=a,b] [--c3po=name|url,...]
+                 [--requires=ns/x:1.0.0,ns/y] [--reqreg=URL] [--deps=a,b] [--c3po=name|url,...] [--c3polock=name|commit,...]
 
 Writes download/ns/name@VERSION (a zip with manifest.json), info/ns/name and
 index.json.
@@ -13,6 +13,7 @@ index.json.
 --reqreg       registry URL written on every --requires entry
 --deps         c3c "dependencies" names (no source)
 --c3po         vendor.c3po.sources entries (name|git url)
+--c3polock     a c3po project.lock.json in the package (name|commit,...)
 --from         publish this .c3l file instead of generating one
 """
 import hashlib, json, os, shutil, sys, zipfile
@@ -41,6 +42,9 @@ def write_package(path, name, version, opts):
             srcs = [dict(zip(("name", "source"), i.split("|", 1))) for i in opts["c3po"].split(",")]
             man.setdefault("vendor", {}).setdefault("c3po", {}).update({"c3po-version": 1, "sources": srcs})
         z.writestr("manifest.json", json.dumps(man))
+        if "c3polock" in opts:
+            pkgs = [dict(zip(("name", "commit"), i.split("|", 1))) for i in opts["c3polock"].split(",")]
+            z.writestr("project.lock.json", json.dumps({"version": 1, "packages": pkgs}))
         z.writestr("src/lib.c3", f"module {name};\nfn int answer() => 42;\n")
 
 
