@@ -323,7 +323,9 @@ new or an existing \fIc3l.\&lock\fR (see \fBGIT SUBMODULES\fR).\&
 .RS 4
 Verify that the library in \fIdir\fR (default: .\&) can be published, without
 uploading: \fImanifest.\&json\fR with \fIprovides\fR, a valid version, a clean working
-tree, the library compiles, and the version is not yet on the registry.\&
+tree, the library compiles with only the libraries its \fIc3l.\&lock\fR brings, and
+the version is not yet on the registry.\& A library in \fIlib/\fR that the manifest
+depends on but \fIc3l.\&lock\fR does not list is an error (see \fBPUBLISHING\fR).\&
 Exit status 1 on any problem.\&
 .P
 .RE
@@ -331,7 +333,7 @@ Exit status 1 on any problem.\&
 .RS 4
 Write \fIname-version.\&c3l\fR (or \fB--output\fR): a zip with \fImanifest.\&json\fR at its
 root and the repository files (git: tracked and untracked-not-ignored; not
-\fI.\&git\fR, \fIlib/\fR, \fIobj/\fR or \fIbuild/\fR), \fIc3l.\&lock\fR included.\& The archive is
+\fI.\&git\fR, the libraries in \fIlib/\fR, \fIobj/\fR or \fIbuild/\fR), \fIc3l.\&lock\fR included.\& The archive is
 deterministic, the same tree gives the same bytes.\&
 .P
 .RE
@@ -358,6 +360,15 @@ something else, c3l warns and the archive gets the chosen version; the files in 
 repository are not changed.\& A version is \fIMAJOR.\&MINOR.\&PATCH\fR or
 \fIMAJOR.\&MINOR.\&PATCH-prerelease\fR and can never be changed once published.\&
 .P
+A package carries no other library: c3c finds a library only next to the others in
+the project'\&s library directory, never inside one.\& Dependencies travel in
+\fIc3l.\&lock\fR instead, and installers fetch them; a library in \fIlib/\fR that is not in
+\fIc3l.\&lock\fR stays behind, so \fBcheck\fR refuses one the manifest depends on.\& Either
+publish it (registry or git) and \fBc3l add\fR it, or vendor its sources: put them in
+the library (e.\&g.\& \fIvendor/name/\fR) and list them in \fI"sources"\fR, so they are
+compiled as part of it (rename the module, e.\&g.\& \fImylib::name\fR, to avoid a clash
+with the real library).\&
+.P
 The C3 version of the library is sent with each upload and checked on \fBadd\fR and
 \fBinfo\fR: a different major.\&minor or a missing platform gives a warning (an error
 with \fB--strict\fR).\&
@@ -382,7 +393,8 @@ tag, branch or commit for git libraries (\fBupdate\fR moves a tag like any other
 Apps and libraries alike, \fIc3l.\&lock\fR is the only file c3l writes dependencies to.\&
 .P
 c3l also reads, but never writes, \fIvendor.\&c3l.\&requires\fR in a library'\&s \fImanifest.\&json\fR
-(packages published by c3l 1.\&1), c3po'\&s \fIvendor.\&c3po.\&sources\fR (\fIc3po-version\fR 1) and
+(packages published by c3l 1.\&1), c3po'\&s \fIvendor.\&c3po.\&sources\fR (\fIc3po-version\fR 1; at
+the commit the library'\&s \fIproject.\&lock.\&json\fR pins, if it has one) and
 c3c'\&s plain \fIdependencies\fR names (no source: a warning, and \fBverify\fR fails until the
 library is added).\& For each name the first wins, in this order: \fIvendor.\&c3l.\&requires\fR,
 \fIc3l.\&lock\fR, \fIvendor.\&c3po.\&sources\fR, \fIdependencies\fR.\& Dependencies that \fIproject.\&json\fR lists for a

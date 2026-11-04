@@ -380,6 +380,12 @@ out="$(c3l --allow-host file add acme/viapo 2>&1)"; eq "trusted host rc" $? 0
 has "c3po source followed" "gitlib installed for viapo" "$out"
 eq "gitlib is a dep, git kind" "$(awk -F'\t' '$1=="gitlib"{print $2 "/" $8}' c3l.lock)" "git/dep"
 check "c3po verify" c3l verify
+has "without project.lock.json: the newest tag" "^gitlib	git	.*	v0.2.0	commit:$C2" "$(cat c3l.lock)"
+# with c3po's project.lock.json in the package: the commit it pins
+publish acme/pinpo 1.0.0 --c3po="gitlib|file://$GR" --c3polock="gitlib|$C1" >/dev/null
+newproj pd8b; c3l init >/dev/null 2>&1
+c3l --allow-host file add acme/pinpo >/dev/null 2>&1; eq "pinned c3po rc" $? 0
+has "at the commit c3po locked" "^gitlib	git	.*	commit:${C1:0:12}	commit:$C1" "$(cat c3l.lock)"
 
 
 section "review fixes: trust list"
@@ -999,6 +1005,30 @@ rm -f lib/alpha.c3l; out="$out$(ng sync 2>&1 && ng verify 2>&1 && ng list 2>&1)"
 cd "$WORK/ng1" && "$C3C" init-lib nglib >/dev/null 2>&1 && cd nglib.c3l || exit 1
 out="$out$(ng check --offline --no-build --version 1.0.0 2>&1 && ng pack --version 1.0.0 2>&1)"; eq "check and pack without git rc" $? 0
 if grep -q "'git' is required" <<< "$out"; then fail "git asked for without a repository: $out"; else ok; fi
+
+section "check: a library in lib/ that c3l.lock does not list does not travel"
+VL="$WORK/vend"; rm -rf "$VL"; mkdir -p "$VL/foo/src" && cd "$VL" || exit 1
+echo '{ "provides": "foo", "sources": ["src/**"], "targets": { "linux-x64": {}, "linux-aarch64": {}, "macos-aarch64": {}, "macos-x64": {}, "windows-x64": {} } }' > foo/manifest.json
+printf 'module foo;\nfn int one() => 1;\n' > foo/src/foo.c3
+(cd foo && python3 -c 'import zipfile;z=zipfile.ZipFile("../foo.c3l","w");[z.write(f) for f in ("manifest.json","src/foo.c3")]')
+"$C3C" init-lib vl >/dev/null 2>&1 && cd vl.c3l || exit 1
+mkdir -p src lib && cp ../foo.c3l lib/ && printf 'module vl;\nimport foo;\nfn int two() => foo::one() + 1;\n' > src/vl.c3
+sed -i 's|  // "sources" : \[ "src/\*\*" \],|  "sources" : [ "src/**" ],|' manifest.json
+out="$(c3l check --offline --version 1.0.0 2>&1)"; eq "used but not declared rc" $? 1
+has "the compile check does not see it" "No module named 'foo'" "$out"
+python3 - <<'PY'
+import re
+s = open("manifest.json").read()
+s = re.sub(r'(//[^\n]*\n\s*)?("dependencies"\s*:\s*)\[\s*\]', r'\2["foo"]', s, count=1)
+open("manifest.json", "w").write(s)
+PY
+out="$(c3l check --offline --version 1.0.0 2>&1)"; eq "declared but not locked rc" $? 1
+has "both ways out" "lib/foo.c3l is not in c3l.lock, so consumers cannot get it: lock it with 'c3l add <source>'" "$out"
+# vendored: its sources are part of the library
+mkdir -p vendor/foo && cp ../foo/src/foo.c3 vendor/foo/ && rm lib/foo.c3l
+sed -i 's|"dependencies" *: *\["foo"\]|"dependencies" : []|; s|"sources" : \[ "src/\*\*" \]|"sources" : [ "src/**", "vendor/**" ]|' manifest.json
+out="$(c3l check --offline --version 1.0.0 2>&1)"; eq "vendored sources rc" $? 0
+c3l pack --version 1.0.0 >/dev/null 2>&1; has "vendored sources packed" "vendor/foo/foo.c3" "$(unzip -l vl-1.0.0.c3l)"
 
 section "git submodules: adopted by migrate, checked out by sync, moved by update, never overwritten"
 # git 2.38.1+ refuses file:// submodules unless allowed; the user's git config decides that, the test allows it

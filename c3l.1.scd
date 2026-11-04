@@ -241,13 +241,15 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 *check* [_dir_]
 	Verify that the library in _dir_ (default: .) can be published, without
 	uploading: _manifest.json_ with _provides_, a valid version, a clean working
-	tree, the library compiles, and the version is not yet on the registry.
+	tree, the library compiles with only the libraries its _c3l.lock_ brings, and
+	the version is not yet on the registry. A library in _lib/_ that the manifest
+	depends on but _c3l.lock_ does not list is an error (see *PUBLISHING*).
 	Exit status 1 on any problem.
 
 *pack* [_dir_]
 	Write _name-version.c3l_ (or *--output*): a zip with _manifest.json_ at its
 	root and the repository files (git: tracked and untracked-not-ignored; not
-	_.git_, _lib/_, _obj/_ or _build/_), _c3l.lock_ included. The archive is
+	_.git_, the libraries in _lib/_, _obj/_ or _build/_), _c3l.lock_ included. The archive is
 	deterministic, the same tree gives the same bytes.
 
 *publish* [_dir_]
@@ -270,6 +272,15 @@ _project.json_ (_manifest.json_ wins). If the manifest or the project file says
 something else, c3l warns and the archive gets the chosen version; the files in the
 repository are not changed. A version is _MAJOR.MINOR.PATCH_ or
 _MAJOR.MINOR.PATCH-prerelease_ and can never be changed once published.
+
+A package carries no other library: c3c finds a library only next to the others in
+the project's library directory, never inside one. Dependencies travel in
+_c3l.lock_ instead, and installers fetch them; a library in _lib/_ that is not in
+_c3l.lock_ stays behind, so *check* refuses one the manifest depends on. Either
+publish it (registry or git) and *c3l add* it, or vendor its sources: put them in
+the library (e.g. _vendor/name/_) and list them in _"sources"_, so they are
+compiled as part of it (rename the module, e.g. _mylib::name_, to avoid a clash
+with the real library).
 
 The C3 version of the library is sent with each upload and checked on *add* and
 *info*: a different major.minor or a missing platform gives a warning (an error
@@ -295,7 +306,8 @@ tag, branch or commit for git libraries (*update* moves a tag like any other ver
 Apps and libraries alike, _c3l.lock_ is the only file c3l writes dependencies to.
 
 c3l also reads, but never writes, _vendor.c3l.requires_ in a library's _manifest.json_
-(packages published by c3l 1.1), c3po's _vendor.c3po.sources_ (_c3po-version_ 1) and
+(packages published by c3l 1.1), c3po's _vendor.c3po.sources_ (_c3po-version_ 1; at
+the commit the library's _project.lock.json_ pins, if it has one) and
 c3c's plain _dependencies_ names (no source: a warning, and *verify* fails until the
 library is added). For each name the first wins, in this order: _vendor.c3l.requires_,
 _c3l.lock_, _vendor.c3po.sources_, _dependencies_. Dependencies that _project.json_ lists for a

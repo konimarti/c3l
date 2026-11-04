@@ -168,6 +168,13 @@ fn void Package.check_dependencies(&self, Manifest m)
 		}
 		if (r.source.len) continue;
 		if (try e = l.get(r.name) && e.role == Role.DIRECT && e.kind != Kind.PATH) continue;
+		String f = string::tformat("lib/%s.c3l", r.name);
+		if (!l.has(r.name) && sys::exists(string::tformat("%s/%s", self.dir, f)))
+		{
+			// the package leaves lib/ out, and c3c finds a library only next to the others, never inside one
+			self.error("the manifest depends on '%s', but %s is not in c3l.lock, so consumers cannot get it: lock it with 'c3l add <source>' (publish it to a registry or a git repository first), or put its sources in this library (e.g. vendor/%s/, listed in \"sources\")", r.name, f, r.name);
+			continue;
+		}
 		log::warn("'%s' is in the manifest's dependencies but nothing says where to get it; run 'c3l add' for it in this library so consumers can install it automatically", r.name);
 	}
 	foreach (&sm : git::submodules(string::tformat("%s/lib", self.dir)))
@@ -204,7 +211,11 @@ fn void Package.check_clean(&self, bool allow_dirty)
 		lock ? "; c3l.lock is part of the package, commit it" : "");
 }
 
-// Compile the staged package as a library, with the library's own dependencies.
+<*
+ Compile the staged package as a library, with what consumers get besides it:
+ the libraries in its c3l.lock. Anything else in lib/ does not travel, so the
+ library must not need it.
+*>
 fn void Package.check_build(&self)
 {
 	String? tmp = sys::temp_dir();
@@ -228,9 +239,10 @@ fn void Package.check_build(&self)
 	if (file::is_dir(lib))
 	{
 		argv.push_all({ "--libdir", (String)lib.to_absolute_path(tmem) ?? lib });
-		if (try libs = path::ls(tmem, (Path)lib))
+		Lock l = lock::load(string::tformat("%s/c3l.lock", self.dir)) ?? (Lock){};  // check_dependencies reported a broken one
+		foreach (e : l.entries)
 		{
-			foreach (f : libs) if (((String)f).ends_with(".c3l")) argv.push_all({ "--lib", ((String)f).strip_suffix(".c3l") });
+			if (sys::exists(string::tformat("%s/%s.c3l", lib, e.name))) argv.push_all({ "--lib", e.name });
 		}
 	}
 	argv.push_all({ "compile-only", "--lib", self.name, "--no-obj" });

@@ -5,7 +5,8 @@
  What a library requires, per name, in this order of precedence:
    vendor.c3l.requires   [{name, source, version, registry}]  read only: packages published by c3l 1.1
    c3l.lock              its direct entries                   how c3l libraries declare them
-   vendor.c3po.sources   [{name, source}]                     read only: c3po compatibility
+   vendor.c3po.sources   [{name, source}]                     read only: c3po compatibility, at the
+                                                              commit c3po's project.lock.json pins, if any
    dependencies          names only (top level and per target), no source
 *>
 module c3l::manifest;
@@ -33,18 +34,19 @@ struct Manifest
 
 faultdef NO_MANIFEST, BAD_MANIFEST;
 
-// From a library directory, or a .c3l file (zip archive); with its c3l.lock, if any.
+// From a library directory, or a .c3l file (zip archive); with its c3l.lock and c3po's project.lock.json, if any.
 fn Manifest? load(String path)
 {
 	if (file::is_dir(path))
 	{
 		String lock_text = (String)file::load_temp(string::tformat("%s/c3l.lock", path)) ?? "";
-		return parse((String)file::load_temp(string::tformat("%s/manifest.json", path)) ?? NO_MANIFEST~!, lock_text);
+		String c3po_lock = (String)file::load_temp(string::tformat("%s/project.lock.json", path)) ?? "";
+		return parse((String)file::load_temp(string::tformat("%s/manifest.json", path)) ?? NO_MANIFEST~!, lock_text, c3po_lock);
 	}
 	ZipArchive archive = zip::open(tmem, path) ?? NO_MANIFEST~!;
 	defer (void)archive.close();
 	char[] data = archive.read_file_all(tmem, "manifest.json") ?? NO_MANIFEST~!;
-	return parse((String)data, (String)archive.read_file_all(tmem, "c3l.lock") ?? "");
+	return parse((String)data, (String)archive.read_file_all(tmem, "c3l.lock") ?? "", (String)archive.read_file_all(tmem, "project.lock.json") ?? "");
 }
 
 fn Manifest? load_file(String file)
@@ -53,7 +55,7 @@ fn Manifest? load_file(String file)
 	return parse((String)data);
 }
 
-fn Manifest? parse(String text, String lock_text = "")
+fn Manifest? parse(String text, String lock_text = "", String c3po_lock = "")
 {
 	Object* root = json::tparse(text) ?? BAD_MANIFEST~!;
 	if (!root.is_map()) return BAD_MANIFEST~;
@@ -108,7 +110,8 @@ fn Manifest? parse(String text, String lock_text = "")
 		}
 		foreach (r : sources)
 		{
-			add(&m, &reqs, { .name = r.get_string("name") ?? "", .source = r.get_string("source") ?? "" });
+			String name = r.get_string("name") ?? "";
+			add(&m, &reqs, { .name = name, .source = r.get_string("source") ?? "", .version = c3po_commit(c3po_lock, name) });
 		}
 	}
 	foreach (d : m.dependencies) add(&m, &reqs, { .name = d });
@@ -122,6 +125,22 @@ fn Manifest? parse(String text, String lock_text = "")
 	m.requires = reqs.array_view();
 	m.notes = notes.array_view();
 	return m;
+}
+
+// The commit c3po's project.lock.json ({"packages": [{name, commit}]}) pins `name` to; empty if none.
+fn String c3po_commit(String text, String name) @private
+{
+	if (!text.len) return "";
+	Object* root = json::tparse(text) ?? null;
+	Object* packages = root && root.is_map() ? root.get("packages") ?? null : null;
+	for (sz i = 0; packages && packages.is_array() && i < packages.get_len(); i++)
+	{
+		Object* p = packages.get_at(i);
+		if (!p.is_map() || (p.get_string("name") ?? "") != name) continue;
+		String commit = p.get_string("commit") ?? "";
+		return lock::is_commit(commit) ? commit : "";
+	}
+	return "";
 }
 
 <*
