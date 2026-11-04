@@ -5,7 +5,7 @@
 .nh
 .ad l
 .\" Begin generated content:
-.TH "C3L" "1" "2026-11-03"
+.TH "C3L" "1" "2026-11-04"
 .P
 .SH NAME
 .P
@@ -239,7 +239,8 @@ Show which libraries require \fIname\fR, and why they are installed.\&
 .RS 4
 Show every locked library with its state: \fIok\fR, \fImodified\fR, \fImissing\fR,
 \fIunpacked\fR, and \fIuntracked\fR for libraries in \fIproject.\&json\fR not in the lockfile.\&
-\fIdep\fR marks a library pulled in by another one.\& With \fB--tree\fR print the
+\fIdep\fR marks a library pulled in by another one, \fIsubmodule\fR one stored as a git
+submodule (with its own states, see \fBGIT SUBMODULES\fR).\& With \fB--tree\fR print the
 dependency graph.\&
 .P
 .RE
@@ -312,7 +313,9 @@ Print a shell completion script.\& See \fBSHELL COMPLETION\fR.\&
 Convert a c3po \fIproject.\&lock.\&json\fR, or the \fI.\&c3l.\&deps\fR of c3l 0.\&x, into
 \fIc3l.\&lock\fR.\& The libraries are locked as git libraries: c3po'\&s commits, or the
 commit each 0.\&x tag points to now.\& The old file is not touched; run \fBsync\fR
-afterwards to rebuild the libraries as verified archives.\&
+afterwards to rebuild the libraries as verified archives.\& Also adopts git
+submodules in the library directory that the lockfile does not list yet, into a
+new or an existing \fIc3l.\&lock\fR (see \fBGIT SUBMODULES\fR).\&
 .P
 .RE
 \fBcheck\fR [\fIdir\fR]
@@ -421,6 +424,32 @@ built-in \fIGITHUB_TOKEN\fR reads only the repository being built):
 git config --global url\&."https://x-access-token:${TOKEN}@github\&.com/"\&.insteadOf https://github\&.com/
 .fi
 .RE
+.P
+.SH GIT SUBMODULES
+.P
+A git library can also be kept as a git submodule at \fIlib/name.\&c3l\fR, for
+example so that contributors without c3l get it with
+\fBgit clone --recurse-submodules\fR.\& c3l reads submodules from git (\fI.\&gitmodules\fR and the
+commits the repository records) and treats them as git libraries that git
+stores: \fIc3l.\&lock\fR describes them like any git library (URL, version, commit,
+content hash), and anyone who installs the library gets them from that lockfile,
+as archives.\& Projects without a \fI.\&gitmodules\fR file are not affected.\&
+.P
+\fBmigrate\fR adopts submodules the lockfile does not list: the URL from
+\fI.\&gitmodules\fR, the commit the repository records, a tag at that commit as the
+version (else the branch \fI.\&gitmodules\fR follows, else the commit), and what they
+require is installed.\& \fBsync\fR checks a submodule out
+(\fBgit submodule update --init\fR) or back to the recorded commit.\& \fBupdate\fR fetches the new commit into
+the submodule, checks it out and stages it; c3l never commits.\& \fBverify\fR,
+\fBlist\fR and \fBcheck\fR report a submodule that is \fInot-checked-out\fR, \fImoved\fR (another
+commit checked out), \fIedited\fR (local changes), \fIlock-differs\fR (the repository
+records another commit than \fIc3l.\&lock\fR; the message shows the \fBupdate\fR that
+settles it either way) or \fIother-source\fR.\&
+.P
+c3l never discards local changes in a submodule and never replaces one with an
+archive or a link: \fBadd\fR and \fBprune\fR leave it alone, and \fBremove\fR asks for
+\fBgit rm\fR first.\& Creating submodules, or converting between a submodule and an
+archive, is left to git.\&
 .P
 .SH LOCKFILE
 .P

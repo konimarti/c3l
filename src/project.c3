@@ -6,7 +6,7 @@
 *>
 module c3l::project;
 
-import std::io, std::os, std::collections::list, c3l::log, c3l::sys, c3l::manifest, c3l::lock, c3l::jsonedit;
+import std::io, std::os, std::collections::list, c3l::log, c3l::sys, c3l::manifest, c3l::lock, c3l::jsonedit, c3l::git;
 
 struct Project
 {
@@ -15,6 +15,8 @@ struct Project
 	Lock lock;
 	String[] dep_names;  // deps(), read once, again after the file changed
 	bool deps_read;
+	Submodule[] subs;    // submodule(), read once
+	bool subs_read;
 }
 
 // The project in the current directory and its lockfile ($C3L_LOCK, default c3l.lock).
@@ -67,6 +69,29 @@ fn String[]? Project.deps(&self)
 	}
 	self.deps_read = true;
 	return self.dep_names;
+}
+
+// The libraries stored as git submodules in the library directory; see git::submodules.
+fn Submodule[] Project.submodules(&self)
+{
+	if (!self.subs_read && !git::has_submodules("."))
+	{
+		self.subs_read = true;  // most projects: no git calls, no c3c call
+	}
+	if (!self.subs_read)
+	{
+		String[] paths = self.libmode ? { "lib" } : view_list("search paths") ?? {};
+		if (paths.len) self.subs = git::submodules(".", paths[0]);
+		self.subs_read = true;
+	}
+	return self.subs;
+}
+
+// The git submodule that stores library `name` (at lib/<name>.c3l), if it is one.
+fn Submodule*? Project.submodule(&self, String name)
+{
+	foreach (&s : self.submodules()) if (s.name == name) return s;
+	return NOT_FOUND~;
 }
 
 // The project file changed on disk: read the dependencies again when asked.

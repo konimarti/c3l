@@ -12,6 +12,12 @@ enum Status : char (String name)
 	MODIFIED { "modified" },
 	MISSING { "missing" },
 	UNPACKED { "unpacked" },  // a directory where c3l keeps a .c3l file (c3c's default)
+	// a library stored as a git submodule
+	NOT_CHECKED_OUT { "not-checked-out" },  // c3l sync checks it out
+	MOVED { "moved" },                      // checked out at another commit than the repository records
+	EDITED { "edited" },                    // local changes
+	DRIFT { "lock-differs" },               // the repository records another commit than c3l.lock
+	OTHER_SOURCE { "other-source" },        // c3l.lock gets the library from elsewhere
 }
 
 <*
@@ -19,8 +25,9 @@ enum Status : char (String name)
  archive of the locked commit (`git archive` stores the commit in the zip
  comment) with the locked contents. A path library is a link to its directory.
 *>
-fn Status status(Entry* e, String dir)
+fn Status status(Entry* e, String dir, Submodule* sub = null)
 {
+	if (sub) return submodule_status(e, sub);
 	String f = project::lib_file(dir, e.name);
 	bool link = path::is_link((Path)f);
 	if (e.kind == PATH)
@@ -42,6 +49,47 @@ fn Status status(Entry* e, String dir)
 	}
 	return (sys::sha256_file(f) ?? "") == e.hash ? OK : MODIFIED;
 }
+
+<*
+ A library stored as a git submodule: it must come from the same repository as
+ c3l.lock says, the repository must record the locked commit, and that commit
+ must be checked out without local changes.
+*>
+fn Status submodule_status(Entry* e, Submodule* s)
+{
+	if (e.kind != GIT || !s.url.len || git::canonical(s.url) != git::canonical(e.origin)) return OTHER_SOURCE;
+	if (string::tformat("commit:%s", s.commit) != e.pin) return DRIFT;
+	if (!s.checked_out()) return NOT_CHECKED_OUT;
+	if (s.head() != s.commit) return MOVED;
+	if (s.edited()) return EDITED;
+	return OK;
+}
+
+// What a submodule status means and what to do about it, for messages.
+fn String explain(Status st, Entry* e, Submodule* s)
+{
+	switch (st)
+	{
+		case NOT_CHECKED_OUT:
+			return string::tformat("the submodule %s is not checked out ('c3l sync' checks it out)", s.path);
+		case MOVED:
+			return string::tformat("the submodule %s is checked out at %s, the repository records %s ('c3l sync' or 'git submodule update' goes back)", s.path, abbrev(s.head()), abbrev(s.commit));
+		case EDITED:
+			return string::tformat("the submodule %s has local changes (c3l never discards them; commit or discard them with git)", s.path);
+		case DRIFT:
+			String locked = e.pin.strip_prefix("commit:");
+			String back = e.version.starts_with("commit:") ? locked : e.version;
+			return string::tformat("the submodule %s is at %s, but c3l.lock has %s: 'c3l update %s@%s' locks the submodule's commit, 'c3l update %s@%s' moves the submodule to the locked one",
+				s.path, abbrev(s.commit), abbrev(locked), e.name, s.commit, e.name, back);
+		case OTHER_SOURCE:
+			if (!s.url.len) return string::tformat("%s is a git submodule without a URL in .gitmodules", s.path);
+			return string::tformat("%s is a git submodule of %s, but c3l.lock gets %s from %s; remove one of them", s.path, s.url, e.name, e.source());
+		default:
+			return st.name;
+	}
+}
+
+fn String abbrev(String commit) @private => commit[:commit.len < 12 ? commit.len : 12];
 
 faultdef UNKNOWN;
 

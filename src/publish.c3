@@ -170,6 +170,17 @@ fn void Package.check_dependencies(&self, Manifest m)
 		if (try e = l.get(r.name) && e.role == Role.DIRECT && e.kind != Kind.PATH) continue;
 		log::warn("'%s' is in the manifest's dependencies but nothing says where to get it; run 'c3l add' for it in this library so consumers can install it automatically", r.name);
 	}
+	foreach (&sm : git::submodules(self.dir, "lib"))
+	{
+		Entry*? e = l.get(sm.name);
+		if (catch e)
+		{
+			log::warn("%s is a git submodule that c3l.lock does not list; consumers do not get submodules ('c3l migrate' locks it)", sm.path);
+			continue;
+		}
+		Status st = install::submodule_status(e, sm);
+		if (st != OK) self.error("%s", install::explain(st, e, sm));
+	}
 	foreach (e : l.entries)
 	{
 		if (e.role != DIRECT || e.kind != PATH) continue;

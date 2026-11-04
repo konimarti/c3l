@@ -179,7 +179,8 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 *list* [*--tree*]
 	Show every locked library with its state: _ok_, _modified_, _missing_,
 	_unpacked_, and _untracked_ for libraries in _project.json_ not in the lockfile.
-	_dep_ marks a library pulled in by another one. With *--tree* print the
+	_dep_ marks a library pulled in by another one, _submodule_ one stored as a git
+	submodule (with its own states, see *GIT SUBMODULES*). With *--tree* print the
 	dependency graph.
 
 *verify*
@@ -232,7 +233,9 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 	Convert a c3po _project.lock.json_, or the _.c3l.deps_ of c3l 0.x, into
 	_c3l.lock_. The libraries are locked as git libraries: c3po's commits, or the
 	commit each 0.x tag points to now. The old file is not touched; run *sync*
-	afterwards to rebuild the libraries as verified archives.
+	afterwards to rebuild the libraries as verified archives. Also adopts git
+	submodules in the library directory that the lockfile does not list yet, into a
+	new or an existing _c3l.lock_ (see *GIT SUBMODULES*).
 
 *check* [_dir_]
 	Verify that the library in _dir_ (default: .) can be published, without
@@ -330,6 +333,32 @@ built-in _GITHUB_TOKEN_ reads only the repository being built):
 ```
 git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf https://github.com/
 ```
+
+# GIT SUBMODULES
+
+A git library can also be kept as a git submodule at _lib/name.c3l_, for
+example so that contributors without c3l get it with
+*git clone --recurse-submodules*. c3l reads submodules from git (_.gitmodules_ and the
+commits the repository records) and treats them as git libraries that git
+stores: _c3l.lock_ describes them like any git library (URL, version, commit,
+content hash), and anyone who installs the library gets them from that lockfile,
+as archives. Projects without a _.gitmodules_ file are not affected.
+
+*migrate* adopts submodules the lockfile does not list: the URL from
+_.gitmodules_, the commit the repository records, a tag at that commit as the
+version (else the branch _.gitmodules_ follows, else the commit), and what they
+require is installed. *sync* checks a submodule out
+(*git submodule update --init*) or back to the recorded commit. *update* fetches the new commit into
+the submodule, checks it out and stages it; c3l never commits. *verify*,
+*list* and *check* report a submodule that is _not-checked-out_, _moved_ (another
+commit checked out), _edited_ (local changes), _lock-differs_ (the repository
+records another commit than _c3l.lock_; the message shows the *update* that
+settles it either way) or _other-source_.
+
+c3l never discards local changes in a submodule and never replaces one with an
+archive or a link: *add* and *prune* leave it alone, and *remove* asks for
+*git rm* first. Creating submodules, or converting between a submodule and an
+archive, is left to git.
 
 # LOCKFILE
 

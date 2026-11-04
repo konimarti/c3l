@@ -48,7 +48,9 @@ fn void? list_run(Ctx* ctx)
 		String where = e.origin;
 		if (e.kind == REGISTRY) where = string::tformat("%s (%s)", e.id, e.origin);
 		if (e.kind == VENDOR) where = string::tformat("vendor:%s", e.id);
-		String st = install::status(e, dir).name;
+		Submodule* sm = p.submodule(e.name) ?? null;
+		String st = install::status(e, dir, sm).name;
+		if (sm) st = string::tformat("%s,submodule", st);
 		if (!array::contains(deps, e.name) && !(p.libmode && e.role == DEP)) st = string::tformat("%s,not-in-project", st);
 		if (e.role == DEP) st = string::tformat("%s,dep", st);
 		io::printfn("%-20s %-8s %-12s %-10s %s", e.name, e.kind.name, e.version, st, where);
@@ -57,7 +59,7 @@ fn void? list_run(Ctx* ctx)
 	foreach (d : deps)
 	{
 		if (p.lock.has(d)) continue;
-		io::printfn("%-20s %-8s %-12s %-10s (in %s, not in %s)", d, "-", "-", "untracked", p.file, p.lock.file);
+		io::printfn("%-20s %-8s %-12s %-10s (in %s, not in %s)", d, "-", "-", @ok(p.submodule(d)) ? "untracked,submodule" : "untracked", p.file, p.lock.file);
 		untracked++;
 	}
 	if (!p.lock.entries.len() && !untracked) log::info("no libraries (add one with 'c3l add <ns/name>')");
@@ -87,10 +89,11 @@ fn void? verify_run(Ctx* ctx)
 	bool bad;
 	foreach (&e : p.lock.entries)
 	{
-		Status st = install::status(e, dir);
+		Submodule* sm = p.submodule(e.name) ?? null;
+		Status st = install::status(e, dir, sm);
 		if (st != OK)
 		{
-			io::eprintfn("%s: %s", e.name, st.name);
+			io::eprintfn("%s: %s", e.name, sm ? install::explain(st, e, sm) : st.name);
 			bad = true;
 		}
 		foreach (r : e.requires)
@@ -103,7 +106,7 @@ fn void? verify_run(Ctx* ctx)
 	foreach (d : p.deps()!)
 	{
 		if (p.lock.has(d)) continue;
-		io::eprintfn("%s: in %s but not in %s", d, p.file, p.lock.file);
+		io::eprintfn("%s: in %s but not in %s%s", d, p.file, p.lock.file, @ok(p.submodule(d)) ? " (a git submodule: 'c3l migrate' adopts it)" : "");
 		bad = true;
 	}
 	if (bad) return log::fail("verification failed")~;

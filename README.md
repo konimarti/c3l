@@ -99,6 +99,8 @@ c3l publish --description "My library" --license MIT
 
 - Private git repositories work with whatever gives git access: an ssh key or a
   credential helper. `man c3l` shows how in CI.
+- Libraries kept as git submodules in `lib/` work too: `c3l migrate` locks them,
+  `sync` checks them out, `update` moves them, and c3l never overwrites them.
 - On Windows, linking a local library needs Developer Mode.
 - c3l follows the dependencies in c3po manifests. `c3l migrate` imports a
   c3po lock or the `.c3l.deps` of c3l 0.x.
