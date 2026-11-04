@@ -141,7 +141,8 @@ fn String canonical(String url)
 	return host.tconcat(path);
 }
 
-fn bool is_repo(String dir) => run(dir, { "rev-parse", "--is-inside-work-tree" });
+// Is `dir` in a git work tree? git only runs where a .git exists, so c3l works without git outside repositories.
+fn bool is_repo(String dir) => repo_root(dir).len && run(dir, { "rev-parse", "--is-inside-work-tree" });
 
 // The non-empty output lines of `git -C dir args...`; none if it fails.
 fn String[] lines(String dir, String[] args)

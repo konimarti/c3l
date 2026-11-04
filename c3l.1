@@ -36,8 +36,9 @@ login to download.\&
 .P
 \fBc3l\fR is linked against \fBlibcurl\fR.\& At run time it calls \fBc3c\fR (to read the project
 with \fBc3c project view\fR, for \fBinit\fR and for the compile check of \fBcheck\fR) and \fBgit\fR
-(git libraries, \fBcheck\fR, \fBpack\fR, \fBpublish\fR).\& It talks to registries itself, with the
-protocol \fBc3c fetch\fR uses, so any \fBc3c\fR that can build the project will do.\&
+(git libraries and submodules, and \fBcheck\fR, \fBpack\fR, \fBpublish\fR in a git repository).\&
+It talks to registries itself, with the protocol \fBc3c fetch\fR uses, so any \fBc3c\fR
+that can build the project will do; registry and vendor libraries need no \fBgit\fR.\&
 .P
 On Windows, \fBgit\fR is Git for Windows, and linking a local directory (\fBadd\fR \fI.\&/dir\fR)
 needs Developer Mode or an administrator, for whom Windows creates symbolic links.\&

@@ -991,6 +991,15 @@ if grep -q vendor: <<< "$out"; then fail "tag search lists vendor libraries: $ou
 out="$(c3l --registry http://127.0.0.1:1 search sdl3 2>&1)"; eq "unreachable registry rc" $? 1
 has "vendor shown without the registry" "vendor:sdl3_ttf" "$out"
 
+section "without git: the registry, sync, verify, check and pack"
+NG="$WORK/nogit-bin"; mkdir -p "$NG"; ln -sf "$(command -v "$C3C")" "$NG/c3c"
+newproj ng1; ng() { PATH="$NG" "$C3L" "$@"; }
+out="$(ng init 2>&1 && ng add acme/alpha@1.0.0 2>&1)"; eq "add without git rc" $? 0
+rm -f lib/alpha.c3l; out="$out$(ng sync 2>&1 && ng verify 2>&1 && ng list 2>&1)"; eq "sync, verify, list without git rc" $? 0
+cd "$WORK/ng1" && "$C3C" init-lib nglib >/dev/null 2>&1 && cd nglib.c3l || exit 1
+out="$out$(ng check --offline --no-build --version 1.0.0 2>&1 && ng pack --version 1.0.0 2>&1)"; eq "check and pack without git rc" $? 0
+if grep -q "'git' is required" <<< "$out"; then fail "git asked for without a repository: $out"; else ok; fi
+
 section "git submodules: adopted by migrate, checked out by sync, moved by update, never overwritten"
 # git 2.38.1+ refuses file:// submodules unless allowed; the user's git config decides that, the test allows it
 export GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=protocol.file.allow GIT_CONFIG_VALUE_0=always GIT_CONFIG_KEY_1=commit.gpgsign GIT_CONFIG_VALUE_1=false GIT_CONFIG_KEY_2=advice.detachedHead GIT_CONFIG_VALUE_2=false

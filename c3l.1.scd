@@ -29,8 +29,9 @@ login to download.
 
 *c3l* is linked against *libcurl*. At run time it calls *c3c* (to read the project
 with *c3c project view*, for *init* and for the compile check of *check*) and *git*
-(git libraries, *check*, *pack*, *publish*). It talks to registries itself, with the
-protocol *c3c fetch* uses, so any *c3c* that can build the project will do.
+(git libraries and submodules, and *check*, *pack*, *publish* in a git repository).
+It talks to registries itself, with the protocol *c3c fetch* uses, so any *c3c*
+that can build the project will do; registry and vendor libraries need no *git*.
 
 On Windows, *git* is Git for Windows, and linking a local directory (*add* _./dir_)
 needs Developer Mode or an administrator, for whom Windows creates symbolic links.
