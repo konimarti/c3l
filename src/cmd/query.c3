@@ -93,7 +93,7 @@ fn void? verify_run(Ctx* ctx)
 		Status st = install::status(e, dir, sm);
 		if (st != OK)
 		{
-			io::eprintfn("%s: %s", e.name, sm ? install::explain(st, e, sm) : st.name);
+			io::eprintfn("%s: %s", e.name, install::explain(st, e, sm));
 			bad = true;
 		}
 		foreach (r : e.requires)
@@ -106,7 +106,7 @@ fn void? verify_run(Ctx* ctx)
 	foreach (d : p.deps()!)
 	{
 		if (p.lock.has(d)) continue;
-		io::eprintfn("%s: in %s but not in %s%s", d, p.file, p.lock.file, @ok(p.submodule(d)) ? " (a git submodule: 'c3l migrate' adopts it)" : "");
+		io::eprintfn("%s: in %s but not in %s (%s)", d, p.file, p.lock.file, how_to_lock(&p, d));
 		bad = true;
 	}
 	if (bad) return log::fail("verification failed")~;

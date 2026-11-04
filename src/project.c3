@@ -15,7 +15,9 @@ struct Project
 	Lock lock;
 	String[] dep_names;  // deps(), read once, again after the file changed
 	bool deps_read;
-	Submodule[] subs;    // submodule(), read once
+	String[] search_paths;  // dependency-search-paths, read once, again after the file changed
+	bool paths_read;
+	Submodule[] subs;    // submodules(), read once
 	bool subs_read;
 }
 
@@ -43,12 +45,12 @@ fn String? Project.lib_dir(&self, bool create = false)
 		if (create) (void)path::mkdir("lib");
 		return "lib";
 	}
-	String[] paths = view_list("search paths")!;
+	String[] paths = self.paths()!;
 	if (!paths.len && create)
 	{
 		self.edit("dependency-search-paths", "lib", true)!;
 		log::info("added \"lib\" to dependency-search-paths in %s", self.file);
-		paths = view_list("search paths")!;
+		paths = self.paths()!;
 	}
 	if (!paths.len) return log::fail("no entry in dependency-search-paths in %s (c3l add creates it)", self.file)~;
 	if (create) (void)path::mkdir(paths[0], true);
@@ -74,16 +76,10 @@ fn String[]? Project.deps(&self)
 // The libraries stored as git submodules in the library directory; see git::submodules.
 fn Submodule[] Project.submodules(&self)
 {
-	if (!self.subs_read && !git::has_submodules("."))
-	{
-		self.subs_read = true;  // most projects: no git calls, no c3c call
-	}
-	if (!self.subs_read)
-	{
-		String[] paths = self.libmode ? { "lib" } : view_list("search paths") ?? {};
-		if (paths.len) self.subs = git::submodules(".", paths[0]);
-		self.subs_read = true;
-	}
+	if (self.subs_read) return self.subs;
+	self.subs_read = true;
+	String[] paths = self.libmode ? { "lib" } : self.paths() ?? {};
+	if (paths.len) self.subs = git::submodules(paths[0]);
 	return self.subs;
 }
 
@@ -94,8 +90,20 @@ fn Submodule*? Project.submodule(&self, String name)
 	return NOT_FOUND~;
 }
 
-// The project file changed on disk: read the dependencies again when asked.
-fn void Project.changed(&self) => self.deps_read = false;
+// The project file changed on disk: read it again when asked.
+fn void Project.changed(&self)
+{
+	self.deps_read = false;
+	self.paths_read = false;
+}
+
+// The dependency-search-paths entries.
+fn String[]? Project.paths(&self)
+{
+	if (!self.paths_read) self.search_paths = view_list("search paths")!;
+	self.paths_read = true;
+	return self.search_paths;
+}
 
 fn bool? Project.has_dep(&self, String name)
 {

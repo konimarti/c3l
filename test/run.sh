@@ -993,7 +993,7 @@ has "vendor shown without the registry" "vendor:sdl3_ttf" "$out"
 
 section "git submodules: adopted by migrate, checked out by sync, moved by update, never overwritten"
 # git 2.38.1+ refuses file:// submodules unless allowed; the user's git config decides that, the test allows it
-export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=protocol.file.allow GIT_CONFIG_VALUE_0=always GIT_CONFIG_KEY_1=commit.gpgsign GIT_CONFIG_VALUE_1=false
+export GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=protocol.file.allow GIT_CONFIG_VALUE_0=always GIT_CONFIG_KEY_1=commit.gpgsign GIT_CONFIG_VALUE_1=false GIT_CONFIG_KEY_2=advice.detachedHead GIT_CONFIG_VALUE_2=false
 SR="$WORK/serp"; mkdir -p "$SR/src"; cd "$SR" || exit 1
 git init -q .
 echo '{ "provides": "serp", "version": "0.2.0", "targets": {} }' > manifest.json
@@ -1010,7 +1010,7 @@ LB="$WORK/subdev"; rm -rf "$LB"; mkdir -p "$LB"; cd "$LB" || exit 1
 "$C3C" init-lib mylib >/dev/null 2>&1; mv mylib.c3l repo; cd repo || exit 1
 git init -q . && git submodule add -q "file://$SR" lib/serp.c3l 2>/dev/null && git -C lib/serp.c3l checkout -q v0.2.0 && git add -A && git commit -qm init
 out="$(c3l add "file://$SR" 2>&1)"; eq "add over an unmanaged submodule rc" $? 1
-has "add explains migrate" "lib/serp.c3l is a git submodule that c3l.lock does not list; 'c3l migrate' adopts it" "$out"
+has "add points to migrate" "'c3l migrate' adopts it" "$out"
 check "submodule untouched by the refused add" test -f lib/serp.c3l/manifest.json
 out="$(c3l migrate 2>&1)"; eq "migrate adopts rc" $? 0
 has "adopted message" "adopted the submodule lib/serp.c3l: serp v0.2.0" "$out"
@@ -1026,33 +1026,38 @@ check "check passes with the submodule" c3l check --offline --no-build --version
 # someone clones without submodules: sync checks it out
 cd "$LB" && rm -rf clone && git clone -q repo clone && cd clone || exit 1
 check_not "not checked out after a plain clone" test -f lib/serp.c3l/manifest.json
-has "verify says how" "serp: the submodule lib/serp.c3l is not checked out ('c3l sync' checks it out)" "$(c3l verify 2>&1)"
+has "verify: not checked out" "not checked out" "$(c3l verify 2>&1)"
 out="$(c3l sync 2>&1)"; eq "sync checks out rc" $? 0
 has "sync message" "checked out the submodule lib/serp.c3l at v0.2.0" "$out"
 check "a directory, not an archive" test -f lib/serp.c3l/manifest.json
 check "verify after sync" c3l verify
 check "sync --frozen" c3l sync --frozen
 
-# moved inside the submodule: sync goes back to the recorded commit
+# moved inside the submodule: sync goes back to the recorded commit, unless that drops commits
 git -C lib/serp.c3l checkout -q "$S2"
-has "moved explained" "serp: the submodule lib/serp.c3l is checked out at ${S2:0:12}, the repository records ${S1:0:12}" "$(c3l verify 2>&1)"
+has "verify: moved" "checked out at ${S2:0:12}, the repository records ${S1:0:12}" "$(c3l verify 2>&1)"
 c3l sync >/dev/null 2>&1; eq "sync puts it back" "$(git -C lib/serp.c3l rev-parse HEAD)" "$S1"
+echo '// wip' >> lib/serp.c3l/src/serp.c3 && git -C lib/serp.c3l commit -qam wip; WIP="$(git -C lib/serp.c3l rev-parse HEAD)"
+out="$(c3l sync 2>&1)"; eq "sync with a commit on no branch rc" $? 1
+has "sync keeps commits" "commits on no branch" "$out"
+eq "commit still checked out" "$(git -C lib/serp.c3l rev-parse HEAD)" "$WIP"
+git -C lib/serp.c3l checkout -q "$S1"
 # local changes are never discarded
 echo '// mine' >> lib/serp.c3l/src/serp.c3
-has "edited explained" "serp: the submodule lib/serp.c3l has local changes" "$(c3l verify 2>&1)"
+has "verify: edited" "has local changes" "$(c3l verify 2>&1)"
 out="$(c3l update serp 2>&1)"; eq "update with local changes rc" $? 1
-has "update refuses" "has local changes (c3l never discards them; commit or discard them with git); not moving it" "$out"
+has "update refuses" "not moving it" "$out"
 check "edit kept" grep -q mine lib/serp.c3l/src/serp.c3
 git -C lib/serp.c3l checkout -q -- .
 
 # update moves the submodule and stages it; c3l never commits
 out="$(c3l update serp@v0.2.1 2>&1)"; eq "update moves rc" $? 0
-has "update message" "moved the submodule lib/serp.c3l from ${S1:0:12} to ${S2:0:12} (staged" "$out"
+has "update message" "moved the submodule lib/serp.c3l from ${S1:0:12} to ${S2:0:12}" "$out"
 eq "checked out at the new commit" "$(git -C lib/serp.c3l rev-parse HEAD)" "$S2"
 has "lock follows" "^serp	git	.*	v0.2.1	commit:$S2	content:" "$(cat c3l.lock)"
 has "staged, not committed" "^M  lib/serp.c3l" "$(git status --porcelain)"
 check "verify after update" c3l verify
-eq "still a directory" "$(test -d lib/serp.c3l && echo dir)" "dir"
+check "still a directory" test -d lib/serp.c3l
 # a failing update leaves submodule, index and lock as they were
 cp c3l.lock "$WORK/sm.lock"
 out="$(c3l update serp@v0.2.2 2>&1)"; eq "failing update rc" $? 1
@@ -1064,28 +1069,56 @@ git commit -qam "serp 0.2.1"
 
 # the repository records another commit than the lock
 git -C lib/serp.c3l checkout -q "$S1" && git add lib/serp.c3l
-out="$(c3l verify 2>&1)"; eq "drift rc" $? 1
-has "drift explained, both ways out" "c3l update serp@$S1' locks the submodule's commit, 'c3l update serp@v0.2.1' moves the submodule" "$out"
+out="$(c3l verify 2>&1)"; eq "lock differs rc" $? 1
+has "both ways out" "c3l update serp@$S1' locks the submodule's commit, 'c3l update serp@v0.2.1' moves" "$out"
 out="$(c3l sync 2>&1)"; eq "sync does not pick a side rc" $? 1
-out="$(c3l check --offline --no-build --version 1.0.0 --allow-dirty 2>&1)"; eq "check catches drift rc" $? 1
+out="$(c3l check --offline --no-build --version 1.0.0 --allow-dirty 2>&1)"; eq "check catches it rc" $? 1
+echo '// mine' >> lib/serp.c3l/src/serp.c3
+out="$(c3l update "serp@$S1" 2>&1)"; eq "lock differs and edited: update refuses rc" $? 1
+check "edit kept there too" grep -q mine lib/serp.c3l/src/serp.c3
+git -C lib/serp.c3l checkout -q -- .
+c3l update serp@v0.2.2 >/dev/null 2>&1; eq "failing update from there rc" $? 1
+eq "index still at the staged commit" "$(git ls-files -s lib/serp.c3l | cut -d' ' -f2)" "$S1"
 c3l update "serp@$S1" >/dev/null 2>&1; eq "update to the submodule's commit rc" $? 0
 check "verify after locking the submodule's commit" c3l verify
 has "commit label" "^serp	git	.*	commit:${S1:0:12}	commit:$S1	" "$(cat c3l.lock)"
 
 # never overwritten or removed behind git's back
 out="$(c3l remove serp 2>&1)"; eq "remove rc" $? 1
-has "remove says git rm" "lib/serp.c3l is a git submodule; remove it with git first ('git rm lib/serp.c3l')" "$out"
+has "remove says git rm" "git rm lib/serp.c3l" "$out"
 check "still there" test -f lib/serp.c3l/manifest.json
 git rm -qf lib/serp.c3l && c3l remove serp >/dev/null 2>&1; eq "remove after git rm rc" $? 0
 check_not "unlocked" grep -q ^serp c3l.lock
 
 # consumers install the library: dependencies from its c3l.lock, as archives
-cd "$LB/repo" || exit 1
 newproj sm-use; c3l init >/dev/null 2>&1
 out="$(c3l add "file://$LB/repo" 2>&1)"; eq "consumer add rc" $? 0
 check "serp as an archive for the consumer" test -f lib/serp.c3l
 check "consumer verify" c3l verify
-unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_CONFIG_KEY_1 GIT_CONFIG_VALUE_1
+
+# a library directory outside the project, with a space in its name
+MO="$WORK/mono"; rm -rf "$MO"; mkdir -p "$MO"; cd "$MO" || exit 1
+git init -q . && "$C3C" init app >/dev/null && git submodule add -q "file://$SR" "shared libs/serp.c3l" 2>/dev/null && git commit -qm init
+cd app && sed -i 's|"dependency-search-paths": \[ *"lib" *\]|"dependency-search-paths": [ "../shared libs" ]|' project.json
+out="$(c3l migrate 2>&1)"; eq "migrate outside the project rc" $? 0
+has "adopted from ../shared libs" "adopted the submodule ../shared libs/serp.c3l" "$out"
+check "verify outside the project" c3l verify
+
+# a relative URL in .gitmodules cannot go into a lockfile
+RL="$WORK/rel"; rm -rf "$RL"; mkdir -p "$RL"; cd "$RL" || exit 1
+"$C3C" init-lib rl >/dev/null 2>&1; cd rl.c3l || exit 1
+git init -q . && git submodule add -q ../../serp lib/serp.c3l 2>/dev/null && git commit -qm init
+out="$(c3l migrate 2>&1)"; eq "relative URL rc" $? 1
+has "relative URL explained" "relative to this repository's remote" "$out"
+check_not "no lock written" test -s c3l.lock
+
+# a nested repository git does not know about is not replaced while it holds work
+newproj sm-nest; c3l init >/dev/null 2>&1
+git clone -q "file://$SR" lib/serp.c3l && git -C lib/serp.c3l commit -q --allow-empty -m unpushed
+out="$(c3l add "file://$SR@v0.2.0" 2>&1)"; eq "nested repository with work rc" $? 1
+has "nested repository explained" "is a git repository with local changes or commits on no branch" "$out"
+check "nested repository kept" test -d lib/serp.c3l/.git
+unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_CONFIG_KEY_1 GIT_CONFIG_VALUE_1 GIT_CONFIG_KEY_2 GIT_CONFIG_VALUE_2
 
 if [[ -n "$LIVE" ]]; then
 	section "live: www.c3pkg.eu"

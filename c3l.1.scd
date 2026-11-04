@@ -338,27 +338,27 @@ git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf 
 
 A git library can also be kept as a git submodule at _lib/name.c3l_, for
 example so that contributors without c3l get it with
-*git clone --recurse-submodules*. c3l reads submodules from git (_.gitmodules_ and the
-commits the repository records) and treats them as git libraries that git
-stores: _c3l.lock_ describes them like any git library (URL, version, commit,
-content hash), and anyone who installs the library gets them from that lockfile,
-as archives. Projects without a _.gitmodules_ file are not affected.
+*git clone --recurse-submodules*. _c3l.lock_ describes it like any git library
+(URL, version, commit, content hash), and anyone who installs your library gets
+it from that lockfile, as an archive. Projects whose _.gitmodules_ names no
+_.c3l_ path are not affected.
 
 *migrate* adopts submodules the lockfile does not list: the URL from
-_.gitmodules_, the commit the repository records, a tag at that commit as the
-version (else the branch _.gitmodules_ follows, else the commit), and what they
-require is installed. *sync* checks a submodule out
-(*git submodule update --init*) or back to the recorded commit. *update* fetches the new commit into
-the submodule, checks it out and stages it; c3l never commits. *verify*,
-*list* and *check* report a submodule that is _not-checked-out_, _moved_ (another
-commit checked out), _edited_ (local changes), _lock-differs_ (the repository
+_.gitmodules_ (it must be absolute), the commit the repository records, a tag
+at that commit as the version (else the branch _.gitmodules_ follows, else the
+commit), and what they require is installed. *sync* checks a submodule out, or
+back to the recorded commit. *update* fetches the new commit into the
+submodule, checks it out and stages it; c3l never commits. *verify*, *list*
+and *check* report a submodule that is _not-checked-out_, _edited_ (local
+changes), _moved_ (another commit checked out), _lock-differs_ (the repository
 records another commit than _c3l.lock_; the message shows the *update* that
 settles it either way) or _other-source_.
 
-c3l never discards local changes in a submodule and never replaces one with an
-archive or a link: *add* and *prune* leave it alone, and *remove* asks for
-*git rm* first. Creating submodules, or converting between a submodule and an
-archive, is left to git.
+c3l never discards local changes or commits on no branch in a submodule, and
+never replaces one with an archive or a link: *add* and *prune* leave it alone,
+and *remove* asks for *git rm* first. The same holds for any git repository in
+the library directory that holds work. Creating submodules, or converting
+between a submodule and an archive, is left to git.
 
 # LOCKFILE
 

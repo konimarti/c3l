@@ -65,7 +65,7 @@ struct Touched
 {
 	String name;
 	bool had_file;
-	String submodule;  // a submodule moved to another commit: the commit it was at
+	String submodule;  // a submodule moved to another commit: the commit it was at (and staged)
 }
 
 fn Op? begin(Project* p, Options* opts)
@@ -112,7 +112,7 @@ fn void Op.rollback(&self)
 		if (t.submodule.len)
 		{
 			bool back;
-			if (try s = self.proj.submodule(t.name)) back = !@catch(s.move(".", t.submodule, "", ""));
+			if (try s = self.proj.submodule(t.name)) back = !@catch(s.move(t.submodule, "", ""));
 			if (!back)
 			{
 				log::error("could not move the submodule of %s back to %s", t.name, t.submodule);
@@ -250,7 +250,9 @@ fn Manifest? Op.install_git(&self, Want w, Intent intent)
 	String pin = string::tformat("commit:%s", rev.commit);
 	Entry e = { .name = name, .kind = GIT, .origin = url, .id = "-", .version = rev.label, .pin = pin, .hash = contents };
 	String put = staged;
-	if (try sub = self.proj.submodule(name))
+	Submodule*? found = self.proj.submodule(name);
+	sys::check_interrupt()!;  // finding submodules runs git
+	if (try sub = found)
 	{
 		self.move_submodule(sub, e, src)!;
 		put = "";  // the submodule is the library
@@ -314,8 +316,15 @@ fn void warn_provides(String file, String name, String what) @private
 fn void? Op.set_aside(&self, String name)
 {
 	foreach (t : self.touched) if (t.name == name) return;
-	if (try s = self.proj.submodule(name)) return not_managed(s, self.proj.lock.has(name))~;
+	Submodule*? found = self.proj.submodule(name);
+	sys::check_interrupt()!;  // finding submodules runs git
+	if (try s = found) return not_managed(s, self.proj.lock.has(name))~;
 	String f = self.file_of(name);
+	// a clone (c3l 0.x made them) or a repository git does not know as a submodule: only if nothing is lost
+	if (!path::is_link((Path)f) && file::exists(string::tformat("%s/.git", f)) && !git::disposable(f))
+	{
+		return log::fail("%s is a git repository with local changes or commits on no branch; c3l does not replace it, save or move it first", f)~;
+	}
 	bool had = sys::exists(f);
 	if (had)
 	{
@@ -328,9 +337,9 @@ fn void? Op.set_aside(&self, String name)
 
 <*
  A library stored as a submodule moves to the commit of `e` (checked out in
- `src`), staged in the repository; c3l never commits. Only from a submodule at
- the commit the repository records, without local changes: anything else is
- the user's work in progress.
+ `src`), staged in the repository; c3l never commits. Only from a clean
+ submodule at the commit the repository records: anything else is the user's
+ work in progress.
 *>
 fn void? Op.move_submodule(&self, Submodule* s, Entry e, String src)
 {
@@ -339,14 +348,16 @@ fn void? Op.move_submodule(&self, Submodule* s, Entry e, String src)
 	Status st = submodule_status(old, s);
 	if (st == NOT_CHECKED_OUT)
 	{
-		if (!s.restore(".")) return log::fail("cannot check out the submodule %s%s", s.path, git::because())~;
+		s.reset()!;
 		st = submodule_status(old, s);
 	}
-	if (st == MOVED || st == EDITED || st == OTHER_SOURCE) return log::fail("%s; not moving it", explain(st, old, s))~;
-	String was = s.head();
-	self.touched.push({ .name = e.name, .had_file = true, .submodule = was });
-	s.move(".", e.pin.strip_prefix("commit:"), e.origin, src)!;
-	log::info("moved the submodule %s from %s to %s (staged; commit it with c3l.lock)", s.path, was[:12], e.pin["commit:".len:12]);
+	if (st != OK && st != LOCK_DIFFERS) return log::fail("%s; not moving it", explain(st, old, s))~;
+	String was = s.commit;
+	String to = e.pin.strip_prefix("commit:");
+	if (to == was) return;
+	self.touched.push({ .name = e.name, .submodule = was });
+	s.move(to, e.origin, src)!;
+	log::info("moved the submodule %s from %s to %s (staged; commit it with %s)", s.path, git::abbrev(was), git::abbrev(to), self.proj.lock.file);
 }
 
 <*

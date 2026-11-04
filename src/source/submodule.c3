@@ -1,8 +1,8 @@
 <*
  Git submodules in the library directory. A git library can be stored as a
- submodule at lib/<name>.c3l instead of an archive: c3l.lock describes it the
- same way, git keeps it. Read only when the project is in a git repository with a
- .gitmodules file, so projects without submodules never run git for this.
+ submodule at <libdir>/<name>.c3l instead of an archive: c3l.lock describes it the
+ same way, git keeps it. git is only asked when the repository's .gitmodules
+ names a .c3l path, so other projects run nothing extra.
 *>
 module c3l::git;
 
@@ -15,36 +15,39 @@ struct Conf @private
 
 struct Submodule
 {
-	String name;    // the library: lib/<name>.c3l
-	String path;    // relative to the project directory
-	String at;      // the same, from the current directory
+	String name;    // the library
+	String path;    // <libdir>/<name>.c3l, as the project names it (for messages)
+	String root;    // the top of the repository that records it
+	String full;    // its path from `root`, as git names it
+	String at;      // root/full
 	String commit;  // what the repository records (the gitlink)
-	String url;     // from .gitmodules; empty if it has none
+	String url;     // from .gitmodules
 	String branch;  // from .gitmodules; usually empty
 }
 
 <*
- The submodules directly in `libdir` (relative to `dir`, the project
- directory) that are named like libraries: <name>.c3l.
+ The submodules directly in `libdir` that are named like libraries
+ (<name>.c3l) and listed in .gitmodules. A gitlink without a .gitmodules entry
+ is not a submodule git can restore; set_aside protects it as a nested repository.
 *>
-fn Submodule[] submodules(String dir, String libdir)
+fn Submodule[] submodules(String libdir)
 {
-	if (!has_submodules(dir)) return {};
-	String root = repo_root(dir);
-	String prefix = git(dir, { "rev-parse", "--show-prefix" }).out.trim();  // the project directory, from the root
-	String lib = clean_path(libdir);
-	String want = clean_path(string::tformat("%s%s", prefix, lib));
+	if (!file::is_dir(libdir)) return {};
+	String root = repo_root(libdir);
+	if (!root.len) return {};
+	String gitmodules = string::tformat("%s/.gitmodules", root);
+	if (!((String)file::load_temp(gitmodules) ?? "").contains(".c3l")) return {};
+	String want = git(libdir, { "rev-parse", "--show-prefix" }).out.trim().strip_suffix("/");  // libdir, from the root
 
-	// .gitmodules: submodule.<section>.path|url|branch (the section may contain dots)
+	// "submodule.<section>.<key>\n<value>" per entry (-z: names and values may contain spaces)
 	List{Conf} config;
 	config.tinit();
-	String gitmodules = string::tformat("%s/.gitmodules", root);
-	foreach (line : lines(dir, { "config", "-f", gitmodules, "--get-regexp", `^submodule\..*\.(path|url|branch)$` }))
+	foreach (entry : zlines(root, { "config", "-z", "-f", gitmodules, "--get-regexp", `^submodule\..*\.(path|url|branch)$` }))
 	{
-		sz? space = line.index_of_char(' ');
-		if (catch space) continue;
-		String key = line[:space];
-		String value = line[space + 1..];
+		sz? nl = entry.index_of_char('\n');
+		if (catch nl) continue;
+		String key = entry[:nl];
+		String value = entry[nl + 1..];
 		sz dot = key.rindex_of_char('.') ?? 0;
 		if (dot <= "submodule.".len) continue;
 		String section = key["submodule.".len..dot - 1];
@@ -57,7 +60,7 @@ fn Submodule[] submodules(String dir, String libdir)
 		}
 		switch (key[dot + 1..])
 		{
-			case "path": c.path = clean_path(value);
+			case "path": c.path = value.strip_suffix("/");
 			case "url": c.url = value;
 			case "branch": c.branch = value;
 		}
@@ -65,34 +68,27 @@ fn Submodule[] submodules(String dir, String libdir)
 
 	List{Submodule} out;
 	out.tinit();
-	foreach (line : lines(dir, { "ls-files", "-s", "--full-name", "--", lib }))
+	foreach (entry : zlines(root, { "ls-files", "-s", "-z", "--", want.len ? want : "." }))
 	{
-		// "160000 <commit> 0\t<path from the root>"; 160000 is a gitlink
-		if (!line.starts_with("160000 ")) continue;
-		sz? tab = line.index_of_char('\t');
-		if (catch tab) continue;
-		String full = line[tab + 1..];
+		// "160000 <commit> <stage>\t<path from the root>": 160000 is a gitlink; stage 0 = not in a merge conflict
+		String[] f = entry.tsplit("\t", 2);
+		if (f.len != 2) continue;
+		String[] meta = f[0].tsplit(" ");
+		if (meta.len != 3 || meta[0] != "160000" || meta[2] != "0") continue;
+		String full = f[1];
 		String file = full[(full.rindex_of_char('/') ?? -1) + 1..];
-		String parent = full[:full.len - file.len].strip_suffix("/");
-		if (parent != want || !file.ends_with(".c3l")) continue;
-		String path = string::tformat("%s/%s", lib, file);
-		Submodule s = { .name = file.strip_suffix(".c3l"), .path = path, .at = dir == "." ? path : string::tformat("%s/%s", dir, path), .commit = line[7:40] };
+		if (full[:full.len - file.len].strip_suffix("/") != want || !file.ends_with(".c3l")) continue;
 		foreach (c : config)
 		{
 			if (c.path != full) continue;
-			s.url = c.url;
-			s.branch = c.branch;
+			out.push({
+				.name = file.strip_suffix(".c3l"), .path = string::tformat("%s/%s", libdir.strip_suffix("/"), file),
+				.root = root, .full = full, .at = string::tformat("%s/%s", root, full),
+				.commit = meta[1], .url = c.url, .branch = c.branch,
+			});
 		}
-		out.push(s);
 	}
 	return out.array_view();
-}
-
-// Is `dir` in a git work tree with a .gitmodules file? Without running git.
-fn bool has_submodules(String dir)
-{
-	String root = repo_root(dir);
-	return root.len && file::exists(string::tformat("%s/.gitmodules", root));
 }
 
 // Is the submodule checked out (its directory has a .git file or directory)?
@@ -104,34 +100,64 @@ fn String Submodule.head(&self) => self.checked_out() ? git(self.at, { "rev-pars
 // Changes to tracked files, staged or not (untracked files, such as build output, do not count).
 fn bool Submodule.edited(&self) => lines(self.at, { "status", "--porcelain", "--untracked-files=no" }).len > 0;
 
-<*
- Check out the commit the repository records, cloning the submodule first if it
- is not there yet (git submodule update --init). Never with local changes.
-*>
-fn bool Submodule.restore(&self, String dir) => run(dir, { "submodule", "update", "--init", "--", self.path });
+// Commits checked out in the submodule that no branch or tag holds: checking out another commit would drop them.
+fn bool Submodule.unsaved(&self) => lines(self.at, { "rev-list", "-n1", "HEAD", "--not", "--branches", "--tags", "--remotes" }).len > 0;
+
+// Check out the commit the repository records, cloning the submodule first if needed.
+fn void? Submodule.reset(&self)
+{
+	if (!run(self.root, { "submodule", "update", "--init", "--checkout", "--", self.full }))
+	{
+		return log::fail("cannot check out the submodule %s%s", self.path, because())~;
+	}
+}
 
 <*
- Move the submodule to `commit` and stage it in the repository. If the
- submodule does not have the commit yet, it is fetched from `url`, else from
- `from` (a checkout that has it).
+ Move the submodule to `commit` and stage it. If the submodule does not have the
+ commit yet, it is fetched from `url`, else from `from` (a checkout that has it).
 *>
-fn void? Submodule.move(&self, String dir, String commit, String url, String from)
+fn void? Submodule.move(&self, String commit, String url, String from)
 {
 	if (!is_commit(commit)) return log::fail("'%s' is not a commit id", commit)~;
 	if (!self.has(commit))
 	{
 		bool got = url.len && run(self.at, { "fetch", "-q", "--end-of-options", url, commit });
-		if (!got && from.len) got = run(self.at, { "fetch", "-q", "--end-of-options", (String)from.to_absolute_path(tmem) ?? from, commit });
+		if (!got && from.len) got = run(self.at, { "fetch", "-q", "--end-of-options", from, commit });
 		if (!got || !self.has(commit)) return log::fail("cannot fetch commit %s into %s%s", commit, self.path, because())~;
 	}
 	if (!run(self.at, { "checkout", "-q", commit })) return log::fail("cannot check out %s in %s%s", commit, self.path, because())~;
-	if (!run(dir, { "add", "--", self.path })) return log::fail("cannot stage %s%s", self.path, because())~;
+	if (!run(self.root, { "add", "--", self.full })) return log::fail("cannot stage %s%s", self.path, because())~;
+	self.commit = commit;
 }
 
+// Does the submodule have `commit`?
 fn bool Submodule.has(&self, String commit) => run(self.at, { "cat-file", "-e", string::tformat("%s^{commit}", commit) });
 
 // The tags at `commit` in the submodule.
 fn String[] Submodule.tags_at(&self, String commit) => lines(self.at, { "tag", "--points-at", commit });
+
+<*
+ Can the git repository in `dir` (a clone, such as c3l 0.x made, or a nested
+ repository git does not know as a submodule) be replaced without losing work:
+ no changes, no untracked files, no commit that no branch or tag holds?
+*>
+fn bool disposable(String dir)
+{
+	Output st = git(dir, { "status", "--porcelain" });
+	if (st.code || st.out.trim().len) return false;
+	Output unsaved = git(dir, { "rev-list", "-n1", "HEAD", "--not", "--branches", "--tags", "--remotes" });
+	return !unsaved.code && !unsaved.out.trim().len;
+}
+
+// The first 12 characters of a commit id, for messages.
+fn String abbrev(String commit) => commit[:commit.len < 12 ? commit.len : 12];
+
+// The NUL separated records of `git -C dir args...` (with -z); none if it fails.
+fn String[] zlines(String dir, String[] args) @private
+{
+	Output o = git(dir, args);
+	return o.code ? {} : o.out.tsplit("\0", skip_empty: true);
+}
 
 <*
  The top of the git work tree `dir` is in, without running git: the nearest
@@ -150,13 +176,4 @@ fn String repo_root(String dir) @private
 		if ((String)up == (String)d) return "";
 		d = up;
 	}
-}
-
-// "./lib/" and "lib\" are "lib".
-fn String clean_path(String p) @private
-{
-	String s = p.treplace("\\", "/");
-	while (s.starts_with("./")) s = s[2..];
-	while (s.ends_with("/") && s.len > 1) s = s[:s.len - 1];
-	return s == "." ? "" : s;
 }

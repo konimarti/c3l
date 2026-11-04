@@ -13,11 +13,11 @@ enum Status : char (String name)
 	MISSING { "missing" },
 	UNPACKED { "unpacked" },  // a directory where c3l keeps a .c3l file (c3c's default)
 	// a library stored as a git submodule
-	NOT_CHECKED_OUT { "not-checked-out" },  // c3l sync checks it out
-	MOVED { "moved" },                      // checked out at another commit than the repository records
-	EDITED { "edited" },                    // local changes
-	DRIFT { "lock-differs" },               // the repository records another commit than c3l.lock
 	OTHER_SOURCE { "other-source" },        // c3l.lock gets the library from elsewhere
+	NOT_CHECKED_OUT { "not-checked-out" },  // c3l sync checks it out
+	EDITED { "edited" },                    // local changes
+	MOVED { "moved" },                      // checked out at another commit than the repository records
+	LOCK_DIFFERS { "lock-differs" },        // the repository records another commit than c3l.lock
 }
 
 <*
@@ -52,20 +52,21 @@ fn Status status(Entry* e, String dir, Submodule* sub = null)
 
 <*
  A library stored as a git submodule: it must come from the same repository as
- c3l.lock says, the repository must record the locked commit, and that commit
- must be checked out without local changes.
+ c3l.lock says and be checked out, without local changes, at the commit the
+ repository records, which must be the locked one. The user's work comes first:
+ local changes are reported before the commits.
 *>
 fn Status submodule_status(Entry* e, Submodule* s)
 {
-	if (e.kind != GIT || !s.url.len || git::canonical(s.url) != git::canonical(e.origin)) return OTHER_SOURCE;
-	if (string::tformat("commit:%s", s.commit) != e.pin) return DRIFT;
+	if (e.kind != GIT || git::canonical(s.url) != git::canonical(e.origin)) return OTHER_SOURCE;
 	if (!s.checked_out()) return NOT_CHECKED_OUT;
-	if (s.head() != s.commit) return MOVED;
 	if (s.edited()) return EDITED;
+	if (s.head() != s.commit) return MOVED;
+	if (string::tformat("commit:%s", s.commit) != e.pin) return LOCK_DIFFERS;
 	return OK;
 }
 
-// What a submodule status means and what to do about it, for messages.
+// What a status means and what to do about it, for messages; `s` is only read for a submodule's.
 fn String explain(Status st, Entry* e, Submodule* s)
 {
 	switch (st)
@@ -73,23 +74,21 @@ fn String explain(Status st, Entry* e, Submodule* s)
 		case NOT_CHECKED_OUT:
 			return string::tformat("the submodule %s is not checked out ('c3l sync' checks it out)", s.path);
 		case MOVED:
-			return string::tformat("the submodule %s is checked out at %s, the repository records %s ('c3l sync' or 'git submodule update' goes back)", s.path, abbrev(s.head()), abbrev(s.commit));
+			return string::tformat("the submodule %s is checked out at %s, the repository records %s ('c3l sync' or 'git submodule update' goes back)", s.path, git::abbrev(s.head()), git::abbrev(s.commit));
 		case EDITED:
 			return string::tformat("the submodule %s has local changes (c3l never discards them; commit or discard them with git)", s.path);
-		case DRIFT:
+		case LOCK_DIFFERS:
 			String locked = e.pin.strip_prefix("commit:");
-			String back = e.version.starts_with("commit:") ? locked : e.version;
+			// a tag names one commit; a branch or HEAD has moved on since
+			bool tag = e.version != "HEAD" && !e.version.starts_with("branch:") && !e.version.starts_with("commit:");
 			return string::tformat("the submodule %s is at %s, but c3l.lock has %s: 'c3l update %s@%s' locks the submodule's commit, 'c3l update %s@%s' moves the submodule to the locked one",
-				s.path, abbrev(s.commit), abbrev(locked), e.name, s.commit, e.name, back);
+				s.path, git::abbrev(s.commit), git::abbrev(locked), e.name, s.commit, e.name, tag ? e.version : locked);
 		case OTHER_SOURCE:
-			if (!s.url.len) return string::tformat("%s is a git submodule without a URL in .gitmodules", s.path);
 			return string::tformat("%s is a git submodule of %s, but c3l.lock gets %s from %s; remove one of them", s.path, s.url, e.name, e.source());
 		default:
 			return st.name;
 	}
 }
-
-fn String abbrev(String commit) @private => commit[:commit.len < 12 ? commit.len : 12];
 
 faultdef UNKNOWN;
 

@@ -170,7 +170,7 @@ fn void Package.check_dependencies(&self, Manifest m)
 		if (try e = l.get(r.name) && e.role == Role.DIRECT && e.kind != Kind.PATH) continue;
 		log::warn("'%s' is in the manifest's dependencies but nothing says where to get it; run 'c3l add' for it in this library so consumers can install it automatically", r.name);
 	}
-	foreach (&sm : git::submodules(self.dir, "lib"))
+	foreach (&sm : git::submodules(string::tformat("%s/lib", self.dir)))
 	{
 		Entry*? e = l.get(sm.name);
 		if (catch e)

@@ -45,11 +45,11 @@ fn void same_git_source() @test
 
 fn void git_urls() @test
 {
-	foreach (u : (String[]){ "https://h/x", "HTTP://h/x", "ssh://git@h/x", "git://h/x", "file:///x", "git@h:x", "/x", "./x", "../x" })
+	foreach (u : (String[]){ "https://h/x", "HTTP://h/x", "ssh://git@h/x", "ssh://h:22/x", "git://h/x", "file:///x", "git@h:x", "/x", "./x", "../x" })
 	{
 		assert(lock::valid_git_url(u), "%s should be valid", u);
 	}
-	foreach (u : (String[]){ "https://user:token@github.com/x", "https://token@github.com/x", "ext::sh -c x% http://h", "ftp://h/x", "h/x", "git@h", "https://h/x\" -x", "https://h/\nx" })
+	foreach (u : (String[]){ "https://user:token@github.com/x", "https://token@github.com/x", "ssh://git:secret@h/x", "ext::sh -c x% http://h", "ftp://h/x", "h/x", "git@h", "https://h/x\" -x", "https://h/\nx" })
 	{
 		assert(!lock::valid_git_url(u), "%s should be refused", u);
 	}

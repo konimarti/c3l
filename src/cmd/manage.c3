@@ -66,13 +66,14 @@ fn void? remove_run(Ctx* ctx)
 	Project p = project::find()!;
 	String name = lib_name(ctx.arg(0))!;
 	String f = project::lib_file(p.lib_dir()!, name);
+	if (try sm = p.submodule(name)) return log::fail("%s is a git submodule; remove it with 'git rm %s' first, then run 'c3l remove %s' again", sm.path, sm.path, name)~;
+	if (!path::is_link((Path)f) && file::exists(string::tformat("%s/.git", f)) && !git::disposable(f))
+	{
+		return log::fail("%s is a git repository with local changes or commits on no branch; save or move it first", f)~;
+	}
 	bool locked = p.lock.has(name);
 	if (!locked && !p.has_dep(name)! && !sys::exists(f)) return log::fail("'%s' is not installed", name)~;
 	if (!locked) log::warn("%s is not tracked in %s", name, p.lock.file);
-	if (try sm = p.submodule(name))
-	{
-		return log::fail("%s is a git submodule; remove it with git first ('git rm %s'), then run 'c3l remove %s' again", sm.path, sm.path, name)~;
-	}
 	String[] needed = p.lock.dependents(name);
 	if (needed.len && !ctx.flag_bool("force"))
 	{
@@ -219,8 +220,7 @@ fn void? sync_run(Ctx* ctx)
 		foreach (d : p.deps()!)
 		{
 			if (p.lock.has(d)) continue;
-			String how = @ok(p.submodule(d)) ? "a git submodule: 'c3l migrate' adopts it" : "'c3l add' it to lock it";
-			log::warn("%s is in %s but not in %s (%s)", d, p.file, p.lock.file, how);
+			log::warn("%s is in %s but not in %s (%s)", d, p.file, p.lock.file, how_to_lock(&p, d));
 		}
 	}
 	Options opts = options(ctx);
@@ -274,138 +274,142 @@ fn void? sync_run(Ctx* ctx)
 	log::info("in sync with %s", p.lock.file);
 }
 
+// How to lock a library that the project lists and the lockfile does not.
+fn String how_to_lock(Project* p, String name) => @ok(p.submodule(name)) ? "a git submodule: 'c3l migrate' adopts it" : "'c3l add' it to lock it";
+
 <*
  A library stored as a git submodule is restored by git: checked out at the
  commit the repository records, which c3l.lock must also have. c3l never
- discards local changes in it or replaces it with an archive.
+ discards local changes or commits in it, or replaces it with an archive.
 *>
 fn bool sync_submodule(Entry* e, Submodule* s, Status st) @private
 {
-	if (st != NOT_CHECKED_OUT && st != MOVED)
+	if (st == MOVED && s.unsaved())
 	{
-		log::error("%s: %s", e.name, install::explain(st, e, s));
+		log::error("%s: the submodule %s has commits on no branch; c3l does not drop them (create a branch for them, or check out %s yourself)", e.name, s.path, git::abbrev(s.commit));
 		return false;
 	}
-	if (st == MOVED && s.edited())
+	if (st == NOT_CHECKED_OUT || st == MOVED)
 	{
-		log::error("%s: %s", e.name, install::explain(EDITED, e, s));
-		return false;
+		if (catch s.reset()) return false;
+		st = install::submodule_status(e, s);
+		if (st == OK) log::info("checked out the submodule %s at %s (commit %s)", s.path, e.version, git::abbrev(s.commit));
 	}
-	if (!s.restore("."))
-	{
-		log::error("%s: cannot check out the submodule %s%s", e.name, s.path, git::because());
-		return false;
-	}
-	Status now = install::status(e, "", s);
-	if (now != OK)
-	{
-		log::error("%s: %s", e.name, install::explain(now, e, s));
-		return false;
-	}
-	log::info("checked out the submodule %s at %s (commit %s)", s.path, e.version, s.commit[:12]);
-	return true;
+	if (st == OK) return true;
+	log::error("%s: %s", e.name, install::explain(st, e, s));
+	return false;
 }
 
 <*
- Bring under c3l what another tool keeps: c3po's project.lock.json or c3l 0.x's
- .c3l.deps (into a new c3l.lock), and git submodules in the library directory
- that c3l.lock does not list yet (adopted at the commit the repository records).
+ Bring under c3l what another tool keeps: git submodules in the library
+ directory that c3l.lock does not list yet (adopted at the commit the repository
+ records), and c3po's project.lock.json or c3l 0.x's .c3l.deps (into a new c3l.lock).
 *>
 fn void? migrate_run(Ctx* ctx)
 {
 	Project p = project::find()!;
-	bool c3po = file::exists("project.lock.json");
-	bool deps = file::exists(".c3l.deps");
+	String old = file::exists("project.lock.json") ? "project.lock.json" : file::exists(".c3l.deps") ? ".c3l.deps" : "";
+	if (old == "project.lock.json" && file::exists(".c3l.deps")) log::warn(".c3l.deps is not imported; project.lock.json is");
+	bool fresh = !p.lock.exists();
 	List{Submodule} subs;
 	subs.tinit();
 	foreach (sm : p.submodules()) if (!p.lock.has(sm.name)) subs.push(sm);
-	if (!c3po && !deps && !subs.len())
+	if (!old.len && !subs.len())
 	{
 		return log::fail("nothing to migrate: no project.lock.json (c3po), no .c3l.deps (c3l 0.x) and no git submodule in the library directory that %s does not list", p.lock.file)~;
 	}
-	if (c3po || deps)
+	if (old.len && !fresh && !subs.len()) return log::fail("%s already exists", p.lock.file)~;
+	String[] adopted = subs.len() ? adopt_submodules(&p, ctx, subs.array_view())! : {};
+	if (old.len && !fresh)
 	{
-		String old = c3po ? "project.lock.json" : ".c3l.deps";
-		if (p.lock.exists())
+		log::warn("%s already exists; %s is not imported", p.lock.file, old);
+	}
+	else if (old.len)
+	{
+		String dir = p.lib_dir()!;
+		if (old == ".c3l.deps")
 		{
-			if (!subs.len()) return log::fail("%s already exists", p.lock.file)~;
-			log::warn("%s already exists; %s is not imported", p.lock.file, old);
+			migrate_deps(&p, dir, adopted)!;
 		}
 		else
 		{
-			String dir = p.lib_dir()!;
-			if (c3po)
-			{
-				migrate_c3po(&p, dir)!;
-			}
-			else
-			{
-				migrate_deps(&p, dir)!;
-			}
-			p.lock.save()!;
-			log::info("the libraries already in %s are not verified yet; run 'c3l sync' to rebuild them as verified archives", dir);
+			migrate_c3po(&p, dir, adopted)!;
 		}
+		p.lock.save()!;
+		log::info("the libraries already in %s are not verified yet; run 'c3l sync' to rebuild them as verified archives", dir);
 	}
-	if (subs.len()) adopt_submodules(&p, ctx, subs.array_view())!;
+	if (!old.len && !adopted.len) return log::fail("no submodule could be adopted (see the warnings)")~;
 }
 
 <*
  Lock git submodules as git libraries: the URL from .gitmodules, the commit the
  repository records, the version a tag at that commit names (else the branch
  .gitmodules follows, else the commit), the content hash an archive of that
- commit would have. Then install what they require, as archives.
+ commit would have. Then install what they require, as archives. The names adopted.
 *>
-fn void? adopt_submodules(Project* p, Ctx* ctx, Submodule[] subs) @private
+fn String[]? adopt_submodules(Project* p, Ctx* ctx, Submodule[] subs) @private
 {
 	Options opts = options(ctx);
 	Op op = install::begin(p, &opts)!;
 	defer catch op.rollback();
 	List{Manifest} adopted;
 	adopted.tinit();
+	List{String} names;
+	names.tinit();
 	foreach (&sm : subs)
 	{
 		sys::check_interrupt()!;
-		if (!lock::valid_git_url(sm.url))
-		{
-			log::warn("%s: skipped, its URL in .gitmodules ('%s') is not one c3l fetches from (https://, ssh://, git://, file:// or git@host:path, without credentials)", sm.path, sm.url);
-			continue;
-		}
-		if (!sm.checked_out())
-		{
-			if (!sm.restore("."))
-			{
-				log::warn("%s: skipped, it cannot be checked out%s", sm.path, git::because());
-				continue;
-			}
-			log::info("checked out the submodule %s", sm.path);
-		}
-		String head = sm.head();
-		if (head != sm.commit)
-		{
-			log::warn("%s: skipped, it is checked out at %s but the repository records %s ('git submodule update %s' goes back)", sm.path, head[:head.len < 12 ? head.len : 12], sm.commit[:12], sm.path);
-			continue;
-		}
-		Manifest? m = manifest::load(sm.at);
-		if (catch m)
-		{
-			log::warn("%s: skipped, it has no manifest.json (not a C3 library)", sm.path);
-			continue;
-		}
-		if (m.provides != sm.name)
-		{
-			log::warn("%s: skipped, its manifest.json provides '%s'; c3c finds a library as <dir>/<provides>.c3l", sm.path, m.provides);
-			continue;
-		}
-		if (sm.edited()) log::warn("%s has local changes; 'c3l verify' reports them until they are committed or discarded", sm.path);
+		Manifest? m = adoptable(sm);
+		if (catch m) continue;
 		String version = submodule_version(sm);
-		String hash = submodule_hash(sm)!;
 		String pin = string::tformat("commit:%s", sm.commit);
-		op.place({ .name = sm.name, .kind = GIT, .origin = sm.url, .id = "-", .version = version, .pin = pin, .hash = hash }, "", DIRECT)!;
-		log::info("adopted the submodule %s: %s %s (commit %s)", sm.path, sm.name, version, sm.commit[:12]);
+		op.place({ .name = sm.name, .kind = GIT, .origin = sm.url, .id = "-", .version = version, .pin = pin, .hash = submodule_hash(sm)! }, "", DIRECT)!;
+		log::info("adopted the submodule %s: %s %s (commit %s)", sm.path, sm.name, version, git::abbrev(sm.commit));
 		adopted.push(m);
+		names.push(sm.name);
 	}
 	foreach (m : adopted) op.follow(m.provides, m.requires)!;
 	op.commit();
+	return names.array_view();
+}
+
+// The manifest of a submodule that can be adopted; otherwise a warning says why not.
+fn Manifest? adoptable(Submodule* sm) @private
+{
+	if (sm.url.starts_with("./") || sm.url.starts_with("../"))
+	{
+		log::warn("%s: skipped, its URL in .gitmodules ('%s') is relative to this repository's remote; consumers need an absolute URL", sm.path, sm.url);
+		return NOT_FOUND~;
+	}
+	if (!lock::valid_git_url(sm.url))
+	{
+		log::warn("%s: skipped, its URL in .gitmodules ('%s') is not one c3l fetches from (https://, ssh://, git://, file:// or git@host:path, without credentials)", sm.path, sm.url);
+		return NOT_FOUND~;
+	}
+	if (!sm.checked_out())
+	{
+		if (catch sm.reset()) return NOT_FOUND~;
+		log::info("checked out the submodule %s", sm.path);
+	}
+	String head = sm.head();
+	if (head != sm.commit)
+	{
+		log::warn("%s: skipped, it is checked out at %s but the repository records %s ('git submodule update %s' goes back)", sm.path, git::abbrev(head), git::abbrev(sm.commit), sm.path);
+		return NOT_FOUND~;
+	}
+	Manifest? m = manifest::load(sm.at);
+	if (catch m)
+	{
+		log::warn("%s: skipped, it has no manifest.json (not a C3 library)", sm.path);
+		return NOT_FOUND~;
+	}
+	if (m.provides != sm.name)
+	{
+		log::warn("%s: skipped, its manifest.json provides '%s'; c3c finds a library as <dir>/<provides>.c3l", sm.path, m.provides);
+		return NOT_FOUND~;
+	}
+	if (sm.edited()) log::warn("%s has local changes; 'c3l verify' reports them until they are committed or discarded", sm.path);
+	return m;
 }
 
 // A tag at the commit (the highest version if several), else the branch .gitmodules follows, else the commit.
@@ -419,7 +423,7 @@ fn String submodule_version(Submodule* sm) @private
 	if (best.len) return best;
 	if (names.len) return names[0];
 	if (sm.branch.len && sm.branch != ".") return string::tformat("branch:%s", sm.branch);
-	return string::tformat("commit:%s", sm.commit[:12]);
+	return string::tformat("commit:%s", git::abbrev(sm.commit));
 }
 
 // The content hash of the commit, as c3l records it for a git library: from an archive of a local copy.
@@ -427,8 +431,7 @@ fn String? submodule_hash(Submodule* sm) @private
 {
 	String tmp = sys::temp_dir()!;
 	defer sys::remove(tmp);
-	String from = (String)sm.at.to_absolute_path(tmem) ?? sm.at;
-	String src = git::checkout(from, sm.commit, "", tmp)!;
+	String src = git::checkout(sm.at, sm.commit, "", tmp)!;
 	String zip = string::tformat("%s/lib.zip", tmp);
 	git::archive(src, zip)!;
 	return sys::content_hash(zip) ?? log::fail("cannot read the archive of %s", sm.path)~;
@@ -439,7 +442,7 @@ fn String? submodule_hash(Submodule* sm) @private
  cloned at the tag (none: HEAD). The tag is resolved to its commit now; the file is
  left alone.
 *>
-fn void? migrate_deps(Project* p, String dir) @private
+fn void? migrate_deps(Project* p, String dir, String[] adopted) @private
 {
 	String text = (String)file::load_temp(".c3l.deps") ?? log::fail("cannot read .c3l.deps")~!;
 	foreach (line : text.tsplit("\n"))
@@ -454,7 +457,7 @@ fn void? migrate_deps(Project* p, String dir) @private
 			log::warn("skipping a .c3l.deps line that is not 'name.c3l path url [tag]': %s", line.trim());
 			continue;
 		}
-		if (@ok(p.submodule(name))) continue;  // adopted as a submodule
+		if (array::contains(adopted, name)) continue;  // stored as a submodule
 		Rev rev = install::resolve_rev(url, tag, "") ?? log::fail("fix or remove the line for %s in .c3l.deps", name)~!;
 		String pin = string::tformat("commit:%s", rev.commit);
 		String file = project::lib_file(dir, name);
@@ -471,7 +474,7 @@ fn void? migrate_deps(Project* p, String dir) @private
  c3po (Ecoral360/c3po) keeps project.lock.json: {"packages": [{name, repo, origin,
  ref, commit}]}. Lock the same commits as git libraries; c3po's files are not touched.
 *>
-fn void? migrate_c3po(Project* p, String dir) @private
+fn void? migrate_c3po(Project* p, String dir, String[] adopted) @private
 {
 	String text = (String)file::load_temp("project.lock.json") ?? log::fail("cannot read project.lock.json")~!;
 	Object* root = json::tparse(text) ?? log::fail("project.lock.json is not valid JSON")~!;
@@ -499,7 +502,7 @@ fn void? migrate_c3po(Project* p, String dir) @private
 				log::warn("%s: unknown c3po origin '%s', skipping", name, origin);
 				continue;
 		}
-		if (@ok(p.submodule(name))) continue;  // adopted as a submodule
+		if (array::contains(adopted, name)) continue;  // stored as a submodule
 		if (!label.len) label = "HEAD";
 		String f = project::lib_file(dir, name);
 		if (!sys::exists(f)) f = string::tformat("%s/%s", dir, repo[(repo.rindex_of_char('/') ?? -1) + 1..]);

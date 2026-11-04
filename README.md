@@ -95,14 +95,26 @@ c3l publish --description "My library" --license MIT
   with `c3l.lock`, so its dependencies come along.
 - `c3l pack` writes the package without uploading it.
 
+## Submodules
+
+A git library can also live as a git submodule in `lib/`, for contributors who
+clone with `--recurse-submodules`:
+
+```sh
+git submodule add https://github.com/you/lib lib/lib.c3l
+c3l migrate                            # lock it in c3l.lock
+c3l sync                               # after a plain clone: checks it out
+c3l update lib                         # moves the submodule and stages it
+```
+
+c3l never overwrites a submodule or discards changes in it, and never commits.
+Whoever installs your library gets it from `c3l.lock` as usual.
+
 ## Notes
 
 - Private git repositories work with whatever gives git access: an ssh key or a
   credential helper. `man c3l` shows how in CI.
-- Libraries kept as git submodules in `lib/` work too: `c3l migrate` locks them,
-  `sync` checks them out, `update` moves them, and c3l never overwrites them.
 - On Windows, linking a local library needs Developer Mode.
-- c3l follows the dependencies in c3po manifests. `c3l migrate` imports a
-  c3po lock or the `.c3l.deps` of c3l 0.x.
+- c3l follows the dependencies in c3po manifests.
 
 MIT, see LICENSE. `make test` runs the tests.

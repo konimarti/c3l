@@ -184,7 +184,9 @@ fn bool valid_git_url(String s)
 	{
 		case "http":
 		case "https": return !rest[:end].contains("@");
-		case "ssh":
+		case "ssh":  // a user name is fine (ssh://git@host), a password is not
+			String auth = rest[:end];
+			return !auth[:auth.rindex_of_char('@') ?? 0].contains(":");
 		case "git":
 		case "file": return true;
 		default: return false;
