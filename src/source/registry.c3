@@ -2,9 +2,10 @@
  A c3c fetch registry, spoken to directly (the same protocol `c3c fetch` uses):
 
    <base>/info/<ns>/<name>         {library, description, latest, updated, tags,
-                                    versions: {<version>: {checksum, ...}}}
-   <base>/download/<ns>/<name>@<v> the .c3l archive
+                                    versions: {<version>: {checksum, size, url, ...}}}
+   <base>/download/<ns>/<name>@<v> the .c3l archive, unless the version has a "url"
    <base>/index.json               {libraries: [{library, description, latest, tags}]}
+                                    (c3pkg has none; it has <base>/search?q= instead)
 
  `base` is the URL as `c3c --fetch-url` takes it, without a trailing slash.
 *>
@@ -73,14 +74,14 @@ fn void Info.print(&self)
 
 fn bool Info.has(&self, String version) => self.versions.has_key(version);
 
-// The published versions.
+// The published versions that were not yanked (a yanked one is never offered, but `has` knows it).
 fn String[] Info.list(&self)
 {
 	List{String} out;
 	out.tinit();
 	self.versions.@each_entry(; String version, Object* v)
 	{
-		out.push(version);
+		if (!self.yanked(version)) out.push(version);
 	};
 	return out.array_view();
 }
@@ -92,9 +93,28 @@ fn String Info.checksum(&self, String version)
 	return v && v.is_map() ? v.get_string("checksum") ?? "" : "";
 }
 
-fn Response download(String base, String id, String version, String file)
+<*
+ Where the archive of `version` is: the version's own "url" in the info record
+ (an http(s) URL, e.g. a release asset), else <base>/download/<id>@<version>.
+*>
+fn String Info.download_url(&self, String base, String id, String version)
 {
-	return http::download(string::tformat("%s/download/%s@%s", base, id, version), file);
+	Object* v = self.versions.get(version) ?? null;
+	String url = v && v.is_map() ? v.get_string("url") ?? "" : "";
+	if (url.starts_with("http://") || url.starts_with("https://")) return url;
+	return string::tformat("%s/download/%s@%s", base, id, version);
+}
+
+// The registry withdrew this version (c3pkg: yanked); it is still served for those who locked it.
+fn bool Info.yanked(&self, String version)
+{
+	Object* v = self.versions.get(version) ?? null;
+	return v && v.is_map() && (v.get_bool("yanked") ?? false);
+}
+
+fn Response download(String url, String file)
+{
+	return http::download(url, file);
 }
 
 struct Hit

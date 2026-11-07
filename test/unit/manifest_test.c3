@@ -78,3 +78,46 @@ fn void c3po_sources_at_the_locked_commit() @test
 	assert(m.requires[1].version == "", "b: not a commit, so any version");
 	assert(manifest::parse(text)!!.requires[0].version == "", "without project.lock.json: any version");
 }
+
+fn void dependency_paths_as_c3c_writes_them() @test
+{
+	String sum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+	Manifest m = manifest::parse(string::tformat(`{ "provides": "x", "dependencies": [
+		"plain", "ns/a", "ns/b@1.2.3", "https://r.example:8080:ns/c@2.0.0", "ns/d@1.0.0:%s",
+		"http://h:ns/e", ], "targets": { "linux-x64": { "dependencies": [ "ns/f@0.1.0" ] } } }`, sum))!!;
+	assert(m.requires.len == 7, "%d", m.requires.len);
+	assert(m.requires[0].name == "plain" && !m.requires[0].source.len);
+	assert(m.requires[1].name == "a" && m.requires[1].source == "ns/a" && !m.requires[1].version.len);
+	assert(m.requires[2].name == "b" && m.requires[2].version == "1.2.3" && !m.requires[2].registry.len);
+	assert(m.requires[3].name == "c" && m.requires[3].registry == "https://r.example:8080" && m.requires[3].version == "2.0.0");
+	assert(m.requires[4].name == "d" && m.requires[4].checksum == string::tformat("sha256:%s", sum));
+	assert(m.requires[5].name == "e" && m.requires[5].registry == "http://h");
+	assert(m.requires[6].name == "f" && m.requires[6].source == "ns/f");
+	assert(!m.invalid.len);
+	assert(m.entries.len == 7 && m.entries[1] == "ns/a");
+}
+
+fn void invalid_dependency_paths() @test
+{
+	String sum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+	String[] bad = {
+		string::tformat("ns/a:%s", sum),   // a checksum needs a version
+		"ftp://h:ns/a@1.0.0",              // the url is http(s)
+		"ns/a@1.0.0:xyz",                  // not a checksum, not a url
+		"ns/a/b/c",                        // namespace/name only
+		"ns/a@",                           // empty version
+	};
+	foreach (b : bad)
+	{
+		Manifest m = manifest::parse(string::tformat(`{ "provides": "x", "dependencies": [ "%s" ] }`, b))!!;
+		assert(m.invalid == b && !m.requires.len, "%s", b);
+	}
+}
+
+fn void bare_names() @test
+{
+	assert(manifest::bare_name("vk") == "vk");
+	assert(manifest::bare_name("tonis2/vk@1.0.1") == "vk");
+	assert(manifest::bare_name("https://h:8080:tonis2/vk") == "vk");
+	assert(manifest::bare_name("not a/path@") == "not a/path@", "an invalid entry stays as it is");
+}

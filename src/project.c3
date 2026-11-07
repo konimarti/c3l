@@ -69,6 +69,8 @@ fn String[]? Project.deps(&self)
 	{
 		self.dep_names = view_list("dependencies", targets: true)!;
 	}
+	// c3c takes "ns/name@1.0" entries too; c3l works with library names
+	foreach (&d : self.dep_names) *d = manifest::bare_name(*d);
 	self.deps_read = true;
 	return self.dep_names;
 }

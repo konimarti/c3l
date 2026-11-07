@@ -159,6 +159,14 @@ fn bool valid_id(String s)
 	return parts.len == 2 && valid_name(parts[0]) && valid_name(parts[1]);
 }
 
+// A version as c3c's library paths take it: letters, digits, '_', '-', '.', '+', starting with a letter or digit.
+fn bool valid_version(String s)
+{
+	if (!s.len || !s[0].is_alnum()) return false;
+	foreach (c : s) if (!c.is_alnum() && c != '.' && c != '_' && c != '-' && c != '+') return false;
+	return true;
+}
+
 <*
  A git URL c3l fetches from: http(s)://, ssh://, git:// or file:// URLs,
  git@host:path, or a local path. Nothing git would run (ext::), and no
@@ -202,7 +210,7 @@ fn bool is_digest(String s) @private => s.starts_with("sha256:") && is_hex(s["sh
 
 fn bool is_content(String s) @private => s.starts_with("content:") && is_hex(s["content:".len..], 64);
 
-fn bool is_hex(String s, sz len) @private
+fn bool is_hex(String s, sz len)
 {
 	if (s.len != len) return false;
 	foreach (c : s) if (!c.is_xdigit()) return false;

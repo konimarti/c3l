@@ -519,7 +519,7 @@ sed -i 's|"provides" : "demo",|"provides" : "demo",\n  "version" : "0.0.9",|' ma
 git commit -qam "manifest version"; git tag v1.2.0
 out="$(pc publish --token-file "$WORK/token" --c3-version 0.7.1 2>&1)"; eq "publish with mismatching manifest rc" $? 0
 has "manifest mismatch warning" "manifest.json says version 0.0.9, publishing 1.2.0" "$out"
-curl -fs "$PR/download/me/demo@1.2.0" > "$WORK/dl.c3l"
+curl -fs "$PR/download/acme/demo@1.2.0" > "$WORK/dl.c3l"
 has "archive carries tag version" '"version" : "1.2.0"' "$(unzip -p "$WORK/dl.c3l" manifest.json)"
 has "repo manifest untouched" '"version" : "0.0.9"' "$(cat manifest.json)"
 
@@ -527,6 +527,52 @@ out="$(c3l --registry "$C3L_REGISTRY" publish --token-file "$WORK/token" 2>&1)";
 has "read-only message" "read-only" "$out"
 out="$(c3l --registry "http://127.0.0.1:$PKG429" --registry-type c3pkg publish --token-file "$WORK/token" --version 3.0.0 --description D 2>&1)"; eq "rate limit rc" $? 1
 has "rate limit message" "retry in 7 seconds" "$out"
+
+# the fake mirrors c3pkg's rules: dependencies are plain library names, search goes through /search
+sed -i 's|"provides" : "demo",|"provides" : "demo",\n  "dependencies" : [ "acme/x@1.0.0" ],|' manifest.json
+out="$(pc check --no-build --allow-dirty 2>&1)"; eq "check: a dependency path is refused rc" $? 1
+has "check: says plain library name" "plain library name" "$out"
+git checkout -q manifest.json
+rm -rf "$WORK/xdep"; mkdir -p "$WORK/xdep/src"
+printf 'module xdep;\n' > "$WORK/xdep/src/xdep.c3"
+printf '{"provides":"xdep","version":"1.0.0","dependencies":["acme/x@1.0.0"]}' > "$WORK/xdep/manifest.json"
+( cd "$WORK/xdep" && python3 -c 'import zipfile; z = zipfile.ZipFile("xdep.c3l", "w"); z.write("manifest.json"); z.write("src/xdep.c3")' )
+put() { curl -s -w '\n%{http_code}' -X PUT -H "Authorization: Bearer ${PUTTOKEN:-c3p_test}" -F "file=@$WORK/xdep/xdep.c3l" -F c3_version=0.7.1 -F description=D "$PR/api/v1/packages/xdep/versions/1.0.0"; }
+out="$(put)"
+has "fake: dependency path refused, real wording" 'manifest.json \\"dependencies\\" has \\"acme/x@1.0.0\\". Use the plain library name, like \\"vk\\".' "$out"
+has "fake: 422" '^422$' "$out"
+has "fake: field error under errors.file" '"errors":{"file":' "$out"
+check_not "fake: nothing was stored" curl -fs "$PR/api/v1/packages/xdep"
+out="$(PUTTOKEN=nope put)"; has "fake: wrong token is 401" '^401$' "$out"
+out="$(curl -si -X PUT "$PR/api/v1/packages/xdep/versions/1.0.0")"; has "fake: 401 names the scheme" 'WWW-Authenticate: Bearer realm="c3pkg"' "$out"
+has "fake: /index.json is a plain 404" '^HTTP/1.[01] 404' "$(curl -si "$PR/index.json")"
+has "fake: /search lists libraries" '"libraries":\[{"library":"acme/demo"' "$(curl -s "$PR/search?q=demo")"
+out="$(pc search demo 2>&1)"; eq "search against the fake rc" $? 0
+has "search shows the owner's library" "^acme/demo .*Demo" "$out"
+out="$(pc search nosuchlibrary 2>&1)"; check_not "search for nothing finds no acme/ library" grep -q '^acme/' <<< "$out"
+
+# a yanked version: not the latest, not offered, still installs from a lock with a warning
+yank() { curl -fs -X "$1" -o /dev/null "$PR/_test/yank/demo/$2"; }
+cd "$WORK" && newproj yk
+c3l --registry "$PR" init >/dev/null 2>&1
+c3l --registry "$PR" add acme/demo@1.0.0 >/dev/null 2>&1
+has "outdated sees 1.2.0 before the yank" "demo .*1.0.0 .*-> 1.2.0" "$(pc outdated 2>&1)"
+yank PUT 1.2.0
+has "yanked: versions list says so" '"version":"1.2.0".*"yanked":true' "$(curl -s "$PR/api/v1/packages/demo/versions" | tr -d ' ' | tr '{' '\n' | grep '"1.2.0"')"
+check_not "yanked: gone from the index list" grep -qx 1.2.0 <<< "$(curl -s "$PR/index/demo/list")"
+check "yanked: still downloadable" curl -fs -o /dev/null "$PR/download/acme/demo@1.2.0"
+has "yanked: not the latest" '"latest":"1.0.3"' "$(curl -s "$PR/info/acme/demo")"
+has "outdated: latest skips the yanked version" "demo .*1.0.0 .*-> 1.0.3" "$(pc outdated 2>&1)"
+yank DELETE 1.2.0
+has "unyanked: latest again" '"latest":"1.2.0"' "$(curl -s "$PR/info/acme/demo")"
+c3l --registry "$PR" remove demo >/dev/null 2>&1
+c3l --registry "$PR" add acme/demo@1.0.1 >/dev/null 2>&1
+yank PUT 1.0.1
+rm -f lib/demo.c3l
+out="$(pc sync 2>&1)"; eq "sync of a locked yanked version rc" $? 0
+has "sync warns about the yank" "yanked" "$out"
+check "the yanked version was restored" test -f lib/demo.c3l
+yank DELETE 1.0.1
 
 section "version from project.json; manifest.json wins; tag and --version win over both"
 rm -rf "$WORK/pubver"; mkdir -p "$WORK/pubver"; cd "$WORK/pubver" && "$C3C" init-lib vdemo >/dev/null 2>&1 && cd vdemo.c3l || exit 1
@@ -552,13 +598,13 @@ has "project.json untouched" '"version": "0.3.0"' "$(cat project.json)"
 section "install-side compatibility (c3_version, targets)"
 cd "$WORK" && newproj p7
 c3l --registry "$PR" init >/dev/null 2>&1
-out="$(c3l --registry "$PR" add me/demo@1.0.0 2>&1)"; eq "compatible add rc" $? 0
+out="$(c3l --registry "$PR" add acme/demo@1.0.0 2>&1)"; eq "compatible add rc" $? 0
 check_not "no warning for matching C3" grep -q "published for C3" <<< "$out"
 c3l --registry "$PR" remove demo >/dev/null 2>&1
-out="$(c3l --registry "$PR" add me/demo@1.2.0 2>&1)"; eq "other-C3 add (warn) rc" $? 0
+out="$(c3l --registry "$PR" add acme/demo@1.2.0 2>&1)"; eq "other-C3 add (warn) rc" $? 0
 has "C3 mismatch warns" "published for C3 0.7.1" "$out"
 c3l --registry "$PR" remove demo >/dev/null 2>&1
-out="$(c3l --registry "$PR" --strict add me/demo@1.2.0 2>&1)"; eq "--strict add rc" $? 1
+out="$(c3l --registry "$PR" --strict add acme/demo@1.2.0 2>&1)"; eq "--strict add rc" $? 1
 has "strict refuses" "not compatible" "$out"
 check_not "nothing installed under --strict" test -e lib/demo.c3l
 
@@ -1158,6 +1204,78 @@ out="$(c3l add "file://$SR@v0.2.0" 2>&1)"; eq "nested repository with work rc" $
 has "nested repository explained" "is a git repository with local changes or commits on no branch" "$out"
 check "nested repository kept" test -d lib/serp.c3l/.git
 unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_CONFIG_KEY_1 GIT_CONFIG_VALUE_1 GIT_CONFIG_KEY_2 GIT_CONFIG_VALUE_2
+
+section "c3c library paths: dependencies as [url:]ns/name[@version][:sha256], a version's own url, yanked"
+newproj lp
+c3l init >/dev/null 2>&1
+publish acme/lpa 1.0.0 >/dev/null
+publish acme/lpa 1.1.0 >/dev/null
+LPA_SUM="$(publish acme/lpa 1.0.0)"
+publish acme/lpb 1.0.0 >/dev/null
+publish acme/lpc 1.0.0 >/dev/null
+publish acme/lpt 1.0.0 >/dev/null
+publish acme/lpd 1.0.0 >/dev/null
+publish acme/lpe 1.0.0 >/dev/null
+publish acme/lpsha 1.0.0 --deps="acme/lpa@1.0.0:$LPA_SUM" >/dev/null
+publish acme/lpurl 1.0.0 --deps="$C3L_REGISTRY:acme/lpb@1.0.0" >/dev/null
+publish acme/lptarget 1.0.0 --tdeps="acme/lpt" >/dev/null
+publish acme/lpbare 1.0.0 --deps="acme/lpd" >/dev/null
+out="$(c3l add acme/lpbare 2>&1)"; eq "a path without a version rc" $? 0
+check "its source was named by the path" test -f lib/lpd.c3l
+has "lpd is a dependency, locked" "^lpd	registry	$C3L_REGISTRY	acme/lpd	1.0.0.*	dep" "$(cat c3l.lock)"
+check_not "the path is not written into project.json" grep -q 'acme/lpd' project.json
+out="$(c3l add acme/lpurl 2>&1)"; eq "a path with a registry url (and a port) rc" $? 0
+check "installed from the url" test -f lib/lpb.c3l
+out="$(c3l add acme/lptarget 2>&1)"; eq "a target's dependency path rc" $? 0
+check "target dependency installed" test -f lib/lpt.c3l
+out="$(c3l add acme/lpsha 2>&1)"; eq "a path with the right sha256 rc" $? 0
+has "locked at the pinned version" "^lpa	registry	$C3L_REGISTRY	acme/lpa	1.0.0	sha256:$LPA_SUM" "$(cat c3l.lock)"
+check "verify with path dependencies" c3l verify
+rm -f lib/lpa.c3l lib/lpb.c3l; c3l sync >/dev/null 2>&1; eq "sync restores them rc" $? 0
+
+newproj lp2
+c3l init >/dev/null 2>&1
+publish acme/lpbad 1.0.0 --deps="acme/lpa@1.0.0:$(printf '0%.0s' $(seq 64))" >/dev/null
+out="$(c3l add acme/lpbad 2>&1)"; eq "a wrong sha256 pin rc" $? 1
+has "it says what differs" "checksum mismatch\|pins" "$out"
+check_not "nothing installed" test -e lib/lpbad.c3l
+check_not "nothing installed (dependency)" test -e lib/lpa.c3l
+publish acme/lpnover 1.0.0 --deps="acme/lpa:$LPA_SUM" >/dev/null
+out="$(c3l add acme/lpnover 2>&1)"; eq "a sha256 without a version rc" $? 1
+has "refused as not a library name" "not a valid library name" "$out"
+publish acme/lpurlbad 1.0.0 --deps="ftp://h:acme/lpa@1.0.0" >/dev/null
+out="$(c3l add acme/lpurlbad 2>&1)"; eq "a url that is not http(s) rc" $? 1
+publish acme/lpverbad 1.0.0 --deps="acme/lpa@1.0.0:xyz" >/dev/null
+out="$(c3l add acme/lpverbad 2>&1)"; eq "a malformed path rc" $? 1
+
+section "a version's own url (c3lang/vendor): the archive is not under download/"
+newproj lu
+c3l init >/dev/null 2>&1
+publish acme/viaurl 1.0.0 --url="$C3L_REGISTRY" >/dev/null
+check_not "no download/ file exists" test -e "$REG/download/acme/viaurl@1.0.0"
+out="$(c3l add acme/viaurl 2>&1)"; eq "add via the version's url rc" $? 0
+check "installed" test -f lib/viaurl.c3l
+has "checksum is the registry's" "sha256:$(sha lib/viaurl.c3l)" "$(cat c3l.lock)"
+rm -f lib/viaurl.c3l; check "sync via the url" c3l sync
+check "verify" c3l verify
+publish acme/viaurl2 1.0.0 --url="$C3L_REGISTRY" --badsum >/dev/null
+out="$(c3l add acme/viaurl2 2>&1)"; eq "a wrong checksum is still refused rc" $? 1
+has "checksum mismatch" "checksum mismatch" "$out"
+publish acme/viaurl3 1.0.0 --yanked >/dev/null
+out="$(c3l add acme/viaurl3 2>&1)"; eq "a yanked version still installs rc" $? 0
+has "with a warning" "yanked" "$out"
+
+section "library mode: a path in manifest.json dependencies is the library name"
+rm -rf "$WORK/libp"; mkdir -p "$WORK/libp"; cd "$WORK/libp" && "$C3C" init-lib lp >/dev/null 2>&1 && cd lp.c3l || exit 1
+sed -i 's|"dependencies": *\[[^]]*\]|"dependencies": [ "acme/lpa@1.0.0" ]|' manifest.json
+grep -q 'acme/lpa@1.0.0' manifest.json || sed -i 's|"provides"|"dependencies": [ "acme/lpa@1.0.0" ], "provides"|' manifest.json
+c3l init >/dev/null 2>&1
+out="$(c3l add acme/lpa 2>&1)"; eq "add of a library the manifest lists as a path rc" $? 0
+eq "no second entry" "$(grep -o 'lpa' manifest.json | wc -l)" "1"
+check "its library is in lib/" test -f lib/lpa.c3l
+has "locked as a direct dependency" "^lpa	registry.*	direct" "$(cat c3l.lock)"
+c3l remove lpa >/dev/null 2>&1
+check_not "remove drops the path entry" grep -q 'acme/lpa' manifest.json
 
 if [[ -n "$LIVE" ]]; then
 	section "live: www.c3pkg.eu"

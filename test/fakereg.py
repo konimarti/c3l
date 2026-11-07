@@ -15,6 +15,10 @@ index.json.
 --c3po         vendor.c3po.sources entries (name|git url)
 --c3polock     a c3po project.lock.json in the package (name|commit,...)
 --from         publish this .c3l file instead of generating one
+--url=BASE     like the c3lang/vendor registry: the archive is not under download/ but at
+               BASE/files/<name>@<version>.c3l, and the info entry says so ("url")
+--yanked       mark the version yanked in its info entry (c3pkg does)
+--tdeps=a,b    c3c "dependencies" of the linux-x64 target only
 """
 import hashlib, json, os, shutil, sys, zipfile
 
@@ -24,6 +28,8 @@ def write_package(path, name, version, opts):
         man = {"provides": name, "version": version, "targets": {t: {} for t in ("linux-x64", "linux-aarch64", "macos-x64", "macos-aarch64", "windows-x64")}}
         if "deps" in opts:
             man["dependencies"] = opts["deps"].split(",")
+        if "tdeps" in opts:
+            man["targets"]["linux-x64"]["dependencies"] = opts["tdeps"].split(",")
         if "requires" in opts:
             reqs = []
             for item in opts["requires"].split(","):
@@ -60,6 +66,9 @@ def main():
     os.makedirs(inf, exist_ok=True)
 
     path = os.path.join(dl, f"{name}@{version}")
+    if "url" in opts:
+        os.makedirs(os.path.join(root, "files"), exist_ok=True)
+        path = os.path.join(root, "files", f"{name}@{version}.c3l")
     if "from" in opts:
         shutil.copyfile(opts["from"], path)
     else:
@@ -73,6 +82,10 @@ def main():
         "updated": "2026-01-01T00:00:00Z", "versions": {}}
     entry = {"version": version, "description": f"test lib {name}", "size": len(data),
              "published": "2026-01-01T00:00:00Z"}
+    if "url" in opts:
+        entry["url"] = f"{opts['url']}/files/{name}@{version}.c3l"
+    if "--yanked" in flags:
+        entry["yanked"] = True
     if "--no-checksum" not in flags:
         entry["checksum"] = "sha256:" + ("0" * 64 if "--badsum" in flags else sha)
     # newest first

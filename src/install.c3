@@ -35,6 +35,7 @@ struct Want
 	String ref;
 	String pin;
 	String hash;
+	String expect;  // "sha256:<hex>" a dependency path pins for `ref` (not a restore)
 }
 
 // For all operations of one command.
@@ -167,18 +168,27 @@ fn Manifest? Op.install_registry(&self, Want w, Intent intent)
 	{
 		return log::fail("%s@%s is not compatible with this toolchain (--strict)", w.id, version)~;
 	}
+	if (info.yanked(version)) log::warn("%s@%s has been yanked by its author; it still installs, but see if a newer version exists (c3l outdated)", w.id, version);
 	String sum = info.checksum(version);
 	if (w.pin.len && sum.len && w.pin != sum)
 	{
 		log::warn("registry checksum for %s@%s differs from c3l.lock (immutable versions must never change)", w.id, version);
 	}
 	String expected = w.pin.len ? w.pin : sum;
+	if (w.expect.len && !w.pin.len && version == w.ref)
+	{
+		if (sum.len && sum != w.expect)
+		{
+			return log::fail("%s@%s: the registry lists %s, but the dependency pins %s", w.id, version, sum, w.expect)~;
+		}
+		expected = w.expect;
+	}
 	if (!expected.len) log::warn("registry gave no checksum for %s@%s; recording the downloaded file (trust on first use)", w.id, version);
 
 	String staged = self.staging(name);
 	defer (void)file::delete(staged);
 	log::info("fetching %s@%s from %s", w.id, version, w.origin);
-	Response r = registry::download(w.origin, w.id, version, staged);
+	Response r = registry::download(info.download_url(w.origin, w.id, version), staged);
 	if (!r.ok()) return log::fail("download of %s@%s from %s failed: %s", w.id, version, w.origin, r.why())~;
 	String got = verify(staged, expected, string::tformat("%s@%s", w.id, version))!;
 	warn_provides(staged, name, w.id);

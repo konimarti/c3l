@@ -32,6 +32,7 @@ struct Package
 	String version;
 	String version_from;
 	String c3_version;
+	String[] dependency_entries;  // the manifest's "dependencies", as written
 	int errors;
 }
 
@@ -92,6 +93,7 @@ fn Package check(String dir, Settings s)
 	if (!sources) log::warn("%s contains no .c3/.c3i sources", dir);
 	if (!file::exists(string::tformat("%s/README.md", dir))) log::warn("no README.md in %s (the registry shows it as the package page)", dir);
 
+	p.dependency_entries = m.entries;
 	p.check_dependencies(m);
 	p.check_clean(s.allow_dirty);
 	if (!s.no_build) p.check_build();
@@ -258,11 +260,24 @@ fn void Package.check_build(&self)
 }
 
 // Not published yet, not older than what is; a new package needs a description.
+// c3pkg's rule for an entry of "dependencies": [a-z][a-z0-9_]{0,126}
+fn bool c3pkg_dependency(String d)
+{
+	if (!d.len || d.len > 127 || !(d[0] >= 'a' && d[0] <= 'z')) return false;
+	foreach (c : d) if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return false;
+	return true;
+}
+
 fn void Package.check_registry(&self, Settings s)
 {
 	String base = registry::base(s.registry);
 	bool guessed;
 	if ((registry::detect(base, s.registry_type, &guessed) ?? Api.STATIC) != C3PKG) return;
+	foreach (d : self.dependency_entries)
+	{
+		if (c3pkg_dependency(d)) continue;
+		self.error("manifest.json \"dependencies\" has \"%s\"; %s only takes a plain library name there, like \"vk\" (c3l.lock in the package says where consumers get it)", d, base);
+	}
 	String[]? published = registry::versions(base, self.name);
 	if (catch e = published)
 	{

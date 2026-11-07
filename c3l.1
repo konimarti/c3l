@@ -5,7 +5,7 @@
 .nh
 .ad l
 .\" Begin generated content:
-.TH "C3L" "1" "2026-11-04"
+.TH "C3L" "1" "2026-11-07"
 .P
 .SH NAME
 .P
@@ -282,7 +282,7 @@ atomically.\&
 .RE
 \fBsearch\fR \fItext\fR | \fBtag:\fR\fIname\fR
 .RS 4
-Search the registry (its \fI/search\fR API, else its \fIindex.\&json\fR) and c3c'\&s vendor
+Search the registry (its \fI/search\fR API, else its \fIindex.\&json\fR; the latter is what c3c'\&s static registries have) and c3c'\&s vendor
 collection, by name and description.\& The vendor list is the one built into this
 c3l, so a library added to the collection since is missing; \fBadd vendor\fR lists the
 collection as it is now.\& \fBtag:\fR searches the registry only.\&
@@ -348,6 +348,11 @@ checksum with the uploaded file.\& With \fB--dry-run\fR stop before the upload.\
 \fBpublish\fR needs a registry with an upload API.\& Registry types: \fIc3pkg\fR (www.\&c3pkg.\&eu;
 detected by probing \fI/api/v1/packages\fR) and \fIstatic\fR (read-only, anything else).\&
 .P
+A \fIstatic\fR registry speaks c3c'\&s fetch protocol: \fIinfo/<ns>/<name>\fR lists the versions with
+their checksum, and each version is downloaded from its own \fIurl\fR when the record has one
+(the \fIc3lang/vendor\fR registry points at release assets), else from \fIdownload/<ns>/<name>@<version>\fR.\&
+A version that c3pkg marks yanked still installs for whoever locked it, with a warning.\&
+.P
 For c3pkg: create an API token under Settings, API tokens, and give it to c3l with
 \fB--token-file\fR \fIFILE\fR, \fBC3L_TOKEN\fR or \fBC3PKG_TOKEN\fR.\& It is sent as
 \fIAuthorization: Bearer\fR header and never appears on a command line.\&
@@ -390,13 +395,20 @@ A library declares them in its \fIc3l.\&lock\fR: each direct entry is a requirem
 the source it names (a registry the consumer has no library from yet needs
 \fB--allow-host\fR), at least at the locked version for registry libraries, at the locked
 tag, branch or commit for git libraries (\fBupdate\fR moves a tag like any other version).\&
-Apps and libraries alike, \fIc3l.\&lock\fR is the only file c3l writes dependencies to.\&
+Apps and libraries alike, \fIc3l.\&lock\fR is the only file c3l writes dependencies to.\& So a library that was never
+touched by c3l but lists its dependencies as paths still installs them all, and they
+end up in \fIc3l.\&lock\fR as dependencies; c3l never writes a path into a manifest.\& c3pkg
+refuses paths in \fIdependencies\fR, and \fBcheck\fR says so before you upload.\&
 .P
 c3l also reads, but never writes, \fIvendor.\&c3l.\&requires\fR in a library'\&s \fImanifest.\&json\fR
 (packages published by c3l 1.\&1), c3po'\&s \fIvendor.\&c3po.\&sources\fR (\fIc3po-version\fR 1; at
 the commit the library'\&s \fIproject.\&lock.\&json\fR pins, if it has one) and
-c3c'\&s plain \fIdependencies\fR names (no source: a warning, and \fBverify\fR fails until the
-library is added).\& For each name the first wins, in this order: \fIvendor.\&c3l.\&requires\fR,
+c3c'\&s \fIdependencies\fR: a plain name (no source: a warning, and \fBverify\fR fails until the
+library is added) or a library path, \fI[url:]ns/name[@version][:sha256]\fR, which names
+the source (\fIns/name\fR in the registry at \fIurl\fR, else the default), the minimum version
+and the checksum that version'\&s archive must have (64 hex digits, needs a version; a
+mismatch with the file or the registry is an error).\& c3c accepts a path wherever it takes a
+name and reduces it to the name itself.\& For each name the first wins, in this order: \fIvendor.\&c3l.\&requires\fR,
 \fIc3l.\&lock\fR, \fIvendor.\&c3po.\&sources\fR, \fIdependencies\fR.\& Dependencies that \fIproject.\&json\fR lists for a
 single target are part of the project too (\fBlist\fR, \fBverify\fR, \fBsync --frozen\fR).\&
 .P

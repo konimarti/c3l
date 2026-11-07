@@ -62,7 +62,7 @@ fn void? Op.resolve(&self, String parent, Requirement r)
 		case registry::is_id(r.source):
 			String origin = self.registry_of(r);
 			if (!self.registry_known(origin)) self.trust(origin)!;
-			w = { .kind = REGISTRY, .origin = origin, .id = r.source, .ref = plain_version(r.version) };
+			w = { .kind = REGISTRY, .origin = origin, .id = r.source, .ref = plain_version(r.version), .expect = r.checksum };
 		default:
 			return log::fail("%s requires '%s' from '%s', which is neither <namespace>/<name> nor a git URL", parent, r.name, r.source)~;
 	}
@@ -95,6 +95,10 @@ fn void? Op.satisfy(&self, String parent, Entry e, Requirement r)
 		return;
 	}
 	String want = plain_version(r.version);
+	if (r.checksum.len && want == e.version && e.pin != r.checksum)
+	{
+		return log::fail("%s@%s: %s pins %s, but the installed archive is %s", e.name, e.version, parent, r.checksum, e.pin)~;
+	}
 	if (!semver::valid(want) || !semver::valid(e.version)) return;
 	if (semver::compat(want) != semver::compat(e.version))
 	{

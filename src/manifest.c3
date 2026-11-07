@@ -7,7 +7,7 @@
    c3l.lock              its direct entries                   how c3l libraries declare them
    vendor.c3po.sources   [{name, source}]                     read only: c3po compatibility, at the
                                                               commit c3po's project.lock.json pins, if any
-   dependencies          names only (top level and per target), no source
+   dependencies          names, or c3c's "[url:]ns/name[@version][:sha256]" (top level and per target)
 *>
 module c3l::manifest;
 
@@ -20,6 +20,7 @@ struct Requirement
 	String source;    // registry id, git URL or vendor:<name>; empty: unknown
 	String version;   // empty: any
 	String registry;  // registry base URL for a registry source; empty: the default
+	String checksum;  // "sha256:<hex>" the archive of `version` must have; empty: none
 }
 
 struct Manifest
@@ -28,6 +29,7 @@ struct Manifest
 	String version;
 	String[] dependencies;  // top level "dependencies"
 	Requirement[] requires;
+	String[] entries;       // every entry of "dependencies", top level and per target, as written
 	String invalid;         // a required name that is not a valid library name (not in `requires`)
 	String[] notes;         // what was not followed, and why: for the user
 }
@@ -85,6 +87,8 @@ fn Manifest? parse(String text, String lock_text = "", String c3po_lock = "")
 	}
 	List{String} notes;
 	notes.tinit();
+	List{String} entries;
+	entries.tinit();
 	if (lock_text.len)
 	{
 		String why;
@@ -114,15 +118,16 @@ fn Manifest? parse(String text, String lock_text = "", String c3po_lock = "")
 			add(&m, &reqs, { .name = name, .source = r.get_string("source") ?? "", .version = c3po_commit(c3po_lock, name) });
 		}
 	}
-	foreach (d : m.dependencies) add(&m, &reqs, { .name = d });
+	foreach (d : m.dependencies) { entries.push(d); add_dependency(&m, &reqs, d); }
 	if (try targets = root.get("targets"))
 	{
 		targets.@each_entry(; String key, Object* target)
 		{
-			foreach (d : strings(target, "dependencies")) add(&m, &reqs, { .name = d });
+			foreach (d : strings(target, "dependencies")) { entries.push(d); add_dependency(&m, &reqs, d); }
 		};
 	}
 	m.requires = reqs.array_view();
+	m.entries = entries.array_view();
 	m.notes = notes.array_view();
 	return m;
 }
@@ -181,6 +186,76 @@ fn String[] Manifest.require_names(&self)
 	names.tinit();
 	foreach (r : self.requires) if (r.name != self.provides) names.push(r.name);
 	return names.array_view();
+}
+
+<*
+ An entry of "dependencies": a library name, or c3c's library path
+ "[<url>:]<namespace>/<name>[@<version>][:<sha256>]" (<url> is a registry, the sha256 is 64 hex
+ digits and needs a version). A path names its source; an invalid one is `invalid`.
+*>
+fn void add_dependency(Manifest* m, List{Requirement}* reqs, String entry) @private
+{
+	Requirement? r = parse_dependency(entry);
+	if (catch r)
+	{
+		if (!m.invalid.len) m.invalid = entry;
+		return;
+	}
+	add(m, reqs, r);
+}
+
+// The library name of a "dependencies" entry: "tonis2/vk@1.0.1" -> "vk"; an invalid entry is returned as it is.
+fn String bare_name(String entry)
+{
+	Requirement? r = parse_dependency(entry);
+	return r.name ?? entry;
+}
+
+fn Requirement? parse_dependency(String entry)
+{
+	if (!entry.contains("/") && !entry.contains(":") && !entry.contains("@")) return { .name = entry };
+	String text = entry;
+	String checksum;
+	if (try i = text.rindex_of_char(':'))
+	{
+		String hex = text[i + 1..];
+		if (hex.len == 64 && lock::is_hex(hex, 64))
+		{
+			checksum = string::tformat("sha256:%s", hex.to_lower_copy(tmem));
+			text = text[:i];
+		}
+	}
+	// the url ends at the last ':' that is not the start of "://"
+	String url;
+	String path = text;
+	for (sz i = text.len; i > 0; i--)
+	{
+		if (text[i - 1] != ':') continue;
+		if (i < text.len && text[i] == '/') break;
+		url = text[:i - 1];
+		path = text[i..];
+		break;
+	}
+	String version;
+	bool has_at;
+	if (try i = path.index_of_char('@'))
+	{
+		has_at = true;
+		version = path[i + 1..];
+		path = path[:i];
+	}
+	if (!path.contains("/")) return { .name = entry };  // a plain name with a stray ':' or '@' is not a path: invalid below
+	if (!lock::valid_id(path)) return BAD_MANIFEST~;
+	if (url.len && !(url.starts_with("http://") || url.starts_with("https://"))) return BAD_MANIFEST~;
+	if (checksum.len && !version.len) return BAD_MANIFEST~;
+	if (has_at && !lock::valid_version(version)) return BAD_MANIFEST~;
+	return {
+		.name = path[(path.rindex_of_char('/') ?? 0) + 1..],
+		.source = path,
+		.version = version,
+		.registry = url,
+		.checksum = checksum,
+	};
 }
 
 // first one per name wins; a nameless entry is named after its source

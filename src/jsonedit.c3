@@ -5,7 +5,7 @@
 *>
 module c3l::jsonedit;
 
-import std::collections::list;
+import std::collections::list, c3l::manifest;
 
 faultdef BROKEN;  // an unclosed string or comment: the file is left alone
 
@@ -46,7 +46,7 @@ fn String edit_array(String text, String key, String name, bool add)
 	bool present;
 	foreach (item : items)
 	{
-		if (item == name)
+		if (item == name || manifest::bare_name(item) == name)  // "ns/name@1.0" is the library "name"
 		{
 			present = true;
 			if (!add) continue;

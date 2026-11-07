@@ -212,7 +212,7 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 	atomically.
 
 *search* _text_ | *tag:*_name_
-	Search the registry (its _/search_ API, else its _index.json_) and c3c's vendor
+	Search the registry (its _/search_ API, else its _index.json_; the latter is what c3c's static registries have) and c3c's vendor
 	collection, by name and description. The vendor list is the one built into this
 	c3l, so a library added to the collection since is missing; *add vendor* lists the
 	collection as it is now. *tag:* searches the registry only.
@@ -261,6 +261,11 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 *publish* needs a registry with an upload API. Registry types: _c3pkg_ (www.c3pkg.eu;
 detected by probing _/api/v1/packages_) and _static_ (read-only, anything else).
 
+A _static_ registry speaks c3c's fetch protocol: _info/<ns>/<name>_ lists the versions with
+their checksum, and each version is downloaded from its own _url_ when the record has one
+(the _c3lang/vendor_ registry points at release assets), else from _download/<ns>/<name>@<version>_.
+A version that c3pkg marks yanked still installs for whoever locked it, with a warning.
+
 For c3pkg: create an API token under Settings, API tokens, and give it to c3l with
 *--token-file* _FILE_, *C3L_TOKEN* or *C3PKG_TOKEN*. It is sent as
 _Authorization: Bearer_ header and never appears on a command line.
@@ -303,13 +308,20 @@ A library declares them in its _c3l.lock_: each direct entry is a requirement, f
 the source it names (a registry the consumer has no library from yet needs
 *--allow-host*), at least at the locked version for registry libraries, at the locked
 tag, branch or commit for git libraries (*update* moves a tag like any other version).
-Apps and libraries alike, _c3l.lock_ is the only file c3l writes dependencies to.
+Apps and libraries alike, _c3l.lock_ is the only file c3l writes dependencies to. So a library that was never
+touched by c3l but lists its dependencies as paths still installs them all, and they
+end up in _c3l.lock_ as dependencies; c3l never writes a path into a manifest. c3pkg
+refuses paths in _dependencies_, and *check* says so before you upload.
 
 c3l also reads, but never writes, _vendor.c3l.requires_ in a library's _manifest.json_
 (packages published by c3l 1.1), c3po's _vendor.c3po.sources_ (_c3po-version_ 1; at
 the commit the library's _project.lock.json_ pins, if it has one) and
-c3c's plain _dependencies_ names (no source: a warning, and *verify* fails until the
-library is added). For each name the first wins, in this order: _vendor.c3l.requires_,
+c3c's _dependencies_: a plain name (no source: a warning, and *verify* fails until the
+library is added) or a library path, _[url:]ns/name[@version][:sha256]_, which names
+the source (_ns/name_ in the registry at _url_, else the default), the minimum version
+and the checksum that version's archive must have (64 hex digits, needs a version; a
+mismatch with the file or the registry is an error). c3c accepts a path wherever it takes a
+name and reduces it to the name itself. For each name the first wins, in this order: _vendor.c3l.requires_,
 _c3l.lock_, _vendor.c3po.sources_, _dependencies_. Dependencies that _project.json_ lists for a
 single target are part of the project too (*list*, *verify*, *sync --frozen*).
 
