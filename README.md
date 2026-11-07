@@ -1,23 +1,19 @@
 # c3l
 
-Reproducible dependencies for C3 projects.
+**Add a C3 library in one command. Ship the exact code you tested.**
+c3l pins the version, checks the download and installs what the library needs.
 
-`c3c fetch` installs a library, but it does not record which version you got,
-does not check that everyone gets the same file, cannot update or remove it, and
-does not install what the library itself needs. c3l does, with the same
-registries:
+- **Reproducible.** `c3l.lock` pins every version and checksum; `c3l sync` restores it.
+- **Any source.** Registry, c3c vendor, git or a local directory, in one project.
+- **Dependencies handled.** Transitive installs, and conflicts that name both sides.
+- **Stay current.** `outdated` and `update` stay within compatible versions.
+- **Publish in two commands.** `check`, then `publish`.
 
-- **Locked.** `c3l.lock` records each library's source, version and checksum or
-  commit. Commit it, and `c3l sync` gives everyone the same bytes.
-- **Verified.** Downloads must match the registry's checksum, git libraries
-  their commit and files. A mismatch is an error, not a warning.
-- **Safe.** Every change is one transaction: if anything fails, the project is
-  left as it was.
-- **Complete.** A library's own dependencies are installed with it, and
-  conflicts name both sides.
-- **Any source.** A registry ([www.c3pkg.eu](https://www.c3pkg.eu) or any other
-  `c3c fetch` registry), c3c's vendor collection, git repositories, local
-  directories.
+```sh
+c3l add tonis2/vk        # from the registry, git, vendor: or a local dir
+git add c3l.lock         # commit the lock
+c3l sync                 # on any clone: the exact same libraries
+```
 
 ## Install
 
