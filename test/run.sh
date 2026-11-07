@@ -742,66 +742,83 @@ has "refusal names the host" "not trusted" "$out"
 out="$(c3l --allow-host 127.0.0.1 add acme/mr4 2>&1 </dev/null)"; eq "allowed registry rc" $? 0
 eq "dependency came from its registry" "$(awk -F'\t' '$1=="mr3"{print $3}' c3l.lock)" "$C3L_REGISTRY/c3/v2"
 
-section "vendor collection (vendor:<name>)"
-VEN="$REG/vendor"; mkdir -p "$VEN/latest"
-vendor_make() { # name content-marker [nodigest]: write the file and the API record for the vendor stub
-	python3 -I - "$VEN" "$1" "$2" "${3:-}" <<'PY'
-import hashlib, json, os, sys, zipfile
-root, name, marker, nodigest = sys.argv[1:5]
-f = os.path.join(root, "latest", name + ".c3l")
-with zipfile.ZipFile(f, "w") as z:
-    z.writestr("manifest.json", json.dumps({"provides": name}))
-    z.writestr("marker", marker)
-api = os.path.join(root, "api.json")
-d = json.load(open(api)) if os.path.exists(api) else {"assets": []}
-d["assets"] = [a for a in d["assets"] if a["name"] != name + ".c3l"]
-a = {"name": name + ".c3l"}
-if not nodigest:
-    a["digest"] = "sha256:" + hashlib.sha256(open(f, "rb").read()).hexdigest()
-d["assets"].append(a)
-json.dump(d, open(api, "w"))
-PY
-}
-vendor_make vz one; vendor_make vnd one nodigest
-export C3L_VENDOR_URL="$C3L_REGISTRY/vendor/latest" C3L_VENDOR_API="$C3L_REGISTRY/vendor/api.json"
+section "add fetches from one registry: c3pkg by default, c3lang by namespace, --registry to choose"
+A="$C3L_REGISTRY"; B="$C3L_REGISTRY/c3/v2"
+publish acme/only_a 1.0.0 >/dev/null
+python3 "$HERE/fakereg.py" "$REG/c3/v2" publish acme/only_b 1.0.0 >/dev/null
+publish acme/both 1.0.0 >/dev/null; python3 "$HERE/fakereg.py" "$REG/c3/v2" publish acme/both 2.0.0 >/dev/null
+python3 "$HERE/fakereg.py" "$REG/c3/v2" publish c3lang/only_c 1.0.0 >/dev/null
+python3 "$HERE/fakereg.py" "$REG/c3/v2" publish acme/needs_both 1.0.0 --deps=acme/both >/dev/null
+publish acme/needs_c3lang 1.0.0 --deps=c3lang/only_c >/dev/null
+# the defaults: c3pkg, then c3lang (their URLs can be replaced for tests and mirrors)
+dflt() { env -u C3L_REGISTRY C3L_C3PKG_URL="$A" C3L_C3LANG_URL="$B" "$C3L" "$@"; }
+newproj mu
+c3l init >/dev/null 2>&1
+out="$(dflt add acme/only_a 2>&1)"; eq "default: c3pkg rc" $? 0
+eq "from c3pkg" "$(awk -F'\t' '$1=="only_a"{print $3}' c3l.lock)" "$A"
+out="$(dflt add acme/only_b 2>&1)"; eq "a library only c3lang has is not looked for there rc" $? 1
+check_not "nothing locked" grep -q '^only_b	' c3l.lock
+out="$(dflt add c3lang/only_c 2>&1)"; eq "the namespace c3lang is the c3lang registry rc" $? 0
+eq "from c3lang" "$(awk -F'\t' '$1=="only_c"{print $3}' c3l.lock)" "$B"
+out="$(dflt --registry c3lang add acme/only_b 2>&1)"; eq "registry by name rc" $? 0
+eq "by name: the c3lang one" "$(awk -F'\t' '$1=="only_b"{print $3}' c3l.lock)" "$B"
+out="$(dflt add acme/both 2>&1)"; eq "the same name in two registries: c3pkg rc" $? 0
+eq "no asking around" "$(awk -F'\t' '$1=="both"{print $3 " " $5}' c3l.lock)" "$A 1.0.0"
+newproj mu1
+c3l init >/dev/null 2>&1
+out="$(c3l --registry "$B" add acme/both 2>&1)"; eq "choosing a registry rc" $? 0
+eq "from the chosen" "$(awk -F'\t' '$1=="both"{print $3 " " $5}' c3l.lock)" "$B 2.0.0"
+out="$(c3l --registry "$B" add acme/only_a 2>&1)"; eq "--registry means only that one rc" $? 1
+out="$(c3l --registry nonsense add acme/only_a 2>&1)"; eq "unknown registry name rc" $? 1
+has "unknown registry named" "unknown registry 'nonsense'" "$out"
+newproj mu2
+c3l init >/dev/null 2>&1
+out="$(c3l --registry "$A" --registry "$B" add acme/only_a 2>&1)"; eq "add with two registries given rc" $? 0
+has "add takes the first, and says so" "add takes the first" "$out"
+eq "from the first" "$(awk -F'\t' '$1=="only_a"{print $3}' c3l.lock)" "$A"
+out="$(C3L_REGISTRY="$A,$B" "$C3L" add acme/only_b 2>&1)"; eq "only the second has it rc" $? 1
+has "points to search" "c3l search only_b" "$out"
+# a dependency without a registry follows the same rule
+newproj mu4
+c3l init >/dev/null 2>&1
+out="$(dflt add acme/needs_c3lang 2>&1)"; eq "dependency in the c3lang namespace rc" $? 0
+eq "dependency from c3lang" "$(awk -F'\t' '$1=="only_c"{print $3}' c3l.lock)" "$B"
+out="$(dflt add acme/needs_both 2>&1)"; eq "dependency in a registry without it rc" $? 1
+check_not "rolled back" test -e lib/needs_both.c3l
+# search and info ask all of them
+out="$(dflt search both 2>&1)"; eq "search rc" $? 0
+has "search: from the first" "^acme/both  *1.0.0  *c3pkg" "$out"
+has "search: from the second" "^acme/both  *2.0.0  *c3lang" "$out"
+has "search says where it looked" "searched c3pkg, c3lang" "$out"
+out="$(C3L_REGISTRY="$A,http://127.0.0.1:1" "$C3L" search only_a 2>&1)"; eq "search with one registry down rc" $? 0
+has "search still finds it" "^acme/only_a" "$out"
+has "search warns" "http://127.0.0.1:1: " "$out"
+out="$(C3L_REGISTRY="http://127.0.0.1:1,http://127.0.0.1:2" "$C3L" search only_a 2>&1)"; eq "search with all down rc" $? 1
+out="$(dflt info acme/both 2>&1)"; has "info: the first" "== c3pkg" "$out"; has "info: the second" "== c3lang" "$out"
+mr() { C3L_REGISTRY="$A,$B" "$C3L" "$@"; }
+out="$(mr publish 2>&1)"; eq "publish to two registries rc" $? 1
+has "publish takes one" "publish uploads to one registry" "$out"
+
+section "the vendor collection is the c3lang registry"
+out="$(c3l add vendor:sqlite3 2>&1)"; eq "add vendor: rc" $? 1
+has "points to c3lang" "c3l add c3lang/sqlite3" "$out"
+python3 "$HERE/fakereg.py" "$REG/c3/v2" publish c3lang/vz 1.0.0 >/dev/null
+publish acme/vuser 1.0.0 --requires=vendor:vz >/dev/null
 newproj vd
 c3l init >/dev/null 2>&1
-out="$(c3l add vendor 2>&1)"; has "lists the collection" "vendor:vz" "$out"
-out="$(c3l add vendor:vz 2>&1)"; eq "add vendor rc" $? 0
-check "installed" test -f lib/vz.c3l
-has "registered" '"vz"' "$(cat project.json)"
-VSUM="sha256:$(sha lib/vz.c3l)"
-eq "lock line" "$(awk -F'\t' '$1=="vz"{print $2 " " $3 " " $4 " " $5 " " $6}' c3l.lock)" "vendor $C3L_VENDOR_URL vz latest $VSUM"
-check "verify" c3l verify
-has "list shows vendor:" "vz .*vendor:vz" "$(c3l list)"
-out="$(c3l add vendor:nope 2>&1)"; eq "unknown vendor library rc" $? 1
-has "unknown explained" "no vendor library 'nope'" "$out"
-out="$(c3l add vendor:vz@1.0 2>&1)"; eq "vendor has no versions rc" $? 1
-rm -f lib/vz.c3l; c3l sync >/dev/null 2>&1; eq "sync restores rc" $? 0
-check "restored" test -f lib/vz.c3l
-check "sync --frozen is clean" c3l sync --frozen
-# the collection replaces a file: sync must refuse it, outdated must see it, update must re-pin
-vendor_make vz two
-rm -f lib/vz.c3l
-out="$(c3l sync 2>&1)"; eq "changed upstream: sync fails rc" $? 1
-has "mismatch explained" "vendor:vz changed upstream" "$out"
-check_not "nothing left behind" test -e lib/vz.c3l
-out="$(c3l outdated 2>&1)"; has "outdated sees the change" "vz .*latest.*-> HEAD@" "$out"
-c3l update >/dev/null 2>&1; eq "update rc" $? 0
-eq "update re-pins" "$(awk -F'\t' '$1=="vz"{print $6}' c3l.lock)" "sha256:$(sha lib/vz.c3l)"
-check "verify after update" c3l verify
-out="$(c3l outdated 2>&1)"; has "up to date again" "up to date" "$out"
-# no digest in the listing: warn and record the download
-out="$(c3l add vendor:vnd 2>&1)"; eq "no digest rc" $? 0
-has "trust on first use warning" "no checksum is listed for vendor:vnd" "$out"
-# a library can depend on a vendor library
-publish acme/vuser 1.0.0 --requires=vendor:vz >/dev/null
+out="$(env -u C3L_REGISTRY C3L_C3PKG_URL="$A" C3L_C3LANG_URL="$B" "$C3L" add acme/vuser 2>&1 </dev/null)"; eq "a manifest that requires vendor:vz rc" $? 0
+eq "vz comes from c3lang" "$(awk -F'\t' '$1=="vz"{print $2 " " $3 " " $4}' c3l.lock)" "registry $B c3lang/vz"
+# an old lock with vendor lines: refused, 'migrate' moves them
 newproj vd2
-c3l init >/dev/null 2>&1
-out="$(c3l --allow-host 127.0.0.1 add acme/vuser 2>&1 </dev/null)"; eq "dependency on vendor:vz rc" $? 0
-eq "vz came in as a dep" "$(awk -F'\t' '$1=="vz"{print $2 "/" $8}' c3l.lock)" "vendor/dep"
-eq "vuser requires vz" "$(awk -F'\t' '$1=="vuser"{print $9}' c3l.lock)" "vz"
-unset C3L_VENDOR_URL C3L_VENDOR_API
+Z="$(printf '0%.0s' $(seq 64))"
+printf '# c3l.lock v1 - written by c3l, do not edit by hand\nvz\tvendor\thttp://x/latest\tvz\tlatest\tsha256:%s\tsha256:%s\tdirect\t-\n' "$Z" "$Z" > c3l.lock
+out="$(c3l list 2>&1)"; eq "old vendor lock rc" $? 1
+has "tells to migrate" "run 'c3l migrate'" "$out"
+out="$(env -u C3L_REGISTRY C3L_C3LANG_URL="$B" "$C3L" migrate 2>&1)"; eq "migrate rc" $? 0
+eq "the line is a c3lang entry" "$(awk -F'\t' '$1=="vz"{print $2 " " $3 " " $4 " " $5}' c3l.lock)" "registry $B c3lang/vz 1.0.0"
+out="$(c3l sync 2>&1)"; eq "sync installs it rc" $? 0
+check "installed" test -f lib/vz.c3l
+check "verify" c3l verify
 
 section "git contents, path links, URL spellings, release tags"
 newproj gc1
@@ -1033,15 +1050,10 @@ eq "no temporary directories left" "$(ls -A "$WORK/tmp")" ""
 check "lock unchanged" cmp -s c3l.lock "$WORK/lock.before"
 check "project unchanged" cmp -s project.json "$WORK/project.before"
 
-section "search: the registry and the vendor snapshot"
-out="$(c3l search SQLite 2>&1)"; eq "search rc" $? 0
-has "vendor snapshot, by description, any case" "^vendor:sqlite3 .*SQLite 3 database" "$out"
-has "count includes vendor" "(1 of 1 shown)" "$out"
+section "search: one registry"
 out="$(c3l search alpha 2>&1)"; has "registry index.json" "^acme/alpha .*test lib alpha" "$out"
-out="$(c3l search tag:db 2>&1)"
-if grep -q vendor: <<< "$out"; then fail "tag search lists vendor libraries: $out"; else ok; fi
+has "the registry is shown" "acme/alpha .*$C3L_REGISTRY" "$out"
 out="$(c3l --registry http://127.0.0.1:1 search sdl3 2>&1)"; eq "unreachable registry rc" $? 1
-has "vendor shown without the registry" "vendor:sdl3_ttf" "$out"
 
 section "without git: the registry, sync, verify, check and pack"
 NG="$WORK/nogit-bin"; mkdir -p "$NG"; ln -sf "$(command -v "$C3C")" "$NG/c3c"

@@ -12,7 +12,7 @@
 module c3l::manifest;
 
 import std::io, std::collections::list, std::collections::object, std::encoding::json;
-import std::compression::zip, c3l::lock;
+import std::compression::zip, c3l::lock, c3l::registry;
 
 struct Requirement
 {
@@ -165,8 +165,6 @@ fn Requirement[] from_lock(Lock* l)
 		{
 			case REGISTRY:
 				out.push({ .name = e.name, .source = e.id, .version = e.version, .registry = e.origin });
-			case VENDOR:
-				out.push({ .name = e.name, .source = string::tformat("vendor:%s", e.id) });
 			case GIT:
 				String version = e.version;
 				if (version == "HEAD") version = "";  // the tip, whatever it is then
@@ -261,6 +259,12 @@ fn Requirement? parse_dependency(String entry)
 // first one per name wins; a nameless entry is named after its source
 fn void add(Manifest* m, List{Requirement}* reqs, Requirement r) @private
 {
+	if (r.source.starts_with("vendor:"))  // c3l 2.1 and older: c3c's vendor collection is the c3lang registry now
+	{
+		r.name = r.source["vendor:".len..];
+		r.source = string::tformat("c3lang/%s", r.name);
+		foreach (d : registry::defaults()) if (d.name == "c3lang") r.registry = d.url;
+	}
 	if (!r.name.len) r.name = name_of(r.source);
 	if (!r.name.len) return;
 	if (!lock::valid_name(r.name))

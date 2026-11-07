@@ -31,7 +31,7 @@ login to download.
 with *c3c project view*, for *init* and for the compile check of *check*) and *git*
 (git libraries and submodules, and *check*, *pack*, *publish* in a git repository).
 It talks to registries itself, with the protocol *c3c fetch* uses, so any *c3c*
-that can build the project will do; registry and vendor libraries need no *git*.
+that can build the project will do; registry libraries need no *git*.
 
 On Windows, *git* is Git for Windows, and linking a local directory (*add* _./dir_)
 needs Developer Mode or an administrator, for whom Windows creates symbolic links.
@@ -46,11 +46,109 @@ The options from *--registry* to *--registry-type* may appear before or after th
 command. The publishing options, from *--version* to *--offline*, follow *check*,
 *pack* or *publish*.
 
-*--registry* _URL_, *--registry=*_URL_
-	Use this registry base URL for the command (as *c3c --fetch-url* takes it, path
-	included). Overrides *C3L_REGISTRY*. It picks the registry for *add*, *search*, *info*
-	and *publish*; libraries already in _c3l.lock_ are always fetched from the registry
-	recorded for them.
+*--registry* _NAME|URL_, *--registry=*_NAME|URL_
+	The registry for *add*, *search*, *info* and *publish*: a base URL (as *c3c --fetch-url*
+	takes it, path included) or the name of a default, _c3pkg_ or _c3lang_. *search* and
+	*info* use all of them (repeat it); *add* takes the first, and warns if there are more; *publish* takes one. Without it c3l uses
+	the defaults (see *REGISTRIES*). *C3L_REGISTRY* is the same, comma separated.
+	Libraries already in _c3l.lock_ are always fetched from the registry recorded for them.
+
+*--dry-run*
+	Only print what *update* or *prune* would change, or stop *publish* before the
+	upload.
+
+*--frozen*
+	For *sync*, meant for CI. Fail if _project.json_ and _c3l.lock_ list different
+	libraries, restore only what the lockfile says, and never write the lockfile.
+	Has no effect on other commands.
+
+*--strict*
+	With *add* and *update*: fail instead of warn when the registry says a library
+	was published for another C3 release than your *c3c* (compared by
+	major.minor), or does not list your platform, and when libraries require each
+	other in a cycle or a library requires itself.
+
+*--fail-fast*
+	With *sync* and *update*: stop at the first library that fails. The default is to
+	go on with the others and report the failures at the end (exit status 1).
+
+*--force*
+	With *remove*: remove the library even if another library requires it.
+
+*--allow-host* _HOST_
+	Trust _HOST_ for git or registry dependencies named by a library's _c3l.lock_ or
+	_manifest.json_. Local paths and *file://* URLs are the host _file_. Can be
+	repeated. See *DEPENDENCIES*.
+
+*--registry-type* _static|c3pkg_
+	Override the detected registry type. See *PUBLISHING*.
+
+*--version* _X.Y.Z_, *--version=*_X.Y.Z_
+	After *check*, *pack* or *publish*: the version to publish. Before any command,
+	*--version* prints the version of *c3l*.
+
+*--token-file* _FILE_
+	File with the registry API token (first line). See *PUBLISHING*.
+
+*--description* _TEXT_, *--license* _ID_, *--tags* _a,b_, *--docs-url* _URL_, *--git-url* _URL_
+	Package metadata for *publish*. The description is required the first time a
+	package is published.
+
+*--c3-version* _X.Y.Z_
+	C3 version sent to the registry. Default: the version of *c3c*.
+
+*--output* _FILE_
+	For *pack*: where to write the package.
+
+*--allow-dirty*
+	Let *check*, *pack* and *publish* run on a working tree with uncommitted changes.
+
+*--no-build*
+	Skip the compile check in *check*, *pack* and *publish*.
+
+*--offline*
+	Do not query the registry in *check* (the registry is always skipped by *pack*).
+
+*--tree*
+	After *list*: print the dependency graph instead of the table.
+
+*-h*, *--help*
+	Print the usage text, of *c3l* or of the command it follows.
+
+# COMMANDS
+
+Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remove* is
+*rm*, *r* and *delete*; *update* is *u*; *sync* is *pull* and *p*; *list* is *ls* and *l*;
+*search* is *s*.
+
+*init* [_name_]
+	Create _c3l.lock_. With _name_ and outside a project, run *c3c init* first.
+
+*add* _namespace/name_[@_version_]
+	Install a library from the registry, compare the SHA-256 of the download with
+	the registry's checksum, write the lock line. The version can also be given as a
+	separate argument. A mismatch or any failure restores the previous library file
+	and _project.json_.
+
+*add* _./dir_)
+needs Developer Mode or an administrator, for whom Windows creates symbolic links.
+Git for Windows checks files out with CRLF line endings by default
+(_core.autocrlf=true_), so a package packed there differs from one packed on
+Linux; a library that wants the same bytes everywhere sets _\* text=auto eol=lf_
+in its _.gitattributes_. c3l reads a _c3l.lock_ with either line ending.
+
+# OPTIONS
+
+The options from *--registry* to *--registry-type* may appear before or after the
+command. The publishing options, from *--version* to *--offline*, follow *check*,
+*pack* or *publish*.
+
+*--registry* _NAME|URL_, *--registry=*_NAME|URL_
+	The registry for *add*, *search*, *info* and *publish*: a base URL (as *c3c --fetch-url*
+	takes it, path included) or the name of a default, _c3pkg_ or _c3lang_. *search* and
+	*info* use all of them (repeat it); *add* takes the first, and warns if there are more; *publish* takes one. Without it c3l uses
+	the defaults (see *REGISTRIES*). *C3L_REGISTRY* is the same, comma separated.
+	Libraries already in _c3l.lock_ are always fetched from the registry recorded for them.
 
 *--dry-run*
 	Only print what *update* or *prune* would change, or stop *publish* before the
@@ -135,8 +233,7 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 	versions, so the lock pins the SHA-256 that GitHub lists for the file (kind
 	_vendor_, version _latest_). *sync* fails if the file changed upstream; *outdated*
 	shows such a change and *update* re-pins it. If no digest is listed, c3l warns and
-	records the download. Plain *add vendor* lists the collection. A library may
-	require one with _"source": "vendor:name"_.
+	records the download. Plain *add vendor* lists the collection. 
 
 *add* _./dir_
 	Link a local library directory (_./dir_, _../dir_ or an absolute path with a
@@ -212,10 +309,9 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 	atomically.
 
 *search* _text_ | *tag:*_name_
-	Search the registry (its _/search_ API, else its _index.json_; the latter is what c3c's static registries have) and c3c's vendor
-	collection, by name and description. The vendor list is the one built into this
-	c3l, so a library added to the collection since is missing; *add vendor* lists the
-	collection as it is now. *tag:* searches the registry only.
+	Search the registries, all at once (one thread each, 10 seconds to answer), by name and
+	description. Each hit shows its registry, in the order of the registries; one that does
+	not answer is a warning. A static registry has no search API: c3l reads its _index.json_.
 
 *info* _namespace/name_
 	Show the registry record of a library: its versions and their checksums, and
@@ -255,6 +351,19 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 *publish* [_dir_]
 	Run *check*, *pack* and upload to the registry, then compare the registry's
 	checksum with the uploaded file. With *--dry-run* stop before the upload.
+
+# REGISTRIES
+
+c3l knows two registries: _c3pkg_ (www.c3pkg.eu) and _c3lang_ (c3c's vendor collection:
+sqlite3, raylib, curl and the like, as _c3lang/<name>_). The list will grow. *search* and *info*
+ask all of them. *add* _ns/name_ asks none: it fetches from _c3pkg_, or from _c3lang_ when the
+namespace is _c3lang_, or from the registry given with *--registry* (the first, if several are set, with a warning). To find out where a library
+is, *search* it. A dependency that names no registry follows the same rule. The registry a
+library was installed from is in _c3l.lock_; *sync*, *update*, *outdated* and *verify* go
+there and ask nobody else.
+
+c3l 2.1 and older locked c3c's vendor collection as _vendor_ entries. *migrate* turns them into
+_c3lang_ entries; *sync* then installs them from the registry (the archives differ).
 
 # PUBLISHING
 
@@ -395,9 +504,9 @@ box2d	registry	https://www.c3pkg.eu	jecokef902/box2d	1.0.0	sha256:4945...	sha256
 hex	git	https://github.com/konimarti/hex.c3l	-	v0.1.1	commit:3fa9...	commit:3fa9...	direct	-
 ```
 
-Columns: name, kind (_registry_, _git_, _vendor_ or _path_), origin, id, version, pin (checksum
-or commit), what the installed file is checked against (the SHA-256 again for registry and
-vendor libraries; for git _content:_ and a SHA-256 over the names and contents of the
+Columns: name, kind (_registry_, _git_ or _path_), origin, id, version, pin (checksum
+or commit), what the installed file is checked against (the SHA-256 again for registry
+libraries; for git _content:_ and a SHA-256 over the names and contents of the
 files in the archive, or the commit again in locks written by c3l 1.1), role
 (_direct_: added by you; _dep_: required by another library) and the comma
 separated names the library requires (_-_ for none).
@@ -464,9 +573,8 @@ _C3C_
 _C3L_LOCK_
 	Lockfile name. Default: _c3l.lock_.
 
-_C3L_VENDOR_URL_, _C3L_VENDOR_API_
-	Where the vendor collection and its asset list are read from. Default: the
-	_latest_ release of _github.com/c3lang/vendor_.
+_C3L_C3PKG_URL_, _C3L_C3LANG_URL_
+	Replace the URL of a default registry (a mirror, or tests).
 
 # SEE ALSO
 

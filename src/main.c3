@@ -11,8 +11,8 @@ const String VERSION = "2.1.0";
 fn int main(String[] args)
 {
 	Command* app = serp::app("c3l", VERSION, "reproducible dependencies for C3 projects")
-		.persistent_flag({ .name = "registry", .kind = STRING, .env = "C3L_REGISTRY", .default_value = registry::DEFAULT,
-			.value_name = "URL", .desc = "registry base URL for new installs, search, info and publish" })
+		.persistent_flag({ .name = "registry", .kind = STRING, .value_name = "NAME|URL",
+			.desc = "registry for new installs, search, info and publish: c3pkg, c3lang or a URL; repeatable, replaces the defaults (C3L_REGISTRY: comma separated)" })
 		.persistent_flag({ .name = "strict", .desc = "a C3 release or platform mismatch, or a dependency cycle, is an error" })
 		.persistent_flag({ .name = "allow-host", .kind = STRING, .value_name = "HOST",
 			.desc = "trust a git or registry host named by a dependency (repeatable)" })
@@ -29,7 +29,7 @@ fn int main(String[] args)
 		.accepts(serp::max_args(1)));
 	app.add(serp::cmd("add", "install a library, verify it, lock it", &add_run)
 		.aka("fetch").aka("f").aka("get").aka("g")
-		.usage_args("<ns/name[@version]> | vendor:<name> | <git-url>[@ref] [ref] | <./dir>")
+		.usage_args("<ns/name[@version]> | <git-url>[@ref] [ref] | <./dir>")
 		.accepts(serp::range_args(1, 2)));
 	app.add(serp::cmd("remove", "remove a library, its project entry and lock line", &remove_run)
 		.aka("rm").aka("r").aka("delete")

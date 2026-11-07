@@ -5,7 +5,7 @@ import std::io, c3l::lock, c3l::sys;
 const String SAMPLE = lock::HEADER +++
 	"app\tgit\thttps://h/app\t-\tv1.0.0\tcommit:0123456789abcdef0123456789abcdef01234567\tcommit:0123456789abcdef0123456789abcdef01234567\tdirect\tmid\n"
 	"mid\tregistry\thttps://r\tns/mid\t1.2.0\tsha256:1111111111111111111111111111111111111111111111111111111111111111\tsha256:1111111111111111111111111111111111111111111111111111111111111111\tdep\tleaf,app\n"
-	"leaf\tvendor\thttps://v\tleaf\tlatest\tsha256:2222222222222222222222222222222222222222222222222222222222222222\tsha256:2222222222222222222222222222222222222222222222222222222222222222\tdep\t-\n"
+	"leaf\tregistry\thttps://v\tc3lang/leaf\t1.0.0\tsha256:2222222222222222222222222222222222222222222222222222222222222222\tsha256:2222222222222222222222222222222222222222222222222222222222222222\tdep\t-\n"
 	"lost\tpath\t../lost\t-\t-\t-\t-\tdep\t-\n";
 
 fn void drop(String lock_file) => sys::remove(lock_file[:lock_file.rindex_of_char('/')!!]);
@@ -30,10 +30,18 @@ fn void round_trip() @test
 	l.save()!!;
 	String back = (String)file::load_temp(f)!!;
 	assert(back.starts_with(lock::HEADER));
-	assert(back.contains("\nleaf\tvendor") && back.index_of("app\t")!! < back.index_of("leaf\t")!!);
+	assert(back.contains("\nleaf\tregistry") && back.index_of("app\t")!! < back.index_of("leaf\t")!!);
 	assert(back.contains("\tdep\t-\n"));
 	assert(lock::load(f)!!.entries.len() == 4);
 	drop(f);
+}
+
+fn void vendor_lines_point_to_migrate() @test
+{
+	String why;
+	String z = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+	Lock? l = lock::parse(string::tformat("%s%s", lock::HEADER, string::tformat("x\tvendor\thttps://v\tx\tlatest\t%s\t%s\tdirect\t-\n", z, z)), "c3l.lock", &why);
+	assert(@catch(l) && why.contains("run 'c3l migrate'"), "%s", why);
 }
 
 fn void old_format_refused() @test

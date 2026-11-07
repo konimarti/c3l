@@ -194,3 +194,10 @@ fn usz on_write(char* ptr, usz size, usz nmemb, void* userdata) @private
 	sink.buf.append(ptr[:n]);
 	return n;
 }
+
+// libcurl initialises itself on first use, which must not happen in two threads at once: do it before starting any.
+fn void warm_up()
+{
+	Curl* h = curl::easy_init();
+	if (h) curl::easy_cleanup(h);
+}

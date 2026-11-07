@@ -12,7 +12,7 @@ module c3l::install;
 
 import std::io, std::os, std::collections::list;
 import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::manifest;
-import c3l::http, c3l::registry, c3l::vendor, c3l::git;
+import c3l::http, c3l::registry, c3l::git;
 
 // What a library is to the project once installed.
 enum Intent
@@ -30,8 +30,8 @@ enum Intent
 struct Want
 {
 	Kind kind;
-	String origin;  // registry base URL, vendor release URL, git URL, directory
-	String id;      // ns/name (registry), name (vendor)
+	String origin;  // registry base URL, git URL, directory
+	String id;      // ns/name (registry)
 	String ref;
 	String pin;
 	String hash;
@@ -42,7 +42,9 @@ struct Want
 struct Options
 {
 	bool strict;
-	String registry;      // the default registry (base URL)
+	Registry[] registries;  // for search and info; new libraries come from one of them (see registry_for)
+	bool warned;            // said once that add takes the first of several registries
+	bool explicit;          // --registry or $C3L_REGISTRY was given
 	List{String} hosts;   // trusted hosts besides the built-in ones; grows when the user allows one
 }
 
@@ -60,6 +62,7 @@ struct Op
 	// resolver (resolve.c3)
 	List{String} stack;
 	sz count;
+	// the info record registry_for fetched: the install uses it instead of asking again
 }
 
 struct Touched
@@ -150,7 +153,6 @@ fn Manifest? Op.install(&self, Want w, Intent intent)
 	switch (w.kind)
 	{
 		case REGISTRY: return self.install_registry(w, intent);
-		case VENDOR: return self.install_vendor(w, intent);
 		case GIT: return self.install_git(w, intent);
 		case PATH: return self.install_path(w, intent);
 	}
@@ -160,7 +162,7 @@ fn Manifest? Op.install_registry(&self, Want w, Intent intent)
 {
 	String name = w.id[(w.id.rindex_of_char('/') ?? -1) + 1..];
 	self.check_collision(name, REGISTRY, w.origin, w.id)!;
-	Info info = registry::info(w.origin, w.id) ?? log::fail("%s: not found or registry not reachable (%s)", w.id, w.origin)~!;
+	Info info = registry::info(w.origin, w.id) ?? log::fail("%s: not found or registry not reachable (%s); c3l search %s shows where it is", w.id, w.origin, w.id[(w.id.rindex_of_char('/') ?? -1) + 1..])~!;
 	String version = w.ref.len ? w.ref : info.latest;
 	if (!version.len) return log::fail("registry returned no latest version for %s", w.id)~;
 	if (!info.has(version)) return log::fail("no such version '%s' for %s", version, w.id)~;
@@ -194,40 +196,6 @@ fn Manifest? Op.install_registry(&self, Want w, Intent intent)
 	warn_provides(staged, name, w.id);
 	Manifest m = self.place({ .name = name, .kind = REGISTRY, .origin = w.origin, .id = w.id, .version = version, .pin = got, .hash = got }, staged, intent)!;
 	log::info("installed %s %s (%s)", name, version, got);
-	return m;
-}
-
-fn Manifest? Op.install_vendor(&self, Want w, Intent intent)
-{
-	String name = w.id;
-	if (!lock::valid_name(name)) return log::fail("'%s' is not a vendor library name", name)~;
-	self.check_collision(name, VENDOR, w.origin, name)!;
-	String expected = w.pin;
-	if (!expected.len)
-	{
-		Asset? a = vendor::find(name);
-		if (catch e = a)
-		{
-			if (e == vendor::NOT_LISTED) return log::fail("no vendor library '%s' (list them with: c3l add vendor)", name)~;
-			return log::fail("cannot read the vendor library list (%s)", vendor::api())~;
-		}
-		expected = a.digest;
-	}
-	if (!expected.len) log::warn("no checksum is listed for vendor:%s; recording the downloaded file (trust on first use)", name);
-
-	String staged = self.staging(name);
-	defer (void)file::delete(staged);
-	log::info("fetching vendor:%s from %s", name, w.origin);
-	Response r = http::download(project::lib_file(w.origin, name), staged);
-	if (!r.ok()) return log::fail("download of vendor:%s failed: %s", name, r.why())~;
-	if (w.pin.len && (sys::sha256_file(staged) ?? "") != w.pin)
-	{
-		return log::fail("vendor:%s changed upstream (the collection is one rolling release, it has no versions); 'c3l update %s' takes the new file", name, name)~;
-	}
-	String got = verify(staged, expected, string::tformat("vendor:%s", name))!;
-	warn_provides(staged, name, string::tformat("vendor:%s", name));
-	Manifest m = self.place({ .name = name, .kind = VENDOR, .origin = w.origin, .id = name, .version = "latest", .pin = got, .hash = got }, staged, intent)!;
-	log::info("installed %s (%s)", name, got);
 	return m;
 }
 

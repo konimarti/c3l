@@ -4,7 +4,7 @@
 module c3l::install;
 
 import std::io, std::collections::list, std::compression::zip, c3l::lock, c3l::sys, c3l::semver, c3l::project;
-import c3l::registry, c3l::vendor, c3l::git;
+import c3l::registry, c3l::git;
 
 enum Status : char (String name)
 {
@@ -101,7 +101,7 @@ struct Newer
 <*
  What is newer than the locked version, UNKNOWN when the source cannot tell.
  Tags and registry versions are compared as semver; a moving source (HEAD, a
- branch, the vendor collection) is newer when its tip is not the locked one,
+ branch) is newer when its tip is not the locked one,
  shown as HEAD@<short id>.
 *>
 fn Newer? newer(Entry* e)
@@ -111,10 +111,6 @@ fn Newer? newer(Entry* e)
 		case REGISTRY:
 			Info info = registry::info(e.origin, e.id) ?? UNKNOWN~!;
 			return pick(e.version, info.list());
-		case VENDOR:
-			String digest = vendor::find(e.id).digest ?? UNKNOWN~!;
-			if (!digest.len) return UNKNOWN~;
-			return { .next = digest == e.pin ? "" : string::tformat("HEAD@%s", digest.strip_prefix("sha256:")[:12]) };
 		case GIT:
 			String tip;
 			switch

@@ -5,7 +5,7 @@
 module c3l;
 
 import std::io, std::os, std::collections::list, serp;
-import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::install, c3l::registry, c3l::vendor, c3l::git;
+import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::install, c3l::registry, c3l::git;
 
 fn void? init_run(Ctx* ctx)
 {
@@ -47,7 +47,6 @@ fn void? list_run(Ctx* ctx)
 	{
 		String where = e.origin;
 		if (e.kind == REGISTRY) where = string::tformat("%s (%s)", e.id, e.origin);
-		if (e.kind == VENDOR) where = string::tformat("vendor:%s", e.id);
 		Submodule* sm = p.submodule(e.name) ?? null;
 		String st = install::status(e, dir, sm).name;
 		if (sm) st = string::tformat("%s,submodule", st);
@@ -172,35 +171,37 @@ fn void? search_run(Ctx* ctx)
 		tag = query["tag:".len..];
 		query = "";
 	}
-	List{Hit} hits;
-	hits.tinit();
+	Registry[] regs = registries(ctx)!;
+	List{Failure} failures;
+	failures.tinit();
 	long total;
-	fault failed = @catch(hits.push_all(registry::search(registry_url(ctx), query, tag, &total)));
-	if (!tag.len)
-	{
-		String q = query.to_lower_tcopy();
-		foreach (lib : vendor::SNAPSHOT)
-		{
-			if (!lib.name.contains(q) && !lib.about.to_lower_tcopy().contains(q)) continue;
-			hits.push({ string::tformat("vendor:%s", lib.name), "latest", lib.about });
-			total++;
-		}
-	}
-	foreach (h : hits) io::printfn("%-32s %-10s %s", h.name, h.version, h.about);
-	if (!failed || hits.len()) io::printfn("(%d of %d shown)", hits.len(), total);
-	if (failed) return failed~;
+	Hit[] hits = registry::search_all(regs, query, tag, &total, &failures);
+	foreach (h : hits) io::printfn("%-32s %-10s %-8s %s", h.name, h.version, h.registry, h.about);
+	if (hits.len || !failures.len()) io::printfn("(%d of %d shown; searched %s)", hits.len, total, registry::names(regs));
+	foreach (f : failures) log::warn("%s: %s", f.registry, f.error);
+	if (failures.len() == regs.len) return log::fail("no registry answered")~;
 }
 
 fn void? info_run(Ctx* ctx)
 {
-	String base = registry_url(ctx);
-	Info info = registry::info(base, ctx.arg(0)) ?? log::fail("%s: not found or registry not reachable (%s)", ctx.arg(0), base)~!;
-	info.print();
-	if (info.latest.len) registry::compatible(base, ctx.arg(0), info.latest);
+	String id = ctx.arg(0);
+	Registry[] regs = registries(ctx)!;
+	List{Failure} failures;
+	failures.tinit();
+	Found[] found = registry::lookup_all(regs, id, &failures);
+	foreach (f : failures) log::warn("%s: %s", f.registry, f.error);
+	if (!found.len) return log::fail("%s: not found in %s", id, registry::names(regs))~;
+	foreach (f : found)
+	{
+		if (found.len > 1) io::printfn("== %s (%s)", f.registry.name, f.registry.url);
+		Info info = registry::info_from(f.body) ?? log::fail("%s: unreadable answer from %s", id, f.registry.url)~!;
+		info.print();
+		if (info.latest.len) registry::compatible(f.registry.url, id, info.latest);
+	}
 }
 
-// The registry for new installs and lookups: --registry > $C3L_REGISTRY > www.c3pkg.eu
-fn String registry_url(Ctx* ctx) => registry::base(ctx.flag_string("registry"));
+// The registries for new installs and lookups: --registry (repeatable) > $C3L_REGISTRY > the defaults.
+fn Registry[]? registries(Ctx* ctx) => registry::configured(ctx.flag_strings("registry"));
 
 fn String[] with(String[] list, String s)
 {

@@ -38,7 +38,7 @@ login to download.\&
 with \fBc3c project view\fR, for \fBinit\fR and for the compile check of \fBcheck\fR) and \fBgit\fR
 (git libraries and submodules, and \fBcheck\fR, \fBpack\fR, \fBpublish\fR in a git repository).\&
 It talks to registries itself, with the protocol \fBc3c fetch\fR uses, so any \fBc3c\fR
-that can build the project will do; registry and vendor libraries need no \fBgit\fR.\&
+that can build the project will do; registry libraries need no \fBgit\fR.\&
 .P
 On Windows, \fBgit\fR is Git for Windows, and linking a local directory (\fBadd\fR \fI.\&/dir\fR)
 needs Developer Mode or an administrator, for whom Windows creates symbolic links.\&
@@ -53,12 +53,150 @@ The options from \fB--registry\fR to \fB--registry-type\fR may appear before or 
 command.\& The publishing options, from \fB--version\fR to \fB--offline\fR, follow \fBcheck\fR,
 \fBpack\fR or \fBpublish\fR.\&
 .P
-\fB--registry\fR \fIURL\fR, \fB--registry=\fR\fIURL\fR
+\fB--registry\fR \fINAME|URL\fR, \fB--registry=\fR\fINAME|URL\fR
 .RS 4
-Use this registry base URL for the command (as \fBc3c --fetch-url\fR takes it, path
-included).\& Overrides \fBC3L_REGISTRY\fR.\& It picks the registry for \fBadd\fR, \fBsearch\fR, \fBinfo\fR
-and \fBpublish\fR; libraries already in \fIc3l.\&lock\fR are always fetched from the registry
-recorded for them.\&
+The registry for \fBadd\fR, \fBsearch\fR, \fBinfo\fR and \fBpublish\fR: a base URL (as \fBc3c --fetch-url\fR
+takes it, path included) or the name of a default, \fIc3pkg\fR or \fIc3lang\fR.\& \fBsearch\fR and
+\fBinfo\fR use all of them (repeat it); \fBadd\fR takes the first, and warns if there are more; \fBpublish\fR takes one.\& Without it c3l uses
+the defaults (see \fBREGISTRIES\fR).\& \fBC3L_REGISTRY\fR is the same, comma separated.\&
+Libraries already in \fIc3l.\&lock\fR are always fetched from the registry recorded for them.\&
+.P
+.RE
+\fB--dry-run\fR
+.RS 4
+Only print what \fBupdate\fR or \fBprune\fR would change, or stop \fBpublish\fR before the
+upload.\&
+.P
+.RE
+\fB--frozen\fR
+.RS 4
+For \fBsync\fR, meant for CI.\& Fail if \fIproject.\&json\fR and \fIc3l.\&lock\fR list different
+libraries, restore only what the lockfile says, and never write the lockfile.\&
+Has no effect on other commands.\&
+.P
+.RE
+\fB--strict\fR
+.RS 4
+With \fBadd\fR and \fBupdate\fR: fail instead of warn when the registry says a library
+was published for another C3 release than your \fBc3c\fR (compared by
+major.\&minor), or does not list your platform, and when libraries require each
+other in a cycle or a library requires itself.\&
+.P
+.RE
+\fB--fail-fast\fR
+.RS 4
+With \fBsync\fR and \fBupdate\fR: stop at the first library that fails.\& The default is to
+go on with the others and report the failures at the end (exit status 1).\&
+.P
+.RE
+\fB--force\fR
+.RS 4
+With \fBremove\fR: remove the library even if another library requires it.\&
+.P
+.RE
+\fB--allow-host\fR \fIHOST\fR
+.RS 4
+Trust \fIHOST\fR for git or registry dependencies named by a library'\&s \fIc3l.\&lock\fR or
+\fImanifest.\&json\fR.\& Local paths and \fBfile://\fR URLs are the host \fIfile\fR.\& Can be
+repeated.\& See \fBDEPENDENCIES\fR.\&
+.P
+.RE
+\fB--registry-type\fR \fIstatic|c3pkg\fR
+.RS 4
+Override the detected registry type.\& See \fBPUBLISHING\fR.\&
+.P
+.RE
+\fB--version\fR \fIX.\&Y.\&Z\fR, \fB--version=\fR\fIX.\&Y.\&Z\fR
+.RS 4
+After \fBcheck\fR, \fBpack\fR or \fBpublish\fR: the version to publish.\& Before any command,
+\fB--version\fR prints the version of \fBc3l\fR.\&
+.P
+.RE
+\fB--token-file\fR \fIFILE\fR
+.RS 4
+File with the registry API token (first line).\& See \fBPUBLISHING\fR.\&
+.P
+.RE
+\fB--description\fR \fITEXT\fR, \fB--license\fR \fIID\fR, \fB--tags\fR \fIa,b\fR, \fB--docs-url\fR \fIURL\fR, \fB--git-url\fR \fIURL\fR
+.RS 4
+Package metadata for \fBpublish\fR.\& The description is required the first time a
+package is published.\&
+.P
+.RE
+\fB--c3-version\fR \fIX.\&Y.\&Z\fR
+.RS 4
+C3 version sent to the registry.\& Default: the version of \fBc3c\fR.\&
+.P
+.RE
+\fB--output\fR \fIFILE\fR
+.RS 4
+For \fBpack\fR: where to write the package.\&
+.P
+.RE
+\fB--allow-dirty\fR
+.RS 4
+Let \fBcheck\fR, \fBpack\fR and \fBpublish\fR run on a working tree with uncommitted changes.\&
+.P
+.RE
+\fB--no-build\fR
+.RS 4
+Skip the compile check in \fBcheck\fR, \fBpack\fR and \fBpublish\fR.\&
+.P
+.RE
+\fB--offline\fR
+.RS 4
+Do not query the registry in \fBcheck\fR (the registry is always skipped by \fBpack\fR).\&
+.P
+.RE
+\fB--tree\fR
+.RS 4
+After \fBlist\fR: print the dependency graph instead of the table.\&
+.P
+.RE
+\fB-h\fR, \fB--help\fR
+.RS 4
+Print the usage text, of \fBc3l\fR or of the command it follows.\&
+.P
+.RE
+.SH COMMANDS
+.P
+Some commands have short names: \fBadd\fR is also \fBfetch\fR, \fBf\fR, \fBget\fR and \fBg\fR; \fBremove\fR is
+\fBrm\fR, \fBr\fR and \fBdelete\fR; \fBupdate\fR is \fBu\fR; \fBsync\fR is \fBpull\fR and \fBp\fR; \fBlist\fR is \fBls\fR and \fBl\fR;
+\fBsearch\fR is \fBs\fR.\&
+.P
+\fBinit\fR [\fIname\fR]
+.RS 4
+Create \fIc3l.\&lock\fR.\& With \fIname\fR and outside a project, run \fBc3c init\fR first.\&
+.P
+.RE
+\fBadd\fR \fInamespace/name\fR[@\fIversion\fR]
+.RS 4
+Install a library from the registry, compare the SHA-256 of the download with
+the registry'\&s checksum, write the lock line.\& The version can also be given as a
+separate argument.\& A mismatch or any failure restores the previous library file
+and \fIproject.\&json\fR.\&
+.P
+.RE
+\fBadd\fR \fI.\&/dir\fR)
+needs Developer Mode or an administrator, for whom Windows creates symbolic links.\&
+Git for Windows checks files out with CRLF line endings by default
+(\fIcore.\&autocrlf=true\fR), so a package packed there differs from one packed on
+Linux; a library that wants the same bytes everywhere sets \fI* text=auto eol=lf\fR
+in its \fI.\&gitattributes\fR.\& c3l reads a \fIc3l.\&lock\fR with either line ending.\&
+.P
+.SH OPTIONS
+.P
+The options from \fB--registry\fR to \fB--registry-type\fR may appear before or after the
+command.\& The publishing options, from \fB--version\fR to \fB--offline\fR, follow \fBcheck\fR,
+\fBpack\fR or \fBpublish\fR.\&
+.P
+\fB--registry\fR \fINAME|URL\fR, \fB--registry=\fR\fINAME|URL\fR
+.RS 4
+The registry for \fBadd\fR, \fBsearch\fR, \fBinfo\fR and \fBpublish\fR: a base URL (as \fBc3c --fetch-url\fR
+takes it, path included) or the name of a default, \fIc3pkg\fR or \fIc3lang\fR.\& \fBsearch\fR and
+\fBinfo\fR use all of them (repeat it); \fBadd\fR takes the first, and warns if there are more; \fBpublish\fR takes one.\& Without it c3l uses
+the defaults (see \fBREGISTRIES\fR).\& \fBC3L_REGISTRY\fR is the same, comma separated.\&
+Libraries already in \fIc3l.\&lock\fR are always fetched from the registry recorded for them.\&
 .P
 .RE
 \fB--dry-run\fR
@@ -183,8 +321,7 @@ release \fIlatest\fR, what \fBc3c vendor-fetch\fR downloads).\& The collection h
 versions, so the lock pins the SHA-256 that GitHub lists for the file (kind
 \fIvendor\fR, version \fIlatest\fR).\& \fBsync\fR fails if the file changed upstream; \fBoutdated\fR
 shows such a change and \fBupdate\fR re-pins it.\& If no digest is listed, c3l warns and
-records the download.\& Plain \fBadd vendor\fR lists the collection.\& A library may
-require one with \fI"source": "vendor:name"\fR.\&
+records the download.\& Plain \fBadd vendor\fR lists the collection.\& 
 .P
 .RE
 \fBadd\fR \fI.\&/dir\fR
@@ -282,10 +419,9 @@ atomically.\&
 .RE
 \fBsearch\fR \fItext\fR | \fBtag:\fR\fIname\fR
 .RS 4
-Search the registry (its \fI/search\fR API, else its \fIindex.\&json\fR; the latter is what c3c'\&s static registries have) and c3c'\&s vendor
-collection, by name and description.\& The vendor list is the one built into this
-c3l, so a library added to the collection since is missing; \fBadd vendor\fR lists the
-collection as it is now.\& \fBtag:\fR searches the registry only.\&
+Search the registries, all at once (one thread each, 10 seconds to answer), by name and
+description.\& Each hit shows its registry, in the order of the registries; one that does
+not answer is a warning.\& A static registry has no search API: c3l reads its \fIindex.\&json\fR.\&
 .P
 .RE
 \fBinfo\fR \fInamespace/name\fR
@@ -343,6 +479,19 @@ Run \fBcheck\fR, \fBpack\fR and upload to the registry, then compare the registr
 checksum with the uploaded file.\& With \fB--dry-run\fR stop before the upload.\&
 .P
 .RE
+.SH REGISTRIES
+.P
+c3l knows two registries: \fIc3pkg\fR (www.\&c3pkg.\&eu) and \fIc3lang\fR (c3c'\&s vendor collection:
+sqlite3, raylib, curl and the like, as \fIc3lang/<name>\fR).\& The list will grow.\& \fBsearch\fR and \fBinfo\fR
+ask all of them.\& \fBadd\fR \fIns/name\fR asks none: it fetches from \fIc3pkg\fR, or from \fIc3lang\fR when the
+namespace is \fIc3lang\fR, or from the registry given with \fB--registry\fR (the first, if several are set, with a warning).\& To find out where a library
+is, \fBsearch\fR it.\& A dependency that names no registry follows the same rule.\& The registry a
+library was installed from is in \fIc3l.\&lock\fR; \fBsync\fR, \fBupdate\fR, \fBoutdated\fR and \fBverify\fR go
+there and ask nobody else.\&
+.P
+c3l 2.\&1 and older locked c3c'\&s vendor collection as \fIvendor\fR entries.\& \fBmigrate\fR turns them into
+\fIc3lang\fR entries; \fBsync\fR then installs them from the registry (the archives differ).\&
+.P
 .SH PUBLISHING
 .P
 \fBpublish\fR needs a registry with an upload API.\& Registry types: \fIc3pkg\fR (www.\&c3pkg.\&eu;
@@ -488,9 +637,9 @@ hex	git	https://github\&.com/konimarti/hex\&.c3l	-	v0\&.1\&.1	commit:3fa9\&.\&.\
 .fi
 .RE
 .P
-Columns: name, kind (\fIregistry\fR, \fIgit\fR, \fIvendor\fR or \fIpath\fR), origin, id, version, pin (checksum
-or commit), what the installed file is checked against (the SHA-256 again for registry and
-vendor libraries; for git \fIcontent:\fR and a SHA-256 over the names and contents of the
+Columns: name, kind (\fIregistry\fR, \fIgit\fR or \fIpath\fR), origin, id, version, pin (checksum
+or commit), what the installed file is checked against (the SHA-256 again for registry
+libraries; for git \fIcontent:\fR and a SHA-256 over the names and contents of the
 files in the archive, or the commit again in locks written by c3l 1.\&1), role
 (\fIdirect\fR: added by you; \fIdep\fR: required by another library) and the comma
 separated names the library requires (\fI-\fR for none).\&
@@ -577,10 +726,9 @@ The c3c executable.\&
 Lockfile name.\& Default: \fIc3l.\&lock\fR.\&
 .P
 .RE
-\fIC3L_VENDOR_URL\fR, \fIC3L_VENDOR_API\fR
+\fIC3L_C3PKG_URL\fR, \fIC3L_C3LANG_URL\fR
 .RS 4
-Where the vendor collection and its asset list are read from.\& Default: the
-\fIlatest\fR release of \fIgithub.\&com/c3lang/vendor\fR.\&
+Replace the URL of a default registry (a mirror, or tests).\&
 .P
 .RE
 .SH SEE ALSO

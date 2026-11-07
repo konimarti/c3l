@@ -3,20 +3,19 @@
 *>
 module c3l;
 
-import std::io, std::collections::list, std::collections::object, std::encoding::json, serp;
-import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::manifest, c3l::install, c3l::registry, c3l::vendor, c3l::git;
+import std::io, std::os, std::collections::list, std::collections::object, std::encoding::json, serp;
+import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::manifest, c3l::install, c3l::registry, c3l::git;
 
 fn void? add_run(Ctx* ctx)
 {
 	Project p = project::find()!;
 	String arg = ctx.arg(0);
-	if (arg == "vendor" || arg == "vendor:")
+	if (arg.starts_with("vendor:") || arg == "vendor")
 	{
-		Asset[] list = vendor::assets() ?? log::fail("cannot read the vendor library list (%s)", vendor::api())~!;
-		foreach (a : list) io::printfn("vendor:%s", a.name);
-		return;
+		String name = arg["vendor".len..].strip_prefix(":");
+		return log::fail("vendor: libraries are gone; c3c's vendor collection is the c3lang registry now: c3l add c3lang/%s", name.len ? name : "<name>")~;
 	}
-	Options opts = options(ctx);
+	Options opts = options(ctx)!;
 	$if env::WIN32:  // the lock records it: keep it readable on other systems
 		if (sys::is_local_path(arg)) arg = arg.treplace("\\", "/");
 	$endif
@@ -37,9 +36,6 @@ fn void? add_run(Ctx* ctx)
 	Want w;
 	switch
 	{
-		case arg.starts_with("vendor:"):
-			if (ref.len || arg.contains("@")) return log::fail("vendor libraries have no versions (the collection is one rolling release); use vendor:<name>")~;
-			w = { .kind = VENDOR, .origin = registry::base(vendor::url()), .id = arg["vendor:".len..] };
 		case is_path_dep(arg):  // the whole argument: a directory name may contain '@'
 			if (ctx.arg(1).len) return log::fail("a local directory has no versions; it is linked as it is")~;
 			w = { .kind = PATH, .origin = arg };
@@ -51,12 +47,13 @@ fn void? add_run(Ctx* ctx)
 			opts.hosts.push(install::host_of(source));
 			w = { .kind = GIT, .origin = source, .ref = ref };
 		case registry::is_id(source):
-			w = { .kind = REGISTRY, .origin = opts.registry, .id = source, .ref = ref };
+			w = { .kind = REGISTRY, .id = source, .ref = ref };  // the origin: op.registry_for, below
 		default:
-			return log::fail("'%s' is neither <namespace>/<name>[@version], vendor:<name> nor a git URL", arg)~;
+			return log::fail("'%s' is neither <namespace>/<name>[@version] nor a git URL", arg)~;
 	}
 	Op op = install::begin(&p, &opts)!;
 	defer catch op.rollback();
+	if (w.kind == REGISTRY) w.origin = op.registry_for(w.id, "")!;
 	op.add(w, DIRECT)!;
 	op.commit();
 }
@@ -113,7 +110,7 @@ fn void? prune_run(Ctx* ctx)
 		foreach (name : orphans) io::printfn("%s: not needed (dry run)", name);
 		return;
 	}
-	Options opts = options(ctx);
+	Options opts = options(ctx)!;
 	Op op = install::begin(&p, &opts)!;
 	defer catch op.rollback();
 	foreach (name : orphans)
@@ -130,7 +127,7 @@ fn void? prune_run(Ctx* ctx)
 fn void? update_run(Ctx* ctx)
 {
 	Project p = project::find()!;
-	Options opts = options(ctx);
+	Options opts = options(ctx)!;
 	// every argument is checked before anything changes
 	List{Entry} todo;
 	List{String} wants;  // per entry: the ref asked for, empty for the newest
@@ -168,7 +165,7 @@ fn void? update_run(Ctx* ctx)
 			if (newer.breaking.len) log::info("%s %s is available, not compatible with %s: 'c3l update %s@%s' moves to it", e.name, newer.breaking, semver::compat(e.version), e.name, newer.breaking);
 			if (!newer.next.len) continue;
 			shown = newer.next;
-			// a moving source (HEAD, branch, vendor) is fetched again at its locked label
+			// a moving source (HEAD, branch) is fetched again at its locked label
 			want = newer.next.starts_with("HEAD@") ? e.version : newer.next;
 		}
 		if (ctx.flag_bool("dry-run"))
@@ -223,7 +220,7 @@ fn void? sync_run(Ctx* ctx)
 			log::warn("%s is in %s but not in %s (%s)", d, p.file, p.lock.file, how_to_lock(&p, d));
 		}
 	}
-	Options opts = options(ctx);
+	Options opts = options(ctx)!;
 	List{Entry} entries;
 	entries.tinit_with_array(p.lock.entries.array_view());
 	List{String} failed;
@@ -307,6 +304,7 @@ fn bool sync_submodule(Entry* e, Submodule* s, Status st) @private
 *>
 fn void? migrate_run(Ctx* ctx)
 {
+	bool moved = migrate_vendor_lock()!;
 	Project p = project::find()!;
 	String old = file::exists("project.lock.json") ? "project.lock.json" : file::exists(".c3l.deps") ? ".c3l.deps" : "";
 	if (old == "project.lock.json" && file::exists(".c3l.deps")) log::warn(".c3l.deps is not imported; project.lock.json is");
@@ -316,6 +314,7 @@ fn void? migrate_run(Ctx* ctx)
 	foreach (sm : p.submodules()) if (!p.lock.has(sm.name)) subs.push(sm);
 	if (!old.len && !subs.len())
 	{
+		if (moved) return;
 		return log::fail("nothing to migrate: no project.lock.json (c3po), no .c3l.deps (c3l 0.x) and no git submodule in the library directory that %s does not list", p.lock.file)~;
 	}
 	if (old.len && !fresh && !subs.len()) return log::fail("%s already exists", p.lock.file)~;
@@ -338,7 +337,45 @@ fn void? migrate_run(Ctx* ctx)
 		p.lock.save()!;
 		log::info("the libraries already in %s are not verified yet; run 'c3l sync' to rebuild them as verified archives", dir);
 	}
-	if (!old.len && !adopted.len) return log::fail("no submodule could be adopted (see the warnings)")~;
+	if (!old.len && !adopted.len && !moved) return log::fail("no submodule could be adopted (see the warnings)")~;
+}
+
+<*
+ c3l 2.1 and older locked c3c's vendor collection as `vendor` entries (one rolling release,
+ no versions). It is the c3lang registry now: each such line becomes a registry entry for
+ c3lang/<name>, at the registry's latest version and checksum. The files in lib/ are not touched
+ (they differ from the registry's archives): 'c3l sync' rebuilds them. False when there is none.
+*>
+fn bool? migrate_vendor_lock() @private
+{
+	String file = env::tget_var("C3L_LOCK") ?? "c3l.lock";
+	if (!file::exists(file)) return false;
+	String text = (String)file::load_temp(file) ?? log::fail("cannot read %s", file)~!;
+	if (!text.contains("\tvendor\t")) return false;
+	Registry c3lang;
+	foreach (d : registry::defaults()) if (d.name == "c3lang") c3lang = d;
+	List{String} lines;
+	lines.tinit();
+	int moved;
+	foreach (raw : text.tsplit("\n"))
+	{
+		String[] col = raw.strip_suffix("\r").tsplit("\t");
+		if (col.len != 9 || col[1] != "vendor")
+		{
+			lines.push(raw);
+			continue;
+		}
+		String id = string::tformat("c3lang/%s", col[3]);
+		Info info = registry::info(c3lang.url, id) ?? log::fail("%s is not in the c3lang registry (%s); remove its line from %s, or keep it from another source", id, c3lang.url, file)~!;
+		String sum = info.checksum(info.latest);
+		if (!info.latest.len || !sum.len) return log::fail("the c3lang registry lists no version or checksum for %s", id)~;
+		lines.push(string::tformat("%s\tregistry\t%s\t%s\t%s\t%s\t%s\t%s\t%s", col[0], c3lang.url, id, info.latest, sum, sum, col[7], col[8]));
+		log::info("%s: vendor:%s is %s %s in the c3lang registry", col[0], col[3], id, info.latest);
+		moved++;
+	}
+	sys::write_atomic(file, string::join(tmem, lines.array_view(), "\n"))!;
+	log::info("%d vendor %s moved to the c3lang registry; run 'c3l sync' to reinstall them as verified archives", moved, libraries(moved));
+	return true;
 }
 
 <*
@@ -349,7 +386,7 @@ fn void? migrate_run(Ctx* ctx)
 *>
 fn String[]? adopt_submodules(Project* p, Ctx* ctx, Submodule[] subs) @private
 {
-	Options opts = options(ctx);
+	Options opts = options(ctx)!;
 	Op op = install::begin(p, &opts)!;
 	defer catch op.rollback();
 	List{Manifest} adopted;
@@ -534,9 +571,9 @@ fn bool? apply(Project* p, Options* opts, Want w, bool fail_fast)
 	return true;
 }
 
-fn Options options(Ctx* ctx)
+fn Options? options(Ctx* ctx)
 {
-	Options opts = { .strict = ctx.flag_bool("strict"), .registry = registry_url(ctx) };
+	Options opts = { .strict = ctx.flag_bool("strict"), .registries = registry::configured(ctx.flag_strings("registry"))!, .explicit = registry::is_explicit(ctx.flag_strings("registry")) };
 	opts.hosts.tinit_with_array(ctx.flag_strings("allow-host"));
 	return opts;
 }

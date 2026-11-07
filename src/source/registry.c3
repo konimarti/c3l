@@ -11,10 +11,105 @@
 *>
 module c3l::registry;
 
-import std::io, std::collections::list, std::collections::object, std::encoding::json, std::net::url;
+import std::io, std::os, std::collections::list, std::collections::object, std::encoding::json, std::net::url;
 import c3l::http, c3l::log, c3l::lock, c3l::sys;
 
 const String DEFAULT = "https://www.c3pkg.eu";
+
+<*
+ A registry c3l looks libraries up in. These are the defaults, in the order search
+ lists them; `add` asks all of them and refuses when a library is in more than one.
+*>
+struct Registry
+{
+	String name;  // c3pkg, c3lang; the URL for one that was given as a URL
+	String url;   // base URL
+}
+
+const Registry[] DEFAULTS = {
+	{ "c3pkg", "https://www.c3pkg.eu" },
+	{ "c3lang", "https://raw.githubusercontent.com/c3lang/vendor/refs/heads/registry" },
+};
+
+<*
+ The defaults; $C3L_C3PKG_URL and $C3L_C3LANG_URL replace a URL (for tests and mirrors).
+*>
+fn Registry[] defaults()
+{
+	List{Registry} out;
+	out.tinit();
+	foreach (d : DEFAULTS)
+	{
+		String url = env::tget_var(string::tformat("C3L_%s_URL", d.name.to_upper_tcopy())) ?? "";
+		out.push({ d.name, url.len ? base(url) : d.url });
+	}
+	return out.array_view();
+}
+
+<*
+ The registries to use: the --registry values (URLs, or the names of the defaults), else
+ the comma-separated $C3L_REGISTRY, else the defaults. Anything given replaces the defaults.
+*>
+fn Registry[]? configured(String[] given)
+{
+	String[] items = given;
+	if (!items.len)
+	{
+		String env = env::tget_var("C3L_REGISTRY") ?? "";
+		if (env.len) items = env.tsplit(",", skip_empty: true);
+	}
+	List{Registry} out;
+	out.tinit();
+	if (!items.len)
+	{
+		foreach (d : defaults()) out.push(d);
+		return out.array_view();
+	}
+	foreach (raw : items)
+	{
+		String item = raw.trim();
+		Registry r;
+		if (item.starts_with("http://") || item.starts_with("https://"))
+		{
+			r = { base(item), base(item) };
+		}
+		else
+		{
+			bool known;
+			foreach (d : defaults()) if (d.name == item) { r = d; known = true; }
+			if (!known) return log::fail("unknown registry '%s': give a URL (https://...) or one of %s", item, default_names())~;
+		}
+		bool dup;
+		foreach (have : out) if (have.url == r.url) dup = true;
+		if (!dup) out.push(r);
+	}
+	return out.array_view();
+}
+
+// Whether the user chose the registries (--registry or $C3L_REGISTRY) instead of the defaults.
+fn bool is_explicit(String[] given) => given.len > 0 || (env::tget_var("C3L_REGISTRY") ?? "").len > 0;
+
+<*
+ The registry `publish` uploads to: the one given, else the first default (c3pkg).
+ Several given is an error: a package goes to one registry.
+*>
+fn String? publish_target(String[] given)
+{
+	Registry[] regs = configured(given)!;
+	if (is_explicit(given) && regs.len > 1) return log::fail("publish uploads to one registry, but %d were given (%s)", regs.len, names(regs))~;
+	return regs[0].url;
+}
+
+fn String default_names() => names(defaults());
+
+// "c3pkg, c3lang"
+fn String names(Registry[] regs)
+{
+	List{String} out;
+	out.tinit();
+	foreach (r : regs) out.push(r.name);
+	return string::join(tmem, out.array_view(), ", ");
+}
 
 <*
  What a registry can do besides the fetch protocol:
@@ -27,7 +122,7 @@ enum Api : char (String name)
 	C3PKG { "c3pkg" },
 }
 
-faultdef UNREACHABLE;
+faultdef UNREACHABLE, NO_SEARCH;
 
 struct Info
 {
@@ -53,7 +148,14 @@ fn bool is_id(String s)
 fn Info? info(String base, String id)
 {
 	Response r = http::get(string::tformat("%s/info/%s", base, id));
-	Object* o = r.ok() ? json::tparse(r.body) ?? null : null;
+	if (!r.ok()) return UNREACHABLE~;
+	return info_from(r.body);
+}
+
+// The info record in `body` (what <base>/info/<id> answered).
+fn Info? info_from(String body)
+{
+	Object* o = json::tparse(body) ?? null;
 	Object* versions = o && o.is_map() ? o.get("versions") ?? null : null;
 	if (!versions || !versions.is_map()) return UNREACHABLE~;
 	return { .record = o, .latest = o.get_string("latest") ?? "", .versions = versions };
@@ -122,6 +224,7 @@ struct Hit
 	String name;
 	String version;
 	String about;
+	String registry;  // where it was found (search_all)
 }
 
 <*
@@ -129,14 +232,14 @@ struct Hit
  it has one (c3pkg), else its index.json. `total` gets how many match in all;
  the search API returns only the first page.
 *>
-fn Hit[]? search(String base, String query, String tag, long* total)
+fn Hit[]? search(String base, String query, String tag, long* total, long timeout = 30)
 {
 	String q = string::tformat("%s/search?q=%s", base, url::encode(tmem, query, QUERY));
 	if (tag.len) q = string::tformat("%s&tag=%s", q, url::encode(tmem, tag, QUERY));
-	Object* found = libraries(q);
+	Object* found = libraries(q, timeout);
 	bool filter = !found;
-	if (filter) found = libraries(string::tformat("%s/index.json", base));
-	if (!found) return log::fail("search failed: %s has no search API and no index.json", base)~;
+	if (filter) found = libraries(string::tformat("%s/index.json", base), timeout);
+	if (!found) return NO_SEARCH~;
 
 	Object* list = found.get("libraries")!!;
 	List{Hit} hits;
@@ -146,16 +249,16 @@ fn Hit[]? search(String base, String query, String tag, long* total)
 		Object* lib = list.get_at(i);
 		String name = lib.get_string("library") ?? "";
 		if (filter && (!name.contains(query) || (tag.len && !has_tag(lib, tag)))) continue;
-		hits.push({ name, lib.get_string("latest") ?? "", lib.get_string("description") ?? "" });
+		hits.push({ name, lib.get_string("latest") ?? "", lib.get_string("description") ?? "", "" });
 	}
 	*total = filter ? hits.len() : found.get_long("total") ?? hits.len();
 	return hits.array_view();
 }
 
 // {libraries: [...]} from `url`, or null
-fn Object* libraries(String url) @private
+fn Object* libraries(String url, long timeout) @private
 {
-	Response r = http::get(url);
+	Response r = http::get(url, timeout);
 	if (!r.ok()) return null;
 	Object* o = json::tparse(r.body) ?? null;
 	if (!o || !o.is_map()) return null;

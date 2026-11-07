@@ -23,7 +23,6 @@ const String HEADER = "# c3l.lock v1 - written by c3l, do not edit by hand\n";
 enum Kind : char (String name)
 {
 	REGISTRY { "registry" },
-	VENDOR { "vendor" },
 	GIT { "git" },
 	PATH { "path" },
 }
@@ -93,6 +92,11 @@ fn Lock? parse(String text, String file, String* why)
 		Role? role = runtime::@enum_lookup(Role, "name", col[7]);
 		if (catch kind, role)
 		{
+			if (col[1] == "vendor")
+			{
+				*why = string::tformat("%s line %d is a vendor: library (c3l 2.1 and older); the collection moved to the c3lang registry: run 'c3l migrate'", file, i + 1);
+				return INVALID~;
+			}
 			*why = string::tformat("%s line %d: unknown kind '%s' or role '%s'", file, i + 1, col[1], col[7]);
 			return INVALID~;
 		}
@@ -112,13 +116,12 @@ fn Lock? parse(String text, String file, String* why)
 	return lock;
 }
 
-// Where an entry comes from, for messages: registry:<url> <id>, vendor:<name>, git:<url>, path:<dir>
+// Where an entry comes from, for messages: registry:<url> <id>, git:<url>, path:<dir>
 fn String Entry.source(&self)
 {
 	switch (self.kind)
 	{
 		case REGISTRY: return string::tformat("registry:%s %s", self.origin, self.id);
-		case VENDOR: return string::tformat("vendor:%s", self.id);
 		default: return string::tformat("%s:%s", self.kind.name, self.origin);
 	}
 }
@@ -132,9 +135,8 @@ fn String Entry.problem(&self)
 	switch (self.kind)
 	{
 		case REGISTRY:
-		case VENDOR:
 			if (!is_digest(self.pin) || !is_digest(self.hash)) return "checksum";
-			if (self.kind == REGISTRY ? !valid_id(self.id) : !valid_name(self.id)) return "id";
+			if (!valid_id(self.id)) return "id";
 		case GIT:
 			if (!valid_git_url(self.origin)) return "git URL";
 			if (!is_commit_pin(self.pin) || !(is_commit_pin(self.hash) || is_content(self.hash))) return "commit";

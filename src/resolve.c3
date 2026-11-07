@@ -6,8 +6,8 @@
 *>
 module c3l::install;
 
-import std::io, std::os, libc;
-import c3l::log, c3l::sys, c3l::lock, c3l::manifest, c3l::semver, c3l::registry, c3l::vendor, c3l::git;
+import std::io, std::os, std::collections::list, libc;
+import c3l::log, c3l::sys, c3l::lock, c3l::manifest, c3l::semver, c3l::registry, c3l::git;
 
 // Trusted for git dependencies; on the command line, github.com/o/r means https://github.com/o/r.
 const String[] BUILTIN_HOSTS = { "github.com", "codeberg.org" };
@@ -52,15 +52,12 @@ fn void? Op.resolve(&self, String parent, Requirement r)
 	Want w;
 	switch
 	{
-		case r.source.starts_with("vendor:"):
-			self.trust(vendor::url())!;
-			w = { .kind = VENDOR, .origin = registry::base(vendor::url()), .id = r.source["vendor:".len..] };
 		case is_git_url(r.source):
 			if (!lock::valid_git_url(r.source)) return log::fail("%s requires '%s' from '%s', which is not a git URL c3l fetches from", parent, r.name, r.source)~;
 			self.trust(r.source)!;
 			w = { .kind = GIT, .origin = r.source, .ref = git_ref(r.version) };
 		case registry::is_id(r.source):
-			String origin = self.registry_of(r);
+			String origin = self.registry_of(r, parent)!;
 			if (!self.registry_known(origin)) self.trust(origin)!;
 			w = { .kind = REGISTRY, .origin = origin, .id = r.source, .ref = plain_version(r.version), .expect = r.checksum };
 		default:
@@ -158,19 +155,53 @@ fn bool Op.same_source(&self, Entry e, Requirement r)
 {
 	switch (e.kind)
 	{
-		case REGISTRY: return registry::is_id(r.source) && r.source == e.id && self.registry_of(r) == e.origin;
-		case VENDOR: return r.source == string::tformat("vendor:%s", e.id);
+		case REGISTRY:
+			if (!registry::is_id(r.source) || r.source != e.id) return false;
+			// a requirement that names no registry matches the one the library is locked from
+			return r.registry.len ? registry::base(r.registry) == e.origin : true;
 		default: return git::canonical(r.source) == git::canonical(e.origin);
 	}
 }
 
-// The registry a requirement comes from: the one it names, else the default.
-fn String Op.registry_of(&self, Requirement r) => registry::base(r.registry.len ? r.registry : self.opts.registry);
+<*
+ The registry a requirement comes from: the one it names, else the one that has the
+ library (registry_for).
+*>
+fn String? Op.registry_of(&self, Requirement r, String parent)
+{
+	if (r.registry.len) return registry::base(r.registry);
+	return self.registry_for(r.source, parent);
+}
 
-// Known: the default registry, or one a locked library already comes from.
+<*
+ The registry a new library `id` (ns/name) is fetched from; nothing is searched, that is
+ what `search` is for. With --registry (or $C3L_REGISTRY) it is the one given. Otherwise
+ the namespace c3lang is the c3lang registry, and everything else is the first default
+ (c3pkg).
+*>
+fn String? Op.registry_for(&self, String id, String parent)
+{
+	Registry[] regs = self.opts.registries;
+	if (self.opts.explicit)
+	{
+		if (regs.len > 1 && !self.opts.warned)
+		{
+			log::warn("%d registries are set (%s); add takes the first, %s. search asks all of them", regs.len, registry::names(regs), regs[0].name);
+			self.opts.warned = true;
+		}
+		return regs[0].url;
+	}
+	if (id.starts_with("c3lang/"))
+	{
+		foreach (r : regs) if (r.name == "c3lang") return r.url;
+	}
+	return regs.len ? regs[0].url : registry::DEFAULT;
+}
+
+// Known: a configured registry, or one a locked library already comes from.
 fn bool Op.registry_known(&self, String origin)
 {
-	if (origin == registry::base(self.opts.registry)) return true;
+	foreach (r : self.opts.registries) if (r.url == origin) return true;
 	foreach (e : self.proj.lock.entries) if (e.kind == REGISTRY && e.origin == origin) return true;
 	return false;
 }

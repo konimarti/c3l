@@ -4,13 +4,13 @@
 c3l pins the version, checks the download and installs what the library needs.
 
 - **Reproducible.** `c3l.lock` pins every version and checksum; `c3l sync` restores it.
-- **Any source.** Registry, c3c vendor, git or a local directory, in one project.
+- **Any source.** c3pkg, c3lang (c3c's vendor libraries), git or a local directory, in one project.
 - **Dependencies handled.** Transitive installs, and conflicts that name both sides.
 - **Stay current.** `outdated` and `update` stay within compatible versions.
 - **Publish in two commands.** `check`, then `publish`.
 
 ```sh
-c3l add tonis2/vk        # from the registry, git, vendor: or a local dir
+c3l add tonis2/vk        # from a registry, git or a local dir
 git add c3l.lock         # commit the lock
 c3l sync                 # on any clone: the exact same libraries
 ```
@@ -32,8 +32,9 @@ c3l calls `c3c` to read your project, and `git` for git libraries.
 
 ```sh
 c3l init app && cd app                 # a new project (c3c init) with a c3l.lock
-c3l add tonis2/vk                      # from the registry
-c3l add vendor:sqlite3                 # from c3c's vendor collection
+c3l search sqlite                      # asks c3pkg and c3lang at once, shows where each hit is from
+c3l add tonis2/vk                      # from c3pkg (the default registry)
+c3l add c3lang/sqlite3                 # from c3lang, c3c's vendor libraries
 c3l add github.com/you/lib@v1.2.0      # from git: any URL, with a tag, branch or commit
 c3l add ../mylib                       # a local library, linked
 git add c3l.lock                       # commit the lock

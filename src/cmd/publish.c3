@@ -7,13 +7,13 @@ import std::io, serp, c3l::log, c3l::sys, c3l::publish, c3l::registry;
 
 fn void? check_run(Ctx* ctx)
 {
-	Package p = publish::check(ctx.arg(0, "."), settings(ctx));
+	Package p = publish::check(ctx.arg(0, "."), settings(ctx)!);
 	if (p.errors) return serp::FAILED~;
 }
 
 fn void? pack_run(Ctx* ctx)
 {
-	Settings s = settings(ctx);
+	Settings s = settings(ctx)!;
 	s.offline = true;
 	Package p = publish::check(ctx.arg(0, "."), s);
 	if (p.errors) return log::fail("not packing: %d problem(s) found", p.errors)~;
@@ -24,7 +24,7 @@ fn void? pack_run(Ctx* ctx)
 
 fn void? publish_run(Ctx* ctx)
 {
-	Settings s = settings(ctx);
+	Settings s = settings(ctx)!;
 	String base = registry::base(s.registry);
 	bool guessed;
 	if (registry::detect(base, s.registry_type, &guessed)! != C3PKG)
@@ -47,10 +47,10 @@ fn void? publish_run(Ctx* ctx)
 	p.upload(s, file, sha)!;
 }
 
-fn Settings settings(Ctx* ctx)
+fn Settings? settings(Ctx* ctx)
 {
 	return {
-		.registry = ctx.flag_string("registry"),
+		.registry = registry::publish_target(ctx.flag_strings("registry"))!,
 		.registry_type = ctx.flag_string("registry-type"),
 		.version = ctx.flag_string("version"),
 		.c3_version = ctx.flag_string("c3-version"),
