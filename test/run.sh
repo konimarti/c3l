@@ -1245,6 +1245,34 @@ has "locked at the pinned version" "^lpa	registry	$C3L_REGISTRY	acme/lpa	1.0.0	s
 check "verify with path dependencies" c3l verify
 rm -f lib/lpa.c3l lib/lpb.c3l; c3l sync >/dev/null 2>&1; eq "sync restores them rc" $? 0
 
+section "add takes c3c's form: [url:]ns/name[@version][:sha256], every part but ns/name optional"
+R="$C3L_REGISTRY"
+for combo in "$R:acme/lpa" "$R:acme/lpa@1.0.0" "$R:acme/lpa@1.0.0:$LPA_SUM" "acme/lpa@1.0.0:$LPA_SUM"; do
+	newproj lf
+	c3l init >/dev/null 2>&1
+	out="$(c3l add "$combo" 2>&1)"; eq "add $combo rc" $? 0
+	check "installed" test -f lib/lpa.c3l
+	has "from the registry" "^lpa	registry	$R	acme/lpa	" "$(cat c3l.lock)"
+done
+newproj lf2
+c3l init >/dev/null 2>&1
+publish acme/lpn 1.0.0 >/dev/null; publish acme/lpn 1.1.0 >/dev/null
+out="$(c3l add "$R:acme/lpn" 2>&1)"; eq "url only rc" $? 0
+eq "url only: the newest" "$(awk -F'\t' '$1=="lpn"{print $5}' c3l.lock)" "1.1.0"
+newproj lf3
+c3l init >/dev/null 2>&1
+out="$(c3l add "$R:acme/lpa@1.0.0:$(printf '0%.0s' $(seq 64))" 2>&1)"; eq "wrong checksum rc" $? 1
+check_not "nothing installed" test -e lib/lpa.c3l
+out="$(c3l add "acme/lpa:$LPA_SUM" 2>&1)"; eq "checksum without version rc" $? 1
+python3 "$HERE/fakereg.py" "$REG/c3/v2" publish acme/lpp 1.0.0 >/dev/null
+out="$(c3l add "$R/c3/v2:acme/lpp@1.0.0" 2>&1)"; eq "a url with a port and a path rc" $? 0
+eq "from that url" "$(awk -F'\t' '$1=="lpp"{print $3}' c3l.lock)" "$R/c3/v2"
+out="$(c3l add "$R:acme/lpa@1.0.0" 1.1.0 2>&1)"; eq "version twice rc" $? 1
+out="$(c3l add "$R:acme/lpnone" 2>&1)"; eq "unknown library at that url rc" $? 1
+out="$(c3l add "ftp://h:acme/lpa" 2>&1)"; eq "not an http url rc" $? 1
+out="$(c3l add "https://example.invalid:8080/repo" 2>&1)"; eq "a port is not a namespace (git)" $? 1
+has "tried as git" "git" "$out"
+
 newproj lp2
 c3l init >/dev/null 2>&1
 publish acme/lpbad 1.0.0 --deps="acme/lpa@1.0.0:$(printf '0%.0s' $(seq 64))" >/dev/null

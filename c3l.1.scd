@@ -130,6 +130,11 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 	separate argument. A mismatch or any failure restores the previous library file
 	and _project.json_.
 
+*add* [_url_:]_namespace/name_[@_version_][:_sha256_]
+	The same in c3c's library path form, as it appears in _dependencies_: the registry url
+	(else *--registry* or the default), the version and the SHA-256 of the download are each
+	optional. A checksum needs a version, and must match what the registry serves.
+
 *add* _./dir_)
 needs Developer Mode or an administrator, for whom Windows creates symbolic links.
 Git for Windows checks files out with CRLF line endings by default

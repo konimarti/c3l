@@ -35,6 +35,7 @@ c3l init app && cd app                 # a new project (c3c init) with a c3l.loc
 c3l search sqlite                      # asks c3pkg and c3lang at once, shows where each hit is from
 c3l add tonis2/vk                      # from c3pkg (the default registry)
 c3l add c3lang/sqlite3                 # from c3lang, c3c's vendor libraries
+c3l add https://reg.example:ns/lib@1.2.0   # c3c's path form: any registry, version and checksum optional
 c3l add github.com/you/lib@v1.2.0      # from git: any URL, with a tag, branch or commit
 c3l add ../mylib                       # a local library, linked
 git add c3l.lock                       # commit the lock

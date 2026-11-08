@@ -177,6 +177,13 @@ separate argument.\& A mismatch or any failure restores the previous library fil
 and \fIproject.\&json\fR.\&
 .P
 .RE
+\fBadd\fR [\fIurl\fR:]\fInamespace/name\fR[@\fIversion\fR][:\fIsha256\fR]
+.RS 4
+The same in c3c'\&s library path form, as it appears in \fIdependencies\fR: the registry url
+(else \fB--registry\fR or the default), the version and the SHA-256 of the download are each
+optional.\& A checksum needs a version, and must match what the registry serves.\&
+.P
+.RE
 \fBadd\fR \fI.\&/dir\fR)
 needs Developer Mode or an administrator, for whom Windows creates symbolic links.\&
 Git for Windows checks files out with CRLF line endings by default

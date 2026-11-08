@@ -34,8 +34,19 @@ fn void? add_run(Ctx* ctx)
 		source = arg[:arg.len - ref.len - 1];
 	}
 	Want w;
+	Requirement dep;
+	bool c3c_form;  // c3c's form: [url:]ns/name[@version][:sha256], with a url or a checksum
+	if (!is_path_dep(arg))
+	{
+		if (try d = manifest::parse_dependency(arg)) { dep = d; c3c_form = c3c_path(d); }
+	}
 	switch
 	{
+		case c3c_form:
+			if (ctx.arg(1).len) return log::fail("give the version either as %s or as a separate argument, not both", arg)~;
+			String origin = dep.registry.len ? registry::base(dep.registry) : "";
+			if (origin.len) opts.hosts.push(install::host_of(origin));
+			w = { .kind = REGISTRY, .id = dep.source, .ref = dep.version, .origin = origin, .expect = dep.checksum };
 		case is_path_dep(arg):  // the whole argument: a directory name may contain '@'
 			if (ctx.arg(1).len) return log::fail("a local directory has no versions; it is linked as it is")~;
 			w = { .kind = PATH, .origin = arg };
@@ -53,9 +64,19 @@ fn void? add_run(Ctx* ctx)
 	}
 	Op op = install::begin(&p, &opts)!;
 	defer catch op.rollback();
-	if (w.kind == REGISTRY) w.origin = op.registry_for(w.id, "")!;
+	if (w.kind == REGISTRY && !w.origin.len) w.origin = op.registry_for(w.id, "")!;
 	op.add(w, DIRECT)!;
 	op.commit();
+}
+
+// A c3c library path that says more than ns/name@version: a registry url, or a checksum.
+// A port ("https://host:8080/repo") is not a namespace.
+fn bool c3c_path(Requirement d)
+{
+	if (!d.registry.len && !d.checksum.len) return false;
+	String ns = d.source[:d.source.index_of_char('/') ?? 0];
+	foreach (c : ns) if (!c.is_digit()) return true;
+	return false;
 }
 
 fn void? remove_run(Ctx* ctx)
