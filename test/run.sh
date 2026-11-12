@@ -1457,6 +1457,30 @@ has "the chosen target is packed" '"provides": "two"' "$(unzip -p "$WORK/sl2.c3l
 out="$(c3l pack --offline --target nope --output "$WORK/sl2n.c3l" 2>&1)"; eq "unknown --target rc" $? 1
 has "unknown target named" "no source-lib target 'nope'" "$out"
 
+# C sources in the c3c example layout: the compile check writes its objects into its own temporary directory
+mklib sl4
+mkdir -p src/extra csource/include
+printf 'module slfour;\nextern fn int sl4_add(int a, int b);\nfn int add(int a, int b) => sl4_add(a, b);\n' > src/m.c3
+printf 'module slfour::extra;\nfn int twice(int x) => x * 2;\n' > src/extra/double.c3
+printf '#include "m.h"\n#include "bias.h"\nint sl4_add(int a, int b) { return a + b + SL4_BIAS; }\n' > csource/m.c
+printf '#pragma once\nint sl4_add(int a, int b);\n' > csource/m.h; printf '#pragma once\n#define SL4_BIAS 0\n' > csource/include/bias.h
+printf '{ "langrev": "1", "version": "0.1.0", "sources": [ "./src/**" ], "c-sources": [ "csource/*" ], "c-include-dirs": [ "./csource/include" ], "targets": { "slfour": { "type": "source-lib" } } }\n' > project.json
+commit_all
+ls -A > "$WORK/sl4.before"
+out="$(c3l check --offline 2>&1)"; eq "source-lib with C sources: check rc" $? 0
+has "source-lib with C sources: compiles" "compiles" "$out"
+c3l pack --offline --output "$WORK/sl4.c3l" >/dev/null 2>&1; eq "source-lib with C sources: pack rc" $? 0
+eq "source-lib with C sources: files" "$(members "$WORK/sl4.c3l")" "csource/include/bias.h csource/m.c csource/m.h manifest.json src/extra/double.c3 src/m.c3 "
+eq "the project directory is untouched (no obj/, build/, out/)" "$(ls -A | diff - "$WORK/sl4.before" && echo same)" "same"
+# the unpacked archive as a library directory with C sources, packed again
+mklib sl5
+mkdir -p lib5; ( cd "$WORK/sl5" && unzip -q "$WORK/sl4.c3l" )
+git add -A >/dev/null 2>&1; git commit -qm lib
+ls -A > "$WORK/sl5.before"
+out="$(c3l check --offline --version 1.0.0 2>&1)"; eq "manifest.json library with c-sources: check rc" $? 0
+has "manifest.json library with c-sources: compiles" "compiles" "$out"
+eq "its directory is untouched" "$(ls -A | diff - "$WORK/sl5.before" && echo same)" "same"
+
 section "warn when c3c is older than 0.8.6"
 newproj old1
 c3l init >/dev/null 2>&1

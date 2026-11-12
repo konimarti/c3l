@@ -394,7 +394,11 @@ fn void Package.check_build(&self)
 	argv.tinit();
 	String empty = string::tformat("%s/cwd", tmp);
 	(void)path::mkdir(empty);
-	argv.push_all({ sys::c3c(), "--path", empty, "--libdir", string::tformat("%s/stage", tmp) });
+	// c3c compiles C sources even with --no-obj, into ./obj of its working directory, which it does not create:
+	// give it a directory of ours (for the staged package only, never the project's)
+	String obj = string::tformat("%s/obj", tmp);
+	(void)path::mkdir(string::tformat("%s/%s", obj, self.name), true);
+	argv.push_all({ sys::c3c(), "--path", empty, "--libdir", string::tformat("%s/stage", tmp), "--obj-out", obj, "--build-dir", string::tformat("%s/build", tmp) });
 	String lib = string::tformat("%s/lib", self.dir);
 	if (file::is_dir(lib))
 	{
