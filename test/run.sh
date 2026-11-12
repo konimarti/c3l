@@ -1450,6 +1450,32 @@ has "the chosen target is packed" '"provides": "two"' "$(unzip -p "$WORK/sl2.c3l
 out="$(c3l pack --offline --target nope --output "$WORK/sl2n.c3l" 2>&1)"; eq "unknown --target rc" $? 1
 has "unknown target named" "no source-lib target 'nope'" "$out"
 
+# check: every platform of the manifest, test files, patterns that match nothing
+section "check: compile for every target platform, warn about test files"
+mklib ck1
+printf '{ "provides": "ck1", "sources": [ "s.c3" ], "targets": { "linux-x64": {}, "windows-x64": {}, "macos-aarch64": {} } }\n' > manifest.json
+printf 'module ck1;\nfn int f()\n{\n\t$if env::WIN32:\n\t\t$error "broken on windows";\n\t$endif\n\treturn 1;\n}\n' > s.c3
+echo '# r' > README.md
+commit_all
+out="$(pc check --offline --version 1.0.0 2>&1)"; eq "a platform that does not compile rc" $? 1
+has "the platform is named" "does not compile for windows-x64" "$out"
+has "the error is shown" "broken on windows" "$out"
+has "other platforms are compiled" "compiles for macos-aarch64" "$out"
+printf 'module ck1;\nfn int f() => 1;\n' > s.c3; git commit -qam ok
+out="$(pc check --offline --version 1.0.0 2>&1)"; eq "all platforms compile rc" $? 0
+has "windows-x64 checked" "compiles for windows-x64" "$out"
+out="$(pc check --offline --no-build --version 1.0.0 2>&1)"
+check_not "--no-build skips the platforms" grep -q "compiles for" <<< "$out"
+mklib ck2
+printf '{ "provides": "ck2", "sources": [ "src/**" ] }\n' > manifest.json
+mkdir src; printf 'module ck2;\nfn int f() => 1;\n' > src/a.c3; printf 'module ck2::t;\nfn void t() @test {}\n' > src/b.c3
+commit_all
+out="$(pc check --offline --version 1.0.0 2>&1)"; eq "test code is a warning rc" $? 0
+has "a file with an @test function" "test code that consumers compile too: src/b.c3" "$out"
+git mv src/b.c3 src/b_test.c3; printf 'module ck2::u;\n' > src/b_test.c3; git commit -qam t
+out="$(pc check --offline --version 1.0.0 2>&1)"
+has "a *_test.c3 file" "test code that consumers compile too: src/b_test.c3" "$out"
+
 if [[ -n "$LIVE" ]]; then
 	section "live: www.c3pkg.eu"
 	unset C3L_REGISTRY

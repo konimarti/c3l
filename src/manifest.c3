@@ -29,6 +29,7 @@ struct Manifest
 	String version;
 	String[] dependencies;  // top level "dependencies"
 	Requirement[] requires;
+	String[] targets;       // the platforms of "targets" (empty: all)
 	String[] entries;       // every entry of "dependencies", top level and per target, as written
 	String invalid;         // a required name that is not a valid library name (not in `requires`)
 	String[] notes;         // what was not followed, and why: for the user
@@ -121,10 +122,14 @@ fn Manifest? parse(String text, String lock_text = "", String c3po_lock = "")
 	foreach (d : m.dependencies) { entries.push(d); add_dependency(&m, &reqs, d); }
 	if (try targets = root.get("targets"))
 	{
+		List{String} platforms;
+		platforms.tinit();
 		targets.@each_entry(; String key, Object* target)
 		{
+			platforms.push(key);
 			foreach (d : strings(target, "dependencies")) { entries.push(d); add_dependency(&m, &reqs, d); }
 		};
+		m.targets = platforms.array_view();
 	}
 	m.requires = reqs.array_view();
 	m.entries = entries.array_view();

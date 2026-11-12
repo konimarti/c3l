@@ -42,6 +42,7 @@ struct Package
 	bool selected;
 	String work;        // temporary directory of a source-lib build, removed by cleanup()
 	String root;        // where the files are read from: the dir, or what c3c built
+	String[] platforms; // the manifest's "targets"
 	String target;      // the source-lib target the package is built from, empty for a manifest.json library
 }
 
@@ -90,9 +91,11 @@ fn Package check(String dir, Settings s)
 	bool sources;
 	foreach (f : files) if (f.ends_with(".c3") || f.ends_with(".c3i")) sources = true;
 	if (!sources) log::warn("%s contains no .c3/.c3i sources", dir);
+	p.warn_tests();
 	if (!file::exists(string::tformat("%s/README.md", dir))) log::warn("no README.md in %s (the registry shows it as the package page)", dir);
 
 	p.dependency_entries = m.entries;
+	p.platforms = m.targets;
 	p.check_dependencies(m);
 	p.check_clean(s.allow_dirty);
 	if (!s.no_build) p.check_build();
@@ -397,14 +400,95 @@ fn void Package.check_build(&self)
 	}
 	argv.push_all({ "compile-only", "--lib", self.name, "--no-obj" });
 	Output? o = sys::run(argv.array_view(), MERGE);
-	if (try o && o.code == 0)
+	bool built;
+	if (try o) built = o.code == 0;
+	if (!built)
 	{
-		log::info("library compiles with c3c %s", sys::c3_version());
+		self.error("the library does not compile:");
+		String[] lines = (o.out ?? "").trim().tsplit("\n");
+		foreach (line : lines[lines.len > 15 ? lines.len - 15 : 0..]) io::eprintn(line);
 		return;
 	}
-	self.error("the library does not compile:");
-	String[] lines = (o.out ?? "").trim().tsplit("\n");
-	foreach (line : lines[lines.len > 15 ? lines.len - 15 : 0..]) io::eprintn(line);
+	log::info("library compiles with c3c %s", sys::c3_version());
+
+	// the other platforms of the manifest, compiled without objects
+	String host = sys::host_target();
+	String[] sorted = self.platforms;
+	sort::quicksort(sorted, fn int(String a, String b) => a.compare_to(b));
+	foreach (t : sorted)
+	{
+		if (t == host) continue;
+		if (t.starts_with("android-"))
+		{
+			// c3c asks to download the NDK (and waits for the answer) before it checks anything
+			log::info("%s skipped: c3c needs the Android NDK for it, which 'check' does not download", t);
+			continue;
+		}
+		argv.push_all({ "--target", t });
+		Output? po = sys::run(argv.array_view(), MERGE);
+		argv.pop()!!;
+		argv.pop()!!;
+		bool ok;
+		if (try po) ok = po.code == 0;
+		if (ok)
+		{
+			log::info("library compiles for %s", t);
+			continue;
+		}
+		String said = (po.out ?? "");
+		if (said.contains("cannot be used with arch/os"))
+		{
+			// a library this one depends on does not support the platform: not a fault of this package
+			log::warn("%s not checked: a library it depends on does not support it", t);
+			continue;
+		}
+		if (!self.compiles_trivial(tmp, t))
+		{
+			log::info("%s skipped: c3c cannot check any library for it here (no SDK?)", t);
+			continue;
+		}
+		self.error("the library does not compile for %s:", t);
+		String[] lines = (po.out ?? "").trim().tsplit("\n");
+		foreach (line : lines[lines.len > 15 ? lines.len - 15 : 0..]) io::eprintn(line);
+	}
+}
+
+// Can c3c check an empty library for `target` here? When not, a failure for it says nothing about the package.
+fn bool Package.compiles_trivial(&self, String tmp, String target)
+{
+	String dir = string::tformat("%s/trivial", tmp);
+	String lib = string::tformat("%s/triv.c3l", dir);
+	(void)path::mkdir(lib, true);
+	if (catch file::save(string::tformat("%s/manifest.json", lib), `{ "provides": "triv", "sources": [ "t.c3" ] }`)) return false;
+	if (catch file::save(string::tformat("%s/t.c3", lib), "module triv;\n")) return false;
+	String empty = string::tformat("%s/cwd", tmp);
+	Output? o = sys::run({ sys::c3c(), "--path", empty, "--libdir", dir, "compile-only", "--lib", "triv", "--no-obj", "--target", target }, MERGE);
+	if (try o) return o.code == 0;
+	return false;
+}
+
+<*
+ Test code in the package is compiled by consumers: warn about a file named
+ *_test.c3 and about one with an @test function.
+*>
+fn void Package.warn_tests(&self)
+{
+	List{String} found;
+	found.tinit();
+	String base = self.root.len ? self.root : self.dir;
+	foreach (f : self.files())
+	{
+		if (!f.ends_with(".c3") && !f.ends_with(".c3t")) continue;
+		bool test = f.ends_with("_test.c3");
+		if (!test)
+		{
+			String text = (String)file::load_temp(string::tformat("%s/%s", base, f)) ?? "";
+			test = text.contains("@test");
+		}
+		if (test) found.push(f);
+	}
+	if (!found.len()) return;
+	log::warn("the package contains test code that consumers compile too: %s%s", found[0], found.len() > 1 ? string::tformat(" and %d more", found.len() - 1) : "");
 }
 
 <*
