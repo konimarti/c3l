@@ -316,7 +316,7 @@ fn String? normalize(String p)
 	String n = s.str_view();
 	while (n.starts_with("./")) n = n[2..];
 	while (n.len > 1 && n.ends_with("/")) n = n[:n.len - 1];
-	if (n == ".") return "";
+	if (n == "." || (!n.len && p.len)) return "";
 	if (!n.len || n[0] == '/' || (n.len > 1 && n[1] == ':')) return BAD_PATH~;
 	foreach (part : n.tsplit("/")) if (part == "..") return BAD_PATH~;
 	return n;

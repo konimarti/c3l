@@ -117,7 +117,7 @@ fn void problems() @test
 fn void normalize_like_c3c() @test
 {
 	assert(select::normalize("./a\\b/")!! == "a/b");
-	assert(select::normalize(".")!! == "");
+	assert(select::normalize(".")!! == "" && select::normalize("./")!! == "");
 	assert(@catch(select::normalize("../a")));
 	assert(@catch(select::normalize("a/../b")));
 	assert(@catch(select::normalize("/a")));
