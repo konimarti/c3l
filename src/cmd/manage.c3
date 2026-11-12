@@ -8,6 +8,7 @@ import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::manifest, c3l::install,
 
 fn void? add_run(Ctx* ctx)
 {
+	sys::warn_old_c3c();
 	Project p = project::find()!;
 	String arg = ctx.arg(0);
 	if (arg.starts_with("vendor:") || arg == "vendor")
@@ -147,6 +148,7 @@ fn void? prune_run(Ctx* ctx)
 
 fn void? update_run(Ctx* ctx)
 {
+	sys::warn_old_c3c();
 	Project p = project::find()!;
 	Options opts = options(ctx)!;
 	// every argument is checked before anything changes
@@ -212,6 +214,7 @@ fn void? update_run(Ctx* ctx)
 
 fn void? sync_run(Ctx* ctx)
 {
+	sys::warn_old_c3c();
 	Project p = project::find()!;
 	if (!p.lock.exists()) return log::fail("%s not found (nothing to sync; try 'c3l migrate' or 'c3l add')", p.lock.file)~;
 	String dir = p.lib_dir(true)!;

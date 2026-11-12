@@ -4,7 +4,7 @@
 module c3l::sys;
 
 import std::io, std::os, std::sort, std::collections::list, std::hash::sha256, std::encoding::hex;
-import std::compression::zip, libc, serp, c3l::log;
+import std::compression::zip, libc, serp, c3l::log, c3l::semver;
 
 // The compiler to call: $C3C or c3c on PATH.
 fn String c3c() => env::tget_var("C3C") ?? "c3c";
@@ -256,6 +256,21 @@ fn String c3_version()
 		return v[:end];
 	}
 	return "";
+}
+
+bool old_c3c_warned @private;
+
+<*
+ Once per run: c3c before 0.8.6 may keep compiling the old sources of a .c3l
+ zip that was updated (add, update and sync write such archives).
+*>
+fn void warn_old_c3c()
+{
+	if (old_c3c_warned) return;
+	old_c3c_warned = true;
+	String v = c3_version();
+	if (!v.len || semver::compare(v, "0.8.6") >= 0) return;
+	log::warn("c3c %s may keep compiling the old sources of an updated .c3l zip (c3c 0.8.6 unpacks it again when only files other than manifest.json changed); update c3c, or delete build/unpacked_c3l", v);
 }
 
 // The platform names c3c knows ("linux-x64", "macos-aarch64", ...), as `c3c --list-targets` prints them.

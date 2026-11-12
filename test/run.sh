@@ -1450,6 +1450,21 @@ has "the chosen target is packed" '"provides": "two"' "$(unzip -p "$WORK/sl2.c3l
 out="$(c3l pack --offline --target nope --output "$WORK/sl2n.c3l" 2>&1)"; eq "unknown --target rc" $? 1
 has "unknown target named" "no source-lib target 'nope'" "$out"
 
+section "warn when c3c is older than 0.8.6"
+newproj old1
+c3l init >/dev/null 2>&1
+out="$(C3C="$WORK/oldc3c" c3l add acme/hex 2>&1)"; eq "add with c3c 0.8.5 rc" $? 0
+eq "add warns once" "$(grep -c 'may keep compiling the old sources' <<< "$out")" "1"
+has "the warning names the version" "c3c 0.8.5 may keep compiling" "$out"
+out="$(C3C="$WORK/oldc3c" c3l update 2>&1)"; eq "update with c3c 0.8.5 rc" $? 0
+eq "update warns once" "$(grep -c 'may keep compiling the old sources' <<< "$out")" "1"
+out="$(C3C="$WORK/oldc3c" c3l sync 2>&1)"; eq "sync with c3c 0.8.5 rc" $? 0
+eq "sync warns once" "$(grep -c 'may keep compiling the old sources' <<< "$out")" "1"
+out="$(C3C="$WORK/oldc3c" c3l list 2>&1)"
+check_not "list does not warn" grep -q 'may keep compiling' <<< "$out"
+out="$(c3l update 2>&1)"
+check_not "no warning with c3c 0.8.6" grep -q 'may keep compiling' <<< "$out"
+
 # check: every platform of the manifest, test files, patterns that match nothing
 section "check: compile for every target platform, warn about test files"
 mklib ck1
