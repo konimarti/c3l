@@ -211,6 +211,8 @@ Some commands have short names: *add* is also *fetch*, *f*, *get* and *g*; *remo
 	lib@HEAD* moves a tag-locked library to HEAD). Moving to a version that is not
 	compatible fails if a library that requires it asks for the old one. A name that is not in
 	the lockfile is an error. With *--dry-run* only print what would change.
+	The library's entry in _project.json_ is rewritten as its full path at the new version and
+	checksum (see *DEPENDENCIES*).
 
 *sync*
 	Make the project match _c3l.lock_: reinstall missing or modified libraries at the
