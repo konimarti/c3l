@@ -427,6 +427,7 @@ rm -rf "$WORK/pub"; mkdir -p "$WORK/pub"; cd "$WORK/pub" && "$C3C" init-lib demo
 mkdir -p src; printf 'module demo;\nfn int answer() => 42;\n' > src/demo.c3
 git init -q .; git add -A; git commit -qm init
 pc() { c3l --registry "$PR" "$@"; }
+LOCKLINE='dcb\tregistry\thttp://example.invalid/v1\tacme/dcb\t1.2.0\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tdirect\t-\n'
 
 out="$(pc check --offline 2>&1)"; eq "untagged without version rc" $? 1
 has "asks for a version" "no version" "$out"
@@ -453,7 +454,7 @@ git checkout -q README.md
 # review fixes: unpacked junk is not "dirty"; modes do not depend on umask; nested .c3l is kept
 mkdir -p obj tests; echo x > obj/a.o
 check "untracked obj/ is not dirt" pc check --offline --no-build
-printf '# c3l.lock v1\n' > c3l.lock
+printf "# c3l.lock v1\n$LOCKLINE" > c3l.lock  # (an uncommitted lock with entries is part of the package)
 out="$(pc check --offline --no-build 2>&1)"; eq "an uncommitted c3l.lock is dirt rc" $? 1
 has "the lock is named" "c3l.lock is part of the package, commit it" "$out"
 echo x > tests/fixture.c3l; echo y > newfile.c3
@@ -1323,7 +1324,6 @@ mklib() { rm -rf "$WORK/$1"; mkdir -p "$WORK/$1"; cd "$WORK/$1" || exit 1; git i
 commit_all() { git add -A; git commit -qm i; }
 members() { unzip -Z1 "$1" | LC_ALL=C sort | tr '\n' ' '; }
 pk() { c3l --registry "$PR" pack --offline --no-build --version 1.0.0 --output "$WORK/pk.c3l" "$@"; }
-LOCKLINE='dcb\tregistry\thttp://example.invalid/v1\tacme/dcb\t1.2.0\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tdirect\t-\n'
 
 # no "sources": the top directory only; CI files, tools and project.json stay out
 mklib sel1
@@ -1408,6 +1408,47 @@ eq "empty c3l.lock stays out" "$(members "$WORK/pk.c3l")" "manifest.json s.c3 "
 printf "# c3l.lock v1\n$LOCKLINE" > c3l.lock; git commit -qam t
 pk >/dev/null 2>&1
 eq "c3l.lock with entries is packed" "$(members "$WORK/pk.c3l")" "c3l.lock manifest.json s.c3 "
+
+# a project with a source-lib target and no manifest.json: the package is c3c's, plus c3l.lock
+section "pack and check: projects with a source-lib target"
+mklib sl1
+mkdir -p src ci build out
+echo 'module slone;' > src/m.c3; echo mit > LICENSE; echo '# r' > README.md; echo x > ci/x.yml
+printf '{ "langrev": "1", "version": "1.2.3", "sources": [ "src/**" ], "targets": { "slone": { "type": "source-lib" }, "app": { "type": "executable" } } }\n' > project.json
+echo keep > build/marker; echo keep > out/marker; printf 'build/\nout/\n' > .gitignore
+commit_all
+out="$(c3l pack --offline --output "$WORK/sl1.c3l" 2>&1)"; eq "source-lib: pack rc" $? 0
+eq "source-lib: c3c's file set" "$(members "$WORK/sl1.c3l")" "LICENSE README.md manifest.json src/m.c3 "
+has "source-lib: the name comes from the target" '"provides": "slone"' "$(unzip -p "$WORK/sl1.c3l" manifest.json)"
+has "source-lib: the version from project.json" '"version": "1.2.3"' "$(unzip -p "$WORK/sl1.c3l" manifest.json)"
+eq "source-lib: the user's build/ and out/ are untouched" "$(ls build out | tr '\n' ' ')" "build: marker  out: marker "
+c3l pack --offline --output "$WORK/sl1b.c3l" >/dev/null 2>&1
+eq "source-lib: same bytes twice" "$(sha "$WORK/sl1.c3l")" "$(sha "$WORK/sl1b.c3l")"
+c3l pack --offline --version 2.0.0 --output "$WORK/sl1c.c3l" >/dev/null 2>&1
+has "source-lib: --version wins" '"version": "2.0.0"' "$(unzip -p "$WORK/sl1c.c3l" manifest.json)"
+out="$(c3l pack --offline --list 2>&1)"
+has "source-lib --list: c3c's rule" "^  src/m.c3	source-lib target slone" "$out"
+has "source-lib --list: left out" "^  ci/x.yml$" "$out"
+out="$(c3l check --offline 2>&1)"; eq "source-lib: check rc" $? 0
+has "source-lib: the staged package compiles" "compiles" "$out"
+printf "# c3l.lock v1\n$LOCKLINE" > c3l.lock; git add c3l.lock; git commit -qm lock
+c3l pack --offline --output "$WORK/sl1d.c3l" >/dev/null 2>&1
+eq "source-lib: c3l.lock is added" "$(members "$WORK/sl1d.c3l")" "LICENSE README.md c3l.lock manifest.json src/m.c3 "
+check "source-lib: the lock is the project's" cmp -s c3l.lock <(unzip -p "$WORK/sl1d.c3l" c3l.lock)
+printf '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "C3 Compiler Version: 0.8.5"; exit 0; fi\nexec "%s" "$@"\n' "$(command -v "$C3C")" > "$WORK/oldc3c"; chmod +x "$WORK/oldc3c"
+out="$(C3C="$WORK/oldc3c" c3l pack --offline --output "$WORK/sl1e.c3l" 2>&1)"; eq "source-lib with c3c 0.8.5 rc" $? 1
+has "source-lib needs 0.8.6" "needs c3c 0.8.6" "$out"
+
+mklib sl2
+mkdir -p src; echo 'module sltwo;' > src/m.c3
+printf '{ "langrev": "1", "version": "0.3.0", "sources": [ "src/**" ], "targets": { "one": { "type": "source-lib" }, "two": { "type": "source-lib" } } }\n' > project.json
+commit_all
+out="$(c3l pack --offline --output "$WORK/sl2.c3l" 2>&1)"; eq "two targets, no --target rc" $? 1
+has "the targets are listed" "one, two" "$out"
+out="$(c3l pack --offline --target two --output "$WORK/sl2.c3l" 2>&1)"; eq "two targets, --target rc" $? 0
+has "the chosen target is packed" '"provides": "two"' "$(unzip -p "$WORK/sl2.c3l" manifest.json)"
+out="$(c3l pack --offline --target nope --output "$WORK/sl2n.c3l" 2>&1)"; eq "unknown --target rc" $? 1
+has "unknown target named" "no source-lib target 'nope'" "$out"
 
 if [[ -n "$LIVE" ]]; then
 	section "live: www.c3pkg.eu"

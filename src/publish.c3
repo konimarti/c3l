@@ -7,6 +7,8 @@ module c3l::publish;
 import std::io, std::os, std::sort, std::collections::list, std::collections::object, std::encoding::json;
 import c3l::log, c3l::sys, c3l::lock, c3l::semver, c3l::manifest, c3l::jsonedit, c3l::http, c3l::registry, c3l::git, c3l::install, c3l::select;
 
+const String MIN_SOURCE_LIB = "0.8.6";  // the c3c that builds source libraries
+
 // From the command line.
 struct Settings
 {
@@ -19,6 +21,7 @@ struct Settings
 	bool no_build;
 	bool offline;
 	bool list;
+	String target;
 	String description;
 	String license;
 	String tags;
@@ -37,6 +40,9 @@ struct Package
 	int errors;
 	Selection chosen;   // what files() chose, once
 	bool selected;
+	String work;        // temporary directory of a source-lib build, removed by cleanup()
+	String root;        // where the files are read from: the dir, or what c3c built
+	String target;      // the source-lib target the package is built from, empty for a manifest.json library
 }
 
 fn void Package.error(&self, String format, args...) @format(1)
@@ -57,19 +63,8 @@ fn Package check(String dir, Settings s)
 		p.error("%s is not a directory", dir);
 		return p;
 	}
-	Manifest? m = manifest::load_file(string::tformat("%s/manifest.json", dir));
-	if (catch e = m)
-	{
-		if (e == manifest::NO_MANIFEST)
-		{
-			p.error("no manifest.json in %s; publish a library directory (create one with 'c3c init-lib <name>')", dir);
-		}
-		else
-		{
-			p.error("manifest.json in %s cannot be read as JSON (comments and trailing commas are fine)", dir);
-		}
-		return p;
-	}
+	Manifest? m = p.load_manifest(s);
+	if (catch m) return p;  // load_manifest said why
 	p.name = m.provides;
 	if (!p.name.len)
 	{
@@ -77,7 +72,7 @@ fn Package check(String dir, Settings s)
 		return p;
 	}
 	if (!lock::valid_name(p.name)) p.error("invalid package name '%s' (letters, digits, '.', '_', '-')", p.name);
-	if (!p.resolve_version(s.version, m.version))
+	if (!p.resolve_version(s.version, p.target.len ? "" : m.version))
 	{
 		p.error("no version: tag the commit (git tag v1.2.3), pass --version 1.2.3, or set \"version\" in manifest.json (or project.json)");
 		return p;
@@ -104,6 +99,147 @@ fn Package check(String dir, Settings s)
 	if (!s.offline) p.check_registry(s);
 	if (!p.errors) log::info("%s %s (from %s, C3 %s) passes all checks", p.name, p.version, p.version_from, p.c3_version);
 	return p;
+}
+
+faultdef NO_SOURCE_LIB;
+
+<*
+ manifest.json of the library in `dir`; a project without one but with a
+ "source-lib" target gets it from what `c3c build <target>` writes.
+*>
+fn Manifest? Package.load_manifest(&self, Settings s)
+{
+	Manifest? m = manifest::load_file(string::tformat("%s/manifest.json", self.dir));
+	if (try m) return m;
+	if (@catch(m) != manifest::NO_MANIFEST)
+	{
+		self.error("manifest.json in %s cannot be read as JSON (comments and trailing commas are fine)", self.dir);
+		return manifest::BAD_MANIFEST~;
+	}
+	String[] targets = source_lib_targets(self.dir);
+	if (!targets.len)
+	{
+		self.error("no manifest.json in %s; publish a library directory (create one with 'c3c init-lib <name>') or a project with a \"source-lib\" target", self.dir);
+		return manifest::NO_MANIFEST~;
+	}
+	return self.build_source_lib(targets, s.target);
+}
+
+<*
+ The targets of type "source-lib" in the project.json(5) of `dir`, sorted.
+*>
+fn String[] source_lib_targets(String dir) @private
+{
+	List{String} out;
+	out.tinit();
+	String file = string::tformat("%s/project.json", dir);
+	if (!file::exists(file)) file = string::tformat("%s/project.json5", dir);
+	char[]? data = file::load_temp(file);
+	if (catch data) return {};
+	Object* root = json::tparse((String)data) ?? null;
+	Object* targets = root && root.is_map() ? root.get("targets") ?? null : null;
+	if (!targets || !targets.is_map()) return {};
+	targets.@each_entry(; String key, Object* t)
+	{
+		if (t.is_map() && (t.get_string("type") ?? "") == "source-lib") out.push(key);
+	};
+	sort::quicksort(&out, fn int(String a, String b) => a.compare_to(b));  // the map has no order to rely on
+	return out.array_view();
+}
+
+<*
+ Build the source-lib target with c3c into a temporary directory (the
+ project's own build and output directories stay as they are); the package is
+ what c3c wrote, plus c3l.lock.
+*>
+fn Manifest? Package.build_source_lib(&self, String[] targets, String want)
+{
+	String target = want;
+	switch
+	{
+		case want.len && !has_name(targets, want):
+			self.error("project.json has no source-lib target '%s' (it has: %s)", want, names(targets));
+			return NO_SOURCE_LIB~;
+		case !want.len && targets.len > 1:
+			self.error("project.json has several source-lib targets (%s); pick one with --target <name>", names(targets));
+			return NO_SOURCE_LIB~;
+		case !want.len:
+			target = targets[0];
+	}
+	String v = sys::c3_version();
+	if (!v.len || semver::compare(v, MIN_SOURCE_LIB) < 0)
+	{
+		self.error("packing a project's source-lib target needs c3c %s or newer (this is %s)", MIN_SOURCE_LIB, v.len ? v : "unknown");
+		return NO_SOURCE_LIB~;
+	}
+	String? work = sys::temp_dir();
+	if (catch work)
+	{
+		self.errors++;
+		return NO_SOURCE_LIB~;
+	}
+	self.work = work;
+	String out = string::tformat("%s/o", work);
+	Output? o = sys::run({ sys::c3c(), "--path", self.dir, "build", target, "--build-dir", string::tformat("%s/b", work), "--output-dir", out, "--no-compress" }, MERGE);
+	if (catch o) 
+	{
+		self.error("cannot run c3c");
+		return NO_SOURCE_LIB~;
+	}
+	if (o.code != 0)
+	{
+		self.error("c3c build %s failed:", target);
+		String[] lines = o.out.trim().tsplit("\n");
+		foreach (line : lines[lines.len > 15 ? lines.len - 15 : 0..]) io::eprintn(line);
+		return NO_SOURCE_LIB~;
+	}
+	String built;
+	if (try list = path::ls(tmem, (Path)out))
+	{
+		foreach (f : list)
+		{
+			String name = ((String)f);
+			if (name.ends_with(".c3l") && file::is_dir(string::tformat("%s/%s", out, name))) built = string::tformat("%s/%s", out, name);
+		}
+	}
+	if (!built.len)
+	{
+		self.error("c3c build %s wrote no library", target);
+		return NO_SOURCE_LIB~;
+	}
+	self.root = built;
+	self.target = target;
+	Lock l = lock::load(string::tformat("%s/c3l.lock", self.dir)) ?? (Lock){};  // check_dependencies reports a broken one
+	if (l.entries.len() > 0)
+	{
+		char[]? data = file::load_temp(string::tformat("%s/c3l.lock", self.dir));
+		if (try data) (void)file::save(string::tformat("%s/c3l.lock", built), data);
+	}
+	return manifest::load_file(string::tformat("%s/manifest.json", built)) ?? NO_SOURCE_LIB~;
+}
+
+fn bool has_name(String[] list, String name) @private
+{
+	foreach (n : list) if (n == name) return true;
+	return false;
+}
+
+fn String names(String[] list) @private
+{
+	DString d = dstring::temp();
+	foreach (i, n : list)
+	{
+		if (i) d.append(", ");
+		d.append(n);
+	}
+	return d.str_view();
+}
+
+// Remove what a source-lib build left in the temporary directory.
+fn void Package.cleanup(&self)
+{
+	if (self.work.len) sys::remove(self.work);
+	self.work = "";
 }
 
 <*
@@ -204,8 +340,16 @@ fn void Package.check_dependencies(&self, Manifest m)
 fn void Package.check_clean(&self, bool allow_dirty)
 {
 	if (!git::is_repo(self.dir)) return;
-	bool dirty = git::lines(self.dir, { "status", "--porcelain", "--untracked-files=no", "--", "." }).len > 0
-		|| packed(git::lines(self.dir, { "ls-files", "-o", "--exclude-standard" })).len > 0;
+	bool dirty = git::lines(self.dir, { "status", "--porcelain", "--untracked-files=no", "--", "." }).len > 0;
+	if (!dirty)
+	{
+		// a new file the package would hold
+		String[] untracked = packed(git::lines(self.dir, { "-c", "core.quotepath=off", "ls-files", "-o", "--exclude-standard" }));
+		foreach (p : self.choose().picked)
+		{
+			if (has_name(untracked, p.path)) dirty = true;
+		}
+	}
 	if (!dirty) return;
 	if (allow_dirty)
 	{
@@ -336,8 +480,9 @@ fn String? Package.stage(&self, String tmp)
 	{
 		String dst = string::tformat("%s/%s", to, f);
 		(void)path::mkdir(dst[:dst.rindex_of_char('/')!!], true);
-		char[] data = file::load_temp(string::tformat("%s/%s", self.dir, f)) ?? log::fail("staging %s/%s failed", self.dir, f)~!;
-		file::save(dst, data) ?? log::fail("staging %s/%s failed", self.dir, f)~!;
+		String from = string::tformat("%s/%s", self.root.len ? self.root : self.dir, f);
+		char[] data = file::load_temp(from) ?? log::fail("staging %s failed", from)~!;
+		file::save(dst, data) ?? log::fail("staging %s failed", from)~!;
 	}
 	String mfile = string::tformat("%s/manifest.json", to);
 	String text = (String)file::load_temp(mfile) ?? log::fail("manifest.json is not part of the package (is it ignored by git?)")~!;
@@ -382,20 +527,7 @@ fn Selection* Package.choose(&self)
 	}
 	else
 	{
-		List{String} found;
-		found.tinit();
-		if (try list = path::ls(tmem, (Path)self.dir, no_dirs: true, recursive: true))
-		{
-			foreach (f : list)
-			{
-				$if env::WIN32:
-					found.push(((String)f).treplace("\\", "/"));  // package paths use '/'
-				$else
-					found.push((String)f);
-				$endif
-			}
-		}
-		all = found.array_view();
+		all = walk(self.dir);
 	}
 	List{String} cand;
 	cand.tinit();
@@ -403,12 +535,53 @@ fn Selection* Package.choose(&self)
 	{
 		if (file::is_file(string::tformat("%s/%s", self.dir, f)) && !cand.contains(f)) cand.push(f);
 	}
+	if (self.root.len)
+	{
+		// c3c chose the files of a source-lib target; what is left of the project is left out
+		List{Pick} picked;
+		picked.tinit();
+		foreach (f : walk(self.root))
+		{
+			picked.push({ f, f == "manifest.json" ? "manifest" : f == "c3l.lock" ? "lock" : string::tformat("source-lib target %s", self.target) });
+		}
+		sort::quicksort(&picked, fn int(Pick a, Pick b) => a.path.compare_to(b.path));
+		List{String} left;
+		left.tinit();
+		foreach (f : cand) if (!picked.contains_pick(f)) left.push(f);
+		self.chosen = { picked.array_view(), left.array_view(), {}, {} };
+		return &self.chosen;
+	}
 	Lock l = lock::load(string::tformat("%s/c3l.lock", self.dir)) ?? (Lock){};  // check_dependencies reports a broken one
 	String text = (String)file::load_temp(string::tformat("%s/manifest.json", self.dir)) ?? "";
 	self.chosen = select::choose(text, cand.array_view(), packed(ignored), sys::platforms(), l.entries.len() > 0);
 	foreach (e : self.chosen.errors) self.error("%s", e);
 	foreach (w : self.chosen.warnings) log::warn("%s", w);
 	return &self.chosen;
+}
+
+fn bool List{Pick}.contains_pick(&self, String path)
+{
+	foreach (p : *self) if (p.path == path) return true;
+	return false;
+}
+
+// Every file below `dir`, relative to it, with '/'.
+fn String[] walk(String dir) @private
+{
+	List{String} found;
+	found.tinit();
+	if (try list = path::ls(tmem, (Path)dir, no_dirs: true, recursive: true))
+	{
+		foreach (f : list)
+		{
+			$if env::WIN32:
+				found.push(((String)f).treplace("\\", "/"));  // package paths use '/'
+			$else
+				found.push((String)f);
+			$endif
+		}
+	}
+	return found.array_view();
 }
 
 // Without what is never packed.

@@ -8,6 +8,7 @@ import std::io, serp, c3l::log, c3l::sys, c3l::publish, c3l::registry;
 fn void? check_run(Ctx* ctx)
 {
 	Package p = publish::check(ctx.arg(0, "."), settings(ctx)!);
+	defer p.cleanup();
 	if (p.errors) return serp::FAILED~;
 }
 
@@ -16,6 +17,7 @@ fn void? pack_run(Ctx* ctx)
 	Settings s = settings(ctx)!;
 	s.offline = true;
 	Package p = publish::check(ctx.arg(0, "."), s);
+	defer p.cleanup();
 	if (p.errors) return log::fail("not packing: %d problem(s) found", p.errors)~;
 	if (s.list) return;  // --list: what would be packed, no package
 	String out = ctx.flag_string("output");
@@ -34,6 +36,7 @@ fn void? publish_run(Ctx* ctx)
 		return log::fail("registry %s is read-only (type 'static'); publishing needs a registry with an upload API such as c3pkg%s", base, hint)~;
 	}
 	Package p = publish::check(ctx.arg(0, "."), s);
+	defer p.cleanup();
 	if (p.errors) return log::fail("not publishing: %d problem(s) found", p.errors)~;
 	String tmp = sys::temp_dir()!;
 	defer sys::remove(tmp);
@@ -60,6 +63,7 @@ fn Settings? settings(Ctx* ctx)
 		.no_build = ctx.flag_bool("no-build"),
 		.offline = ctx.flag_bool("offline"),
 		.list = ctx.flag_bool("list"),
+		.target = ctx.flag_string("target"),
 		.description = ctx.flag_string("description"),
 		.license = ctx.flag_string("license"),
 		.tags = ctx.flag_string("tags"),
@@ -76,6 +80,7 @@ fn Command* publish_flags(Command* c)
 		.accepts(serp::max_args(1))
 		.flag({ .name = "version", .kind = STRING, .value_name = "X.Y.Z", .desc = "the version (default: semver tag on HEAD, manifest.json, project.json)" })
 		.flag({ .name = "c3-version", .kind = STRING, .desc = "the C3 version it is published for (default: c3c --version)" })
+		.flag({ .name = "target", .kind = STRING, .value_name = "NAME", .desc = "the source-lib target to pack, for a project without manifest.json that has several" })
 		.flag({ .name = "allow-dirty", .desc = "allow uncommitted changes" })
 		.flag({ .name = "no-build", .desc = "skip the compile check" })
 		.flag({ .name = "offline", .desc = "do not ask the registry about existing versions" })
