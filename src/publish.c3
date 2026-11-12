@@ -18,6 +18,7 @@ struct Settings
 	bool allow_dirty;
 	bool no_build;
 	bool offline;
+	bool list;
 	String description;
 	String license;
 	String tags;
@@ -90,6 +91,7 @@ fn Package check(String dir, Settings s)
 	if (!p.c3_version.len) p.error("cannot determine the C3 version; pass --c3-version");
 
 	String[] files = p.files();
+	if (s.list) p.print_list();
 	bool sources;
 	foreach (f : files) if (f.ends_with(".c3") || f.ends_with(".c3i")) sources = true;
 	if (!sources) log::warn("%s contains no .c3/.c3i sources", dir);
@@ -259,6 +261,19 @@ fn void Package.check_build(&self)
 	self.error("the library does not compile:");
 	String[] lines = (o.out ?? "").trim().tsplit("\n");
 	foreach (line : lines[lines.len > 15 ? lines.len - 15 : 0..]) io::eprintn(line);
+}
+
+<*
+ What `--list` prints: each packed file with the rule that took it, then the
+ files left out (tracked, or not ignored by git).
+*>
+fn void Package.print_list(&self)
+{
+	Selection* c = self.choose();
+	io::printfn("packed (%d):", c.picked.len);
+	foreach (p : c.picked) io::printfn("  %s\t%s", p.path, p.rule);
+	io::printfn("left out (%d):", c.left_out.len);
+	foreach (f : c.left_out) io::printfn("  %s", f);
 }
 
 // Not published yet, not older than what is; a new package needs a description.

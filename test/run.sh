@@ -1335,6 +1335,18 @@ commit_all
 pk >/dev/null 2>&1; eq "no sources: pack rc" $? 0
 eq "no sources: the top directory, licence, readme" "$(members "$WORK/pk.c3l")" "LICENSE README.md main.c3 manifest.json "
 pk >/dev/null 2>&1; cp "$WORK/pk.c3l" "$WORK/pk1.c3l"; pk >/dev/null 2>&1
+rm -f "$WORK/pk.c3l"
+out="$(pk --list 2>&1)"; eq "--list rc" $? 0
+has "--list: a source with its rule" "^  main.c3	top directory" "$out"
+has "--list: the manifest" "^  manifest.json	manifest" "$out"
+has "--list: licence and readme" "^  LICENSE	licence" "$out"
+has "--list: left out" "^left out (.*" "$out"
+has "--list: a tracked file left out" "^  tools/x.c3$" "$out"
+has "--list: project.json left out" "^  project.json$" "$out"
+check_not "--list writes no package" test -e "$WORK/pk.c3l"
+out="$(pc check --offline --no-build --version 1.0.0 --list 2>&1)"; eq "check --list rc" $? 0
+has "check --list lists too" "^  main.c3	top directory" "$out"
+pk >/dev/null 2>&1; cp "$WORK/pk.c3l" "$WORK/pk1.c3l"; pk >/dev/null 2>&1
 eq "pack twice: same bytes" "$(sha "$WORK/pk1.c3l")" "$(sha "$WORK/pk.c3l")"
 
 # sources with **, a directory and a wildcard; hidden directories are not found

@@ -17,6 +17,7 @@ fn void? pack_run(Ctx* ctx)
 	s.offline = true;
 	Package p = publish::check(ctx.arg(0, "."), s);
 	if (p.errors) return log::fail("not packing: %d problem(s) found", p.errors)~;
+	if (s.list) return;  // --list: what would be packed, no package
 	String out = ctx.flag_string("output");
 	if (!out.len) out = string::tformat("%s/%s-%s.c3l", (String)(path::tcwd() ?? (Path)"."), p.name, p.version);
 	log::info("packed %s (%s)", out, p.pack(out)!);
@@ -58,6 +59,7 @@ fn Settings? settings(Ctx* ctx)
 		.allow_dirty = ctx.flag_bool("allow-dirty"),
 		.no_build = ctx.flag_bool("no-build"),
 		.offline = ctx.flag_bool("offline"),
+		.list = ctx.flag_bool("list"),
 		.description = ctx.flag_string("description"),
 		.license = ctx.flag_string("license"),
 		.tags = ctx.flag_string("tags"),

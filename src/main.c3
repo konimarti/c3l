@@ -61,8 +61,10 @@ fn int main(String[] args)
 	app.add(serp::cmd("info", "show the registry record of a library", &info_run)
 		.usage_args("<namespace>/<name>")
 		.accepts(serp::exact_args(1)));
-	app.add(publish_flags(serp::cmd("check", "verify a library is ready to publish (no upload)", &check_run)));
+	app.add(publish_flags(serp::cmd("check", "verify a library is ready to publish (no upload)", &check_run))
+		.flag({ .name = "list", .desc = "list the packed files and the rule that took each" }));
 	app.add(publish_flags(serp::cmd("pack", "build the deterministic <name>-<version>.c3l", &pack_run))
+		.flag({ .name = "list", .desc = "list the packed files and the rule that took each; write no package" })
 		.flag({ .name = "output", .kind = STRING, .value_name = "FILE", .desc = "where to write the package" }));
 	app.add(publish_flags(serp::cmd("publish", "check, pack and upload to the registry", &publish_run))
 		.flag({ .name = "token-file", .kind = STRING, .value_name = "FILE", .desc = "API token (or $C3L_TOKEN, $C3PKG_TOKEN)" })
