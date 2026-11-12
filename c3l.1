@@ -281,6 +281,8 @@ libraries a tag, branch, \fBHEAD\fR or full commit hash (for example \fBc3l upda
 lib@HEAD\fR moves a tag-locked library to HEAD).\& Moving to a version that is not
 compatible fails if a library that requires it asks for the old one.\& A name that is not in
 the lockfile is an error.\& With \fB--dry-run\fR only print what would change.\&
+The library'\&s entry in \fIproject.\&json\fR is rewritten as its full path at the new version and
+checksum (see \fBDEPENDENCIES\fR).\&
 .PP
 .RE
 \fBsync\fR
