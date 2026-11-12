@@ -1363,11 +1363,16 @@ eq "sources with ** and *" "$(members "$WORK/pk.c3l")" "extra/e.c3i manifest.jso
 mklib sel3
 printf '{ "provides": "sel3", "sources": [ "s.c3" ], "c-sources": [ "c/one.c" ], "c-include-dirs": [ "inc" ] }\n' > manifest.json
 mkdir -p c inc/deep other
-echo 'module sel3;' > s.c3; echo 'int one(void){return 1;}' > c/one.c; echo '#define A 1' > c/one.h; echo n > c/notes.txt
-echo '#define B 1' > inc/i.h; echo '#define C 1' > inc/deep/d.h; echo 'int o;' > other/o.c; echo '#define D' > other/o.h
+printf 'module sel3;\nextern fn int one();\n' > s.c3; printf '#include "one.h"\n#include "i.h"\nint one(void){return ONE + TWO;}\n' > c/one.c
+echo '#define ONE 1' > c/one.h; echo n > c/notes.txt
+echo '#define TWO 2' > inc/i.h; echo '#define C 1' > inc/deep/d.h; echo 'int o;' > other/o.c; echo '#define D' > other/o.h
 commit_all
 pk >/dev/null 2>&1; eq "C: pack rc" $? 0
 eq "C sources, headers next to them and in include dirs" "$(members "$WORK/pk.c3l")" "c/one.c c/one.h inc/deep/d.h inc/i.h manifest.json s.c3 "
+# the proof for the header rules: a consumer that builds against the package (compile-only does not compile C files)
+rm -rf "$WORK/cons3"; mkdir -p "$WORK/cons3/lib/sel3.c3l"; ( cd "$WORK/cons3/lib/sel3.c3l" && unzip -q "$WORK/pk.c3l" )
+printf 'module main;\nimport sel3;\nfn int main() => sel3::one() == 3 ? 0 : 1;\n' > "$WORK/cons3/main.c3"
+( cd "$WORK/cons3" && "$C3C" compile --libdir lib --lib sel3 main.c3 -o m >/dev/null 2>&1 && ./m ); eq "a consumer builds and runs against the package (C sources, headers)" $? 0
 
 # prebuilt libraries per platform with the os fallback; exec names a script
 mklib sel4
