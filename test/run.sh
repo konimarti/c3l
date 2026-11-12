@@ -205,6 +205,8 @@ newproj p5
 c3l init >/dev/null 2>&1
 out="$(c3l add "file://$GR" 2>&1)"; eq "git add rc" $? 0
 has "latest tag chosen" "installed gitlib v0.2.0" "$out"
+has "a git library is listed by its name" '"gitlib"' "$(cat project.json)"
+check_not "no path for a git library" grep -q 'gitlib[@:/]' project.json
 rec="$(grep '^gitlib' c3l.lock)"
 has "commit pinned (annotated tag peeled)" "commit:$C2" "$rec"
 check "file is a zip" python3 -c "import zipfile;zipfile.ZipFile('lib/gitlib.c3l').getinfo('manifest.json')"
@@ -299,7 +301,7 @@ check "dry run kept dcb" test -f lib/dcb.c3l
 c3l prune >/dev/null 2>&1; eq "prune rc" $? 0
 check_not "dcb pruned" test -e lib/dcb.c3l
 check_not "dcc pruned" test -e lib/dcc.c3l
-check_not "project.json cleaned" grep -q '"dcb"' project.json
+check_not "project.json cleaned" grep -q 'acme/dcb' project.json
 eq "lock empty after prune" "$(awk -F'\t' '$0 !~ /^#/ && $1 !~ /^@/' c3l.lock | wc -l)" "0"
 
 section "dependencies: diamond, minimum version selection, conflicts"
@@ -1511,6 +1513,11 @@ FPA_SUM2="$(awk -F'\t' '$1=="fpa"{print $6}' c3l.lock | sed 's/^sha256://')"
 has "update replaces it by the new version and checksum" "\"$C3L_REGISTRY:acme/fpa@1.1.0:$FPA_SUM2\"" "$(cat project.json)"
 eq "one entry per library" "$(grep -c 'acme/fpa' project.json)" "1"
 check "frozen sync accepts the full path" c3l sync --frozen
+cp project.json "$WORK/fp1.good"
+sed -i "s|:$FPA_SUM2\"|:$(printf 'b%.0s' $(seq 64))\"|" project.json
+out="$(c3l sync --frozen 2>&1)"; eq "a checksum that disagrees with the lock fails rc" $? 1
+has "frozen sync names the checksum" "the lock has checksum" "$out"
+cp "$WORK/fp1.good" project.json
 sed -i "s|acme/fpa@1.1.0|acme/fpa@1.0.0|" project.json
 out="$(c3l sync --frozen 2>&1)"; eq "a path that disagrees with the lock fails rc" $? 1
 has "frozen sync names the disagreement" "does not match c3l.lock: the lock has version 1.1.0" "$out"
