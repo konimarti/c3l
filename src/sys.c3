@@ -258,6 +258,20 @@ fn String c3_version()
 	return "";
 }
 
+// The platform names c3c knows ("linux-x64", "macos-aarch64", ...), as `c3c --list-targets` prints them.
+fn String[] platforms()
+{
+	List{String} out;
+	out.tinit();
+	String text = (run({ c3c(), "--list-targets" }, MERGE) ?? (Output){}).out;
+	foreach (line : text.tsplit("\n"))
+	{
+		String t = line.trim();
+		if (line.starts_with("   ") && t.len && !t.contains(" ")) out.push(t);
+	}
+	return out.array_view();
+}
+
 // This platform as registries name targets ("linux-x64"), empty if unknown.
 fn String host_target()
 {

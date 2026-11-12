@@ -5,7 +5,7 @@
 module c3l::publish;
 
 import std::io, std::os, std::sort, std::collections::list, std::collections::object, std::encoding::json;
-import c3l::log, c3l::sys, c3l::lock, c3l::semver, c3l::manifest, c3l::jsonedit, c3l::http, c3l::registry, c3l::git, c3l::install;
+import c3l::log, c3l::sys, c3l::lock, c3l::semver, c3l::manifest, c3l::jsonedit, c3l::http, c3l::registry, c3l::git, c3l::install, c3l::select;
 
 // From the command line.
 struct Settings
@@ -34,6 +34,8 @@ struct Package
 	String c3_version;
 	String[] dependency_entries;  // the manifest's "dependencies", as written
 	int errors;
+	Selection chosen;   // what files() chose, once
+	bool selected;
 }
 
 fn void Package.error(&self, String format, args...) @format(1)
@@ -340,16 +342,28 @@ fn String? Package.pack(&self, String out)
 }
 
 <*
- The files that belong in the package, sorted: tracked and untracked-not-ignored
- in a git repository, else everything; never installed libraries or build output.
- c3l.lock is part of it.
+ The files that belong in the package, sorted: what the manifest names and
+ c3c reads (see select.c3), from the files git tracks or does not ignore (all
+ files without git). Chosen once; what is wrong with the choice is reported
+ and counted then.
 *>
 fn String[] Package.files(&self)
 {
-	String[] all;
+	List{String} out;
+	out.tinit();
+	foreach (p : self.choose().picked) out.push(p.path);
+	return out.array_view();
+}
+
+fn Selection* Package.choose(&self)
+{
+	if (self.selected) return &self.chosen;
+	self.selected = true;
+	String[] all, ignored;
 	if (git::is_repo(self.dir))
 	{
 		all = git::lines(self.dir, { "-c", "core.quotepath=off", "ls-files", "-co", "--exclude-standard" });
+		ignored = git::lines(self.dir, { "-c", "core.quotepath=off", "ls-files", "-o", "-i", "--exclude-standard" });
 	}
 	else
 	{
@@ -368,14 +382,18 @@ fn String[] Package.files(&self)
 		}
 		all = found.array_view();
 	}
-	List{String} out;
-	out.tinit();
+	List{String} cand;
+	cand.tinit();
 	foreach (f : packed(all))
 	{
-		if (file::is_file(string::tformat("%s/%s", self.dir, f)) && !out.contains(f)) out.push(f);
+		if (file::is_file(string::tformat("%s/%s", self.dir, f)) && !cand.contains(f)) cand.push(f);
 	}
-	sort::quicksort(&out, fn int(String a, String b) => a.compare_to(b));
-	return out.array_view();
+	Lock l = lock::load(string::tformat("%s/c3l.lock", self.dir)) ?? (Lock){};  // check_dependencies reports a broken one
+	String text = (String)file::load_temp(string::tformat("%s/manifest.json", self.dir)) ?? "";
+	self.chosen = select::choose(text, cand.array_view(), packed(ignored), sys::platforms(), l.entries.len() > 0);
+	foreach (e : self.chosen.errors) self.error("%s", e);
+	foreach (w : self.chosen.warnings) log::warn("%s", w);
+	return &self.chosen;
 }
 
 // Without what is never packed.

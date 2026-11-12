@@ -462,7 +462,8 @@ rm newfile.c3
 ( umask 002; c3l pack --no-build --allow-dirty --output "$WORK/u2.c3l" >/dev/null 2>&1 )
 ( umask 077; c3l pack --no-build --allow-dirty --output "$WORK/u7.c3l" >/dev/null 2>&1 )
 eq "pack independent of umask" "$(sha "$WORK/u2.c3l")" "$(sha "$WORK/u7.c3l")"
-has "nested .c3l kept" "tests/fixture.c3l" "$(unzip -l "$WORK/u2.c3l")"
+# (the package holds what the library needs, so a tracked file nothing names is left out)
+check_not "an unrelated nested .c3l is not packed" bash -c "unzip -l '$WORK/u2.c3l' | grep -q 'tests/fixture.c3l'"
 check_not "obj/ not packed" bash -c "unzip -l '$WORK/u2.c3l' | grep -q obj/"
 rm -rf obj c3l.lock tests
 out="$(pc check --offline --version 2>&1)"; eq "--version without value rc" $? 2
@@ -1316,6 +1317,85 @@ check "its library is in lib/" test -f lib/lpa.c3l
 has "locked as a direct dependency" "^lpa	registry.*	direct" "$(cat c3l.lock)"
 c3l remove lpa >/dev/null 2>&1
 check_not "remove drops the path entry" grep -q 'acme/lpa' manifest.json
+
+section "pack: only the files the library needs"
+mklib() { rm -rf "$WORK/$1"; mkdir -p "$WORK/$1"; cd "$WORK/$1" || exit 1; git init -q .; }
+commit_all() { git add -A; git commit -qm i; }
+members() { unzip -Z1 "$1" | LC_ALL=C sort | tr '\n' ' '; }
+pk() { c3l --registry "$PR" pack --offline --no-build --version 1.0.0 --output "$WORK/pk.c3l" "$@"; }
+LOCKLINE='dcb\tregistry\thttp://example.invalid/v1\tacme/dcb\t1.2.0\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tsha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tdirect\t-\n'
+
+# no "sources": the top directory only; CI files, tools and project.json stay out
+mklib sel1
+printf '{ "provides": "sel1" }\n' > manifest.json
+mkdir -p tools .github/workflows
+echo 'module sel1;' > main.c3; echo 'module sel1_t;' > tools/x.c3; echo x > .github/workflows/ci.yml
+echo '{}' > project.json; echo mit > LICENSE; echo '# r' > README.md; echo s > build.sh
+commit_all
+pk >/dev/null 2>&1; eq "no sources: pack rc" $? 0
+eq "no sources: the top directory, licence, readme" "$(members "$WORK/pk.c3l")" "LICENSE README.md main.c3 manifest.json "
+pk >/dev/null 2>&1; cp "$WORK/pk.c3l" "$WORK/pk1.c3l"; pk >/dev/null 2>&1
+eq "pack twice: same bytes" "$(sha "$WORK/pk1.c3l")" "$(sha "$WORK/pk.c3l")"
+
+# sources with **, a directory and a wildcard; hidden directories are not found
+mklib sel2
+printf '{ "provides": "sel2", "sources": [ "src/**", "extra/*" ] }\n' > manifest.json
+mkdir -p src/deep src/.hid extra/sub docs
+echo 'module sel2;' > src/a.c3; echo 'module sel2::d;' > src/deep/b.c3; echo 'module h;' > src/.hid/h.c3
+echo 'module sel2::e;' > extra/e.c3i; echo 'module n;' > extra/sub/n.c3; echo d > docs/d.md
+commit_all
+pk >/dev/null 2>&1; eq "sources: pack rc" $? 0
+eq "sources with ** and *" "$(members "$WORK/pk.c3l")" "extra/e.c3i manifest.json src/a.c3 src/deep/b.c3 "
+
+# C sources: headers next to them and in an include directory
+mklib sel3
+printf '{ "provides": "sel3", "sources": [ "s.c3" ], "c-sources": [ "c/one.c" ], "c-include-dirs": [ "inc" ] }\n' > manifest.json
+mkdir -p c inc/deep other
+echo 'module sel3;' > s.c3; echo 'int one(void){return 1;}' > c/one.c; echo '#define A 1' > c/one.h; echo n > c/notes.txt
+echo '#define B 1' > inc/i.h; echo '#define C 1' > inc/deep/d.h; echo 'int o;' > other/o.c; echo '#define D' > other/o.h
+commit_all
+pk >/dev/null 2>&1; eq "C: pack rc" $? 0
+eq "C sources, headers next to them and in include dirs" "$(members "$WORK/pk.c3l")" "c/one.c c/one.h inc/deep/d.h inc/i.h manifest.json s.c3 "
+
+# prebuilt libraries per platform with the os fallback; exec names a script
+mklib sel4
+printf '{ "provides": "sel4", "sources": [ "s.c3" ], "exec": [ "sh ./gen.sh" ], "targets": { "linux-x64": {}, "macos-x64": {} } }\n' > manifest.json
+mkdir -p linux-x64 macos windows-x64
+echo 'module sel4;' > s.c3; echo a > linux-x64/libx.a; echo b > macos/libx.a; echo c > windows-x64/x.lib; echo 'echo' > gen.sh; echo 'echo' > other.sh
+commit_all
+out="$(pk 2>&1)"; eq "platforms: pack rc" $? 0
+eq "platform libraries for the manifest's targets, the exec script" "$(members "$WORK/pk.c3l")" "gen.sh linux-x64/libx.a macos/libx.a manifest.json s.c3 "
+has "exec: a warning that scripts are opaque" "cannot see what else a script uses" "$out"
+sed -i 's|, "targets".*$| }|' manifest.json; git commit -qam t
+pk >/dev/null 2>&1
+eq "without targets: every platform directory that exists" "$(members "$WORK/pk.c3l")" "gen.sh linux-x64/libx.a macos/libx.a manifest.json s.c3 windows-x64/x.lib "
+
+# a pattern that matches only ignored files, a pattern outside the library, a missing file
+mklib sel5
+printf '{ "provides": "sel5", "sources": [ "gen/**" ] }\n' > manifest.json
+mkdir gen; echo 'module g;' > gen/g.c3; echo gen/ > .gitignore; echo 'module sel5;' > a.c3
+commit_all
+out="$(pk 2>&1)"; eq "only-ignored pattern rc" $? 1
+has "the pattern is named" "gen/\*\*.*ignores" "$out"
+printf '{ "provides": "sel5", "sources": [ "../up/**" ] }\n' > manifest.json; git commit -qam t
+out="$(pk 2>&1)"; eq ".. pattern rc" $? 1
+has ".. pattern named" "outside the library" "$out"
+printf '{ "provides": "sel5", "sources": [ "nope.c3" ] }\n' > manifest.json; git commit -qam t
+out="$(pc check --offline --no-build --version 1.0.0 2>&1)"; eq "check: a named file that does not exist rc" $? 1
+has "missing file named" "nope.c3" "$out"
+printf '{ "provides": "sel5", "sources": [ "a.c3", "none/**" ] }\n' > manifest.json; git commit -qam t
+out="$(pc check --offline --no-build --version 1.0.0 2>&1)"; eq "check: an empty pattern is a warning rc" $? 0
+has "empty pattern warned" "none/\*\*.*matches no file" "$out"
+
+# c3l.lock travels when it has entries
+mklib sel6
+printf '{ "provides": "sel6", "sources": [ "s.c3" ] }\n' > manifest.json; echo 'module sel6;' > s.c3
+printf '# c3l.lock v1\n' > c3l.lock; commit_all
+pk >/dev/null 2>&1
+eq "empty c3l.lock stays out" "$(members "$WORK/pk.c3l")" "manifest.json s.c3 "
+printf "# c3l.lock v1\n$LOCKLINE" > c3l.lock; git commit -qam t
+pk >/dev/null 2>&1
+eq "c3l.lock with entries is packed" "$(members "$WORK/pk.c3l")" "c3l.lock manifest.json s.c3 "
 
 if [[ -n "$LIVE" ]]; then
 	section "live: www.c3pkg.eu"

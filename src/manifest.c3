@@ -286,7 +286,7 @@ fn String name_of(String source) @private
 	return s.strip_suffix(".git").strip_suffix(".c3l");
 }
 
-fn String[] strings(Object* o, String key) @private
+fn String[] strings(Object* o, String key)
 {
 	List{String} out;
 	out.tinit();
