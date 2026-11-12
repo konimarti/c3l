@@ -7,7 +7,7 @@ on:
   pull_request:
 
 env:
-  C3C_RELEASE: v0.8.5_1
+  C3C_RELEASE: v0.8.6
   CURL_VERSION: 8.23.0
   CURL_SHA256: 8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5
 
