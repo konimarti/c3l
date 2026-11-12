@@ -69,7 +69,7 @@ publish acme/alpha 1.0.0 >/dev/null
 out="$(c3l add acme/alpha 2>&1)"; eq "add rc" $? 0
 has "add output" "installed alpha 1.0.0" "$out"
 check "file installed" test -f lib/alpha.c3l
-has "project registered" '"alpha"' "$(cat project.json)"
+has "project registered with its full registry path" '"[^"]*acme/alpha@[0-9][^"]*:[0-9a-f]\{64\}"' "$(cat project.json)"
 SUM="$(sha lib/alpha.c3l)"
 has "lock has hash" "sha256:$SUM" "$(cat c3l.lock)"
 has "lock records origin and id" "^alpha	registry	$C3L_REGISTRY	acme/alpha	1.0.0" "$(cat c3l.lock)"
@@ -140,7 +140,7 @@ cp "$HERE/../README.md" /dev/null
 sed -i.bak 's/"dependencies":.*/"dependencies": [ ],/' project.json && rm -f project.json.bak
 c3l sync >/dev/null 2>&1; eq "fresh sync rc" $? 0
 check "alpha back" test -f lib/alpha.c3l
-has "deps back" '"alpha"' "$(cat project.json)"
+has "deps back" '"[^"]*acme/alpha@[0-9][^"]*:[0-9a-f]\{64\}"' "$(cat project.json)"
 check "verify ok" c3l verify
 
 section "sync --frozen detects drift"
@@ -159,7 +159,7 @@ check_not "hex gone" test -e lib/hex.c3l
 check "hexdump kept" test -f lib/hexdump.c3l
 has "hexdump still locked" "^hexdump" "$(cat c3l.lock)"
 check_not "hex not locked" grep -q '^hex	' c3l.lock
-has "hexdump still in project" '"hexdump"' "$(cat project.json)"
+has "hexdump still in project" '"[^"]*acme/hexdump@[0-9][^"]*:[0-9a-f]\{64\}"' "$(cat project.json)"
 check "verify ok" c3l verify
 
 section "unpacked (c3c default) copy is replaced by a file"
@@ -275,7 +275,7 @@ publish acme/dca 1.0.0 --requires=acme/dcb:1.0.0 >/dev/null
 out="$(c3l add acme/dca 2>&1)"; eq "add with deps rc" $? 0
 has "dependency installed" "dcb installed for dca" "$out"
 has "transitive installed" "dcc installed for dcb" "$out"
-for n in dca dcb dcc; do check "$n file" test -f lib/$n.c3l; has "$n in project.json" "\"$n\"" "$(cat project.json)"; done
+for n in dca dcb dcc; do check "$n file" test -f lib/$n.c3l; has "$n in project.json with its full path" "\"[^\"]*acme/$n@[0-9][^\"]*:[0-9a-f]\{64\}\"" "$(cat project.json)"; done
 eq "lock header stays v1" "$(head -n 1 c3l.lock | cut -d' ' -f1-3)" "# c3l.lock v1"
 eq "dca is direct" "$(awk -F'\t' '$1=="dca"{print $8}' c3l.lock)" "direct"
 eq "dcb is dep" "$(awk -F'\t' '$1=="dcb"{print $8}' c3l.lock)" "dep"
@@ -1237,7 +1237,7 @@ publish acme/lpbare 1.0.0 --deps="acme/lpd" >/dev/null
 out="$(c3l add acme/lpbare 2>&1)"; eq "a path without a version rc" $? 0
 check "its source was named by the path" test -f lib/lpd.c3l
 has "lpd is a dependency, locked" "^lpd	registry	$C3L_REGISTRY	acme/lpd	1.0.0.*	dep" "$(cat c3l.lock)"
-check_not "the path is not written into project.json" grep -q 'acme/lpd' project.json
+has "the transitive registry library is listed with its full path" '"[^"]*acme/lpd@[0-9][^"]*:[0-9a-f]\{64\}"' "$(cat project.json)"
 out="$(c3l add acme/lpurl 2>&1)"; eq "a path with a registry url (and a port) rc" $? 0
 check "installed from the url" test -f lib/lpb.c3l
 out="$(c3l add acme/lptarget 2>&1)"; eq "a target's dependency path rc" $? 0
@@ -1490,6 +1490,51 @@ has "a file with an @test function" "test code that consumers compile too: src/b
 git mv src/b.c3 src/b_test.c3; printf 'module ck2::u;\n' > src/b_test.c3; git commit -qam t
 out="$(pc check --offline --version 1.0.0 2>&1)"
 has "a *_test.c3 file" "test code that consumers compile too: src/b_test.c3" "$out"
+
+section "project.json: registry libraries are listed with their full path"
+newproj fp1
+c3l init >/dev/null 2>&1
+cp project.json "$WORK/fp1.before"
+publish acme/fpa 1.0.0 >/dev/null; publish acme/fpa 1.1.0 >/dev/null
+out="$(c3l add acme/fpa 1.0.0 2>&1)"; eq "add rc" $? 0
+FPA_SUM="$(awk -F'\t' '$1=="fpa"{print $6}' c3l.lock | sed 's/^sha256://')"
+has "the full path: url, id, version, checksum" "\"$C3L_REGISTRY:acme/fpa@1.0.0:$FPA_SUM\"" "$(cat project.json)"
+eq "every comment of c3c init's project.json is kept" "$(diff <(grep '^ *//' "$WORK/fp1.before") <(grep '^ *//' project.json); echo $?)" "0"
+check "c3c reads the entry as the library fpa" bash -c "cd '$PWD' && '$C3C' project view | grep -q fpa"
+c3l update fpa@1.1.0 >/dev/null 2>&1
+FPA_SUM2="$(awk -F'\t' '$1=="fpa"{print $6}' c3l.lock | sed 's/^sha256://')"
+has "update replaces it by the new version and checksum" "\"$C3L_REGISTRY:acme/fpa@1.1.0:$FPA_SUM2\"" "$(cat project.json)"
+eq "one entry per library" "$(grep -c 'acme/fpa' project.json)" "1"
+check "frozen sync accepts the full path" c3l sync --frozen
+sed -i "s|acme/fpa@1.1.0|acme/fpa@1.0.0|" project.json
+out="$(c3l sync --frozen 2>&1)"; eq "a path that disagrees with the lock fails rc" $? 1
+has "frozen sync names the disagreement" "does not match c3l.lock: the lock has version 1.1.0" "$out"
+sed -i 's|"[^"]*acme/fpa@[^"]*"|"fpa"|' project.json
+check "frozen sync accepts a plain name for a locked registry library" c3l sync --frozen
+c3l sync >/dev/null 2>&1; eq "plain sync upgrades the plain name" "$(grep -c "acme/fpa@1.1.0:$FPA_SUM2" project.json)" "1"
+# a fresh clone without lib/: plain c3c restores the same bytes
+cd "$WORK/fp1/app" && rm -rf lib/fpa.c3l && mkdir -p lib
+out="$(cd "$WORK/fp1/app" && "$C3C" --decompress=no project fetch fpa 2>&1)"; eq "c3c project fetch rc" $? 0
+check "c3c fetched the library" test -e lib/fpa.c3l
+check "c3l verify passes after c3c's fetch" c3l verify
+c3l remove fpa >/dev/null 2>&1
+check_not "remove drops the full-path entry" grep -q 'acme/fpa' project.json
+
+# git and local libraries stay plain names
+newproj fp2
+c3l init >/dev/null 2>&1
+mkdir -p "$WORK/fp2/locl/src"; printf '{ "provides": "locl" }\n' > "$WORK/fp2/locl/manifest.json"; echo 'module locl;' > "$WORK/fp2/locl/src/l.c3"
+c3l add ../locl >/dev/null 2>&1; eq "add a local library rc" $? 0
+has "a local library is listed by name" '"locl"' "$(cat project.json)"
+check_not "no path for it" grep -q 'locl[@:/]' project.json
+
+# a source-lib project's package names its libraries plainly, whatever project.json says
+mklib sl3
+mkdir -p src; echo 'module slthree;' > src/m.c3
+printf '{ "langrev": "1", "version": "0.1.0", "sources": [ "src/**" ], "dependencies": [ "http://127.0.0.1:1:acme/fpa@1.0.0:%s" ], "targets": { "slthree": { "type": "source-lib" } } }\n' "$(printf 'a%.0s' $(seq 64))" > project.json
+commit_all
+c3l pack --offline --no-build --output "$WORK/sl3.c3l" >/dev/null 2>&1; eq "source-lib with a full-path dependency: pack rc" $? 0
+has "the packaged manifest names the library plainly" '"dependencies": \[ "fpa" \]' "$(unzip -p "$WORK/sl3.c3l" manifest.json)"
 
 if [[ -n "$LIVE" ]]; then
 	section "live: www.c3pkg.eu"

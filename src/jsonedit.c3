@@ -15,7 +15,15 @@ faultdef BROKEN;  // an unclosed string or comment: the file is left alone
  scanner cannot follow (an unclosed string, comment or array) is returned as it
  is; the caller checks the result.
 *>
-fn String edit_array(String text, String key, String name, bool add)
+fn String edit_array(String text, String key, String name, bool add) => put_array(text, key, name, name, add, true);
+
+<*
+ Like edit_array, for an entry that is more than the name: with `add`, the
+ entry of library `name` (as "name" or as "ns/name@1.0") becomes `value`, or
+ `value` is added; without it the entry goes. `keep` leaves an entry that is
+ there as it is.
+*>
+fn String put_array(String text, String key, String name, String value, bool add, bool keep = false)
 {
 	List{String} items;
 	items.tinit();
@@ -46,19 +54,54 @@ fn String edit_array(String text, String key, String name, bool add)
 	bool present;
 	foreach (item : items)
 	{
+		String out = item;
 		if (item == name || manifest::bare_name(item) == name)  // "ns/name@1.0" is the library "name"
 		{
-			present = true;
 			if (!add) continue;
+			if (!keep)
+			{
+				if (present) continue;  // one entry per library
+				out = value;
+			}
+			present = true;
 		}
-		list.appendf("%s\"%s\"", list.len() > 1 ? ", " : " ", item);
+		list.appendf("%s\"%s\"", list.len() > 1 ? ", " : " ", out);
 	}
-	if (add && !present) list.appendf("%s\"%s\"", list.len() > 1 ? ", " : " ", name);
+	if (add && !present) list.appendf("%s\"%s\"", list.len() > 1 ? ", " : " ", value);
 	list.append(list.len() > 1 ? " ]" : "]");
 
 	if (found) return string::tformat("%s%s%s", text[:start!!], list, text[sc.p + 1..]);
 	if (!add) return text;
 	return insert_first(text, string::tformat("\"%s\": %s", key, list));
+}
+
+<*
+ The strings of the top-level array `key`, as written; none for a missing
+ key or a file the scanner cannot follow.
+*>
+fn String[] array_items(String text, String key)
+{
+	List{String} items;
+	items.tinit();
+	sz? start = find_value(text, key);
+	if (catch start) return {};
+	Scanner sc = { .s = text, .p = start };
+	if (sc.peek() != '[') return {};
+	int depth;
+	for (sc.p++, sc.skip_space(); sc.p < text.len && (depth || text[sc.p] != ']'); sc.skip_space())
+	{
+		char c = text[sc.p];
+		if (c == '"' || c == '\'')
+		{
+			String item = sc.read_string();
+			if (!depth) items.push(item);
+			continue;
+		}
+		if (c == '[' || c == '{') depth++;
+		if (c == ']' || c == '}') depth--;
+		sc.p++;
+	}
+	return sc.broken ? (String[]){} : items.array_view();
 }
 
 // `text` with the top-level string `key` set to `value` (added first if missing).

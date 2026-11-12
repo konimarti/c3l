@@ -6,7 +6,7 @@
 *>
 module c3l::project;
 
-import std::io, std::os, std::collections::list, c3l::log, c3l::sys, c3l::manifest, c3l::lock, c3l::jsonedit, c3l::git;
+import std::io, std::os, std::collections::list, c3l::log, c3l::sys, c3l::manifest, c3l::lock, c3l::jsonedit, c3l::git, c3l::registry;
 
 struct Project
 {
@@ -123,6 +123,62 @@ fn void? Project.set_dep(&self, String name, bool add)
 {
 	self.edit("dependencies", name, add)!;
 	if (self.has_dep(name)! != add) return NOT_UPDATED~;
+}
+
+<*
+ What the project lists for library `e`: a registry library as its full path,
+ `[<registry url>:]<namespace>/<name>@<version>:<sha256>` (the registry url
+ is left out for the c3lang registry, the one a plain `c3c fetch` asks), a
+ git or local library, and anything in a library's manifest.json, as its name.
+*>
+fn String entry_text(Entry e, bool libmode)
+{
+	String sum = e.pin.strip_prefix("sha256:");
+	if (libmode || e.kind != REGISTRY || !e.id.len || !e.version.len || sum.len != 64) return e.name;
+	String origin = registry::base(e.origin);
+	String prefix = origin == registry::C3LANG_URL || !origin.len ? "" : string::tformat("%s:", origin);
+	return string::tformat("%s%s@%s:%s", prefix, e.id, e.version, sum);
+}
+
+// The entries of "dependencies" as written (a library's manifest.json has them too).
+fn String[] Project.entries(&self)
+{
+	String text = (String)file::load_temp(self.file) ?? "";
+	return jsonedit::array_items(text, "dependencies");
+}
+
+// Does the project list library `e` differently from `entry_text`?
+fn bool Project.entry_stale(&self, Entry e)
+{
+	if (self.libmode) return !(self.has_dep(e.name) ?? false);
+	String want = entry_text(e, false);
+	foreach (item : self.entries())
+	{
+		if (manifest::bare_name(item) == e.name) return item != want;
+	}
+	return true;
+}
+
+<*
+ List library `e` in the project's "dependencies" with `entry_text`, replacing
+ its plain name or an older path. A library's manifest.json only gets the name.
+ NOT_UPDATED when c3c does not read back what was written.
+*>
+fn void? Project.register(&self, Entry e)
+{
+	if (self.libmode)
+	{
+		if (self.has_dep(e.name)!) return;
+		return self.set_dep(e.name, true);
+	}
+	String text = (String)file::load_temp(self.file) ?? log::fail("cannot read %s", self.file)~!;
+	String edited = jsonedit::put_array(text, "dependencies", e.name, entry_text(e, false), true);
+	if (edited != text)
+	{
+		sys::write_atomic(self.file, edited)!;
+		self.changed();
+	}
+	if (!self.has_dep(e.name)!) return NOT_UPDATED~;
 }
 
 fn void? Project.edit(&self, String key, String name, bool add)

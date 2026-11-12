@@ -212,6 +212,23 @@ fn void? update_run(Ctx* ctx)
 	if (!n) log::info("nothing to update");
 }
 
+<*
+ What differs between a full path in the project and the lock's entry for the
+ library, empty when they agree (a part the path leaves out is not compared).
+*>
+fn String path_mismatch(Requirement r, Entry* e) @private
+{
+	switch
+	{
+		case e.kind != REGISTRY: return string::tformat("the lock has it from a %s source, not a registry", e.kind.name);
+		case r.source != e.id: return string::tformat("the lock has %s", e.id);
+		case r.version.len && r.version != e.version: return string::tformat("the lock has version %s", e.version);
+		case r.checksum.len && r.checksum != e.pin: return string::tformat("the lock has checksum %s", e.pin);
+		case r.registry.len && registry::base(r.registry) != registry::base(e.origin): return string::tformat("the lock has registry %s", e.origin);
+	}
+	return "";
+}
+
 fn void? sync_run(Ctx* ctx)
 {
 	sys::warn_old_c3c();
@@ -231,6 +248,18 @@ fn void? sync_run(Ctx* ctx)
 		{
 			if (!listed(&p, e) || p.has_dep(e.name)!) continue;
 			io::eprintfn("drift: %s is in %s but not in %s", e.name, p.lock.file, p.file);
+			drift = true;
+		}
+		foreach (item : p.entries())
+		{
+			Requirement? r = manifest::parse_dependency(item);
+			if (catch r) continue;
+			if (!r.source.len) continue;  // a plain name says nothing more than the lock
+			Entry* le = p.lock.get(r.name) ?? null;
+			if (!le) continue;  // reported above
+			String why = path_mismatch(r, le);
+			if (!why.len) continue;
+			io::eprintfn("drift: %s in %s does not match %s: %s", item, p.file, p.lock.file, why);
 			drift = true;
 		}
 		if (drift) return log::fail("project and lockfile disagree (--frozen)")~;
@@ -266,10 +295,10 @@ fn void? sync_run(Ctx* ctx)
 		}
 		if (st == OK)
 		{
-			if (listed(&p, *e) && !p.has_dep(e.name)!)
+			if (listed(&p, *e) && p.entry_stale(*e) && !p.lock.frozen)
 			{
 				log::info("registering %s in %s", e.name, p.file);
-				if (catch err = p.set_dep(e.name, true))
+				if (catch err = p.register(*e))
 				{
 					if (err == project::NOT_UPDATED) return log::fail("could not register %s in %s", e.name, p.file)~;
 					return err~;  // already reported

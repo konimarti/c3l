@@ -26,9 +26,11 @@ struct Registry
 	String url;   // base URL
 }
 
+const String C3LANG_URL = "https://raw.githubusercontent.com/c3lang/vendor/refs/heads/registry";
+
 const Registry[] DEFAULTS = {
 	{ "c3pkg", "https://www.c3pkg.eu" },
-	{ "c3lang", "https://raw.githubusercontent.com/c3lang/vendor/refs/heads/registry" },
+	{ "c3lang", C3LANG_URL },
 };
 
 <*

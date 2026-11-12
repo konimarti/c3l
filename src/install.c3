@@ -367,9 +367,9 @@ fn Manifest? Op.place(&self, Entry e, String staged, Intent intent)
 	m.provides = e.name;
 	e.role = self.role_of(e.name, intent);
 	e.requires = m.require_names();
-	if (!(self.proj.libmode && e.role == DEP) && !self.proj.has_dep(e.name)!)
+	if (!(self.proj.libmode && e.role == DEP) && self.proj.entry_stale(e))
 	{
-		if (catch err = self.proj.set_dep(e.name, true))
+		if (catch err = self.proj.register(e))
 		{
 			if (err == project::NOT_UPDATED) return log::fail("could not register %s in %s", e.name, self.proj.file)~;
 			return err~;  // already reported

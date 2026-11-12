@@ -95,6 +95,13 @@ fn Package check(String dir, Settings s)
 	if (!file::exists(string::tformat("%s/README.md", dir))) log::warn("no README.md in %s (the registry shows it as the package page)", dir);
 
 	p.dependency_entries = m.entries;
+	if (p.target.len)
+	{
+		List{String} plain;
+		plain.tinit();
+		foreach (d : m.entries) plain.push(manifest::bare_name(d));
+		p.dependency_entries = plain.array_view();
+	}
 	p.platforms = m.targets;
 	p.check_dependencies(m);
 	p.check_clean(s.allow_dirty);
@@ -571,6 +578,15 @@ fn String? Package.stage(&self, String tmp)
 	String mfile = string::tformat("%s/manifest.json", to);
 	String text = (String)file::load_temp(mfile) ?? log::fail("manifest.json is not part of the package (is it ignored by git?)")~!;
 	text = jsonedit::set_string(text, "version", self.version);
+	if (self.target.len)
+	{
+		// c3c copies the project's dependencies, which may be full paths; a package names libraries only (c3l.lock says where from)
+		foreach (item : jsonedit::array_items(text, "dependencies"))
+		{
+			String bare = manifest::bare_name(item);
+			if (bare != item) text = jsonedit::put_array(text, "dependencies", bare, bare, true);
+		}
+	}
 	file::save(mfile, text) ?? log::fail("cannot write %s", mfile)~!;
 	return to;
 }
