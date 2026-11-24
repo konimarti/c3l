@@ -27,7 +27,7 @@ enum Status : char (String name)
 *>
 fn Status status(Entry* e, String dir, Submodule* sub = null)
 {
-	if (sub) return submodule_status(e, sub);
+	if (sub != null) return submodule_status(e, sub);
 	String f = project::lib_file(dir, e.name);
 	bool link = path::is_link((Path)f);
 	if (e.kind == PATH)

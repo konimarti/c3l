@@ -49,7 +49,7 @@ fn void? list_run(Ctx* ctx)
 		if (e.kind == REGISTRY) where = string::tformat("%s (%s)", e.id, e.origin);
 		Submodule* sm = p.submodule(e.name) ?? null;
 		String st = install::status(e, dir, sm).name;
-		if (sm) st = string::tformat("%s,submodule", st);
+		if (sm != null) st = string::tformat("%s,submodule", st);
 		if (!array::contains(deps, e.name) && !(p.libmode && e.role == DEP)) st = string::tformat("%s,not-in-project", st);
 		if (e.role == DEP) st = string::tformat("%s,dep", st);
 		io::printfn("%-20s %-8s %-12s %-10s %s", e.name, e.kind.name, e.version, st, where);

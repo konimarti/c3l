@@ -68,7 +68,7 @@ fn Response request(Request req)
 	defer if (sink.to_file) (void)sink.file.close();
 
 	CurlSlist* headers;
-	defer if (headers) curl::slist_free_all(headers);
+	defer if (headers != null) curl::slist_free_all(headers);
 	foreach (hdr : req.headers) headers = curl::slist_append(headers, hdr.zstr_tcopy());
 
 	char[256] err;
@@ -96,7 +96,7 @@ fn Response request(Request req)
 	curl::easy_setopt(h, CurlOption.TIMEOUT, req.timeout);
 
 	CurlMime* mime;
-	defer if (mime) curl::mime_free(mime);
+	defer if (mime != null) curl::mime_free(mime);
 	if (req.form.len)
 	{
 		mime = curl::mime_init(h);
@@ -199,5 +199,5 @@ fn usz on_write(char* ptr, usz size, usz nmemb, void* userdata) @private
 fn void warm_up()
 {
 	Curl* h = curl::easy_init();
-	if (h) curl::easy_cleanup(h);
+	if (h != null) curl::easy_cleanup(h);
 }
