@@ -6,8 +6,8 @@
 *>
 module c3l::registry;
 
-import std::thread, std::collections::list, std::collections::object, std::encoding::json;
 import c3l::http;
+import std::collections::list, std::collections::object, std::encoding::json, std::thread;
 
 const long PROBE_TIMEOUT = 10;  // seconds a registry has to answer
 

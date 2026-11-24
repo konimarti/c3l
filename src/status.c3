@@ -3,8 +3,8 @@
 *>
 module c3l::install;
 
-import std::io, std::collections::list, std::compression::zip, c3l::lock, c3l::sys, c3l::semver, c3l::project;
-import c3l::registry, c3l::git;
+import c3l::git, c3l::registry;
+import c3l::lock, c3l::project, c3l::semver, c3l::sys, std::collections::list, std::compression::zip, std::io;
 
 enum Status : char (String name)
 {

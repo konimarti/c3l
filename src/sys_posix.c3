@@ -4,7 +4,7 @@
 *>
 module c3l::sys @feat(!WIN32);
 
-import std::io, std::os, libc, c3l::log;
+import c3l::log, libc, std::io, std::os;
 
 // The capture file is anonymous: gone once closed.
 fn Capture? capture()

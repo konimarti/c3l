@@ -3,8 +3,8 @@
 *>
 module c3l;
 
-import std::io, std::os, std::collections::list, std::collections::object, std::encoding::json, serp;
-import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::manifest, c3l::install, c3l::registry, c3l::git;
+import c3l::git, c3l::install, c3l::lock, c3l::log, c3l::manifest, c3l::project, c3l::registry, c3l::sys;
+import serp, std::collections::list, std::collections::object, std::encoding::json, std::io, std::os;
 
 fn void? add_run(Ctx* ctx)
 {

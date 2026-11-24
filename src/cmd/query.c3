@@ -4,8 +4,8 @@
 *>
 module c3l;
 
-import std::io, std::os, std::collections::list, serp;
-import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::install, c3l::registry, c3l::git;
+import c3l::git, c3l::install, c3l::lock, c3l::log, c3l::project, c3l::registry, c3l::sys;
+import serp, std::collections::list, std::io, std::os;
 
 fn void? init_run(Ctx* ctx)
 {

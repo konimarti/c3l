@@ -16,7 +16,7 @@
 *>
 module c3l::lock;
 
-import std::io, std::collections::list, std::sort, c3l::log, c3l::sys;
+import c3l::log, c3l::sys, std::collections::list, std::io, std::sort;
 
 const String HEADER = "# c3l.lock v1 - written by c3l, do not edit by hand\n";
 

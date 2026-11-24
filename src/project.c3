@@ -6,7 +6,7 @@
 *>
 module c3l::project;
 
-import std::io, std::os, std::collections::list, c3l::log, c3l::sys, c3l::manifest, c3l::lock, c3l::jsonedit, c3l::git, c3l::registry;
+import c3l::git, c3l::jsonedit, c3l::lock, c3l::log, c3l::manifest, c3l::registry, c3l::sys, std::collections::list, std::io, std::os;
 
 struct Project
 {

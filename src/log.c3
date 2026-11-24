@@ -6,7 +6,7 @@
 *>
 module c3l::log;
 
-import std::io, libc, serp;
+import libc, serp, std::io;
 
 fn void info(String format, args...) @format(0)
 {

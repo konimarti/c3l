@@ -6,8 +6,8 @@
 *>
 module c3l::install;
 
-import std::io, std::os, std::collections::list, libc;
-import c3l::log, c3l::sys, c3l::lock, c3l::manifest, c3l::semver, c3l::registry, c3l::git;
+import c3l::git, c3l::lock, c3l::log, c3l::manifest, c3l::registry, c3l::semver, c3l::sys;
+import libc, std::collections::list, std::io, std::os;
 
 // Trusted for git dependencies; on the command line, github.com/o/r means https://github.com/o/r.
 const String[] BUILTIN_HOSTS = { "github.com", "codeberg.org" };

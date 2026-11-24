@@ -4,7 +4,7 @@
 // c3l - reproducible dependencies for C3 projects.
 module c3l;
 
-import std::io, serp, c3l::sys;
+import c3l::sys, serp, std::io;
 
 const String VERSION = "2.1.0";
 

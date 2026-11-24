@@ -11,8 +11,8 @@
 *>
 module c3l::registry;
 
-import std::io, std::os, std::collections::list, std::collections::object, std::encoding::json, std::net::url;
-import c3l::http, c3l::log, c3l::lock, c3l::sys;
+import c3l::http, c3l::lock, c3l::log, c3l::sys;
+import std::collections::list, std::collections::object, std::encoding::json, std::io, std::net::url, std::os;
 
 const String DEFAULT = "https://www.c3pkg.eu";
 

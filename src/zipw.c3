@@ -5,7 +5,7 @@
 *>
 module c3l::publish;
 
-import std::io, std::hash::crc32, std::collections::list, c3l::log;
+import c3l::log, std::collections::list, std::hash::crc32, std::io;
 
 const ushort DOS_DATE = (0 << 9) | (1 << 5) | 1;  // 1980-01-01
 const ushort VERSION = 20;

@@ -3,8 +3,8 @@
 *>
 module c3l::sys;
 
-import std::io, std::os, std::sort, std::collections::list, std::hash::sha256, std::encoding::hex;
-import std::compression::zip, libc, serp, c3l::log, c3l::semver;
+import c3l::log, c3l::semver, libc, serp, std::compression::zip;
+import std::collections::list, std::encoding::hex, std::hash::sha256, std::io, std::os, std::sort;
 
 // The compiler to call: $C3C or c3c on PATH.
 fn String c3c() => env::tget_var("C3C") ?? "c3c";
@@ -145,7 +145,9 @@ fn String? sha256_file(String path)
 		if (n <= 0) break;
 		h.update(buf[:n]);
 	}
+	// c3f off
 	return string::tformat("sha256:%s", hex::encode(tmem, &&h.final()));
+	// c3f on
 }
 
 <*
@@ -179,7 +181,9 @@ fn String? content_hash(String path)
 		h.update(&le);
 		h.update(data);
 	}
+	// c3f off
 	return string::tformat("content:%s", hex::encode(tmem, &&h.final()));
+	// c3f on
 }
 
 <*

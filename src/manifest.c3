@@ -11,8 +11,8 @@
 *>
 module c3l::manifest;
 
-import std::io, std::collections::list, std::collections::object, std::encoding::json;
-import std::compression::zip, c3l::lock, c3l::registry;
+import c3l::lock, c3l::registry, std::compression::zip;
+import std::collections::list, std::collections::object, std::encoding::json, std::io;
 
 struct Requirement
 {

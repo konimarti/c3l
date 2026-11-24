@@ -4,8 +4,8 @@
 *>
 module c3l::publish;
 
-import std::io, std::os, std::sort, std::collections::list, std::collections::object, std::encoding::json;
-import c3l::log, c3l::sys, c3l::lock, c3l::semver, c3l::manifest, c3l::jsonedit, c3l::http, c3l::registry, c3l::git, c3l::install, c3l::select;
+import c3l::git, c3l::http, c3l::install, c3l::jsonedit, c3l::lock, c3l::log, c3l::manifest, c3l::registry, c3l::select, c3l::semver, c3l::sys;
+import std::collections::list, std::collections::object, std::encoding::json, std::io, std::os, std::sort;
 
 const String MIN_SOURCE_LIB = "0.8.6";  // the c3c that builds source libraries
 
@@ -191,7 +191,7 @@ fn Manifest? Package.build_source_lib(&self, String[] targets, String want)
 	self.work = work;
 	String out = string::tformat("%s/o", work);
 	Output? o = sys::run({ sys::c3c(), "--path", self.dir, "build", target, "--build-dir", string::tformat("%s/b", work), "--output-dir", out, "--no-compress" }, MERGE);
-	if (catch o) 
+	if (catch o)
 	{
 		self.error("cannot run c3c");
 		return NO_SOURCE_LIB~;

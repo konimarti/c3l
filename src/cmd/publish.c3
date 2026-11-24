@@ -3,7 +3,7 @@
 *>
 module c3l;
 
-import std::io, serp, c3l::log, c3l::sys, c3l::publish, c3l::registry;
+import c3l::log, c3l::publish, c3l::registry, c3l::sys, serp, std::io;
 
 fn void? check_run(Ctx* ctx)
 {

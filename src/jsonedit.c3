@@ -5,7 +5,7 @@
 *>
 module c3l::jsonedit;
 
-import std::collections::list, c3l::manifest;
+import c3l::manifest, std::collections::list;
 
 faultdef BROKEN;  // an unclosed string or comment: the file is left alone
 

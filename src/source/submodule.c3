@@ -6,7 +6,7 @@
 *>
 module c3l::git;
 
-import std::io, std::os, std::collections::list, c3l::log, c3l::sys;
+import c3l::log, c3l::sys, std::collections::list, std::io, std::os;
 
 struct Conf @private
 {

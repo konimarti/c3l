@@ -10,9 +10,9 @@
 *>
 module c3l::install;
 
-import std::io, std::os, std::collections::list;
-import c3l::log, c3l::sys, c3l::lock, c3l::project, c3l::manifest;
-import c3l::http, c3l::registry, c3l::git;
+import c3l::git, c3l::http, c3l::registry;
+import c3l::lock, c3l::log, c3l::manifest, c3l::project, c3l::sys;
+import std::collections::list, std::io, std::os;
 
 // What a library is to the project once installed.
 enum Intent

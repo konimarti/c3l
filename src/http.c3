@@ -5,7 +5,7 @@
 *>
 module c3l::http;
 
-import std::io, std::os, curl, c3l::sys;
+import c3l::sys, curl, std::io, std::os;
 
 const usz MAX_BODY = 64 * 1024 * 1024;
 const long SSLOPT_REVOKE_BEST_EFFORT @private = 1 << 3;  // CURLSSLOPT_REVOKE_BEST_EFFORT

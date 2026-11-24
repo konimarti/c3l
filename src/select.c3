@@ -11,7 +11,7 @@
 *>
 module c3l::select;
 
-import std::collections::list, std::collections::object, std::encoding::json, std::sort, c3l::manifest;
+import c3l::manifest, std::collections::list, std::collections::object, std::encoding::json, std::sort;
 
 // A packed file and the rule that took it.
 struct Pick

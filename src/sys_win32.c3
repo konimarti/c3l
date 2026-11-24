@@ -4,7 +4,7 @@
 *>
 module c3l::sys @feat(WIN32);
 
-import std::io, std::os, std::os::win32, std::math::uuid, libc, c3l::log;
+import c3l::log, libc, std::io, std::math::uuid, std::os, std::os::win32;
 
 <*
  The capture file is named, in the temp directory (tmpfile() may use the drive

@@ -1,0 +1,16 @@
+root = true
+
+[*.c3]
+c3f_style                  = strict
+indent_style               = tab
+indent_size                = 8
+tab_width                  = 8
+insert_final_newline       = true
+c3f_one_line_blocks        = keep
+c3f_space_after_cast       = false
+c3f_pointer_style          = type
+c3f_space_inside_brackets  = keep
+c3f_space_inside_braces    = keep
+c3f_max_blank_lines        = 2
+c3f_trim_block_blanks      = true
+c3f_sort_imports           = all
