@@ -86,8 +86,8 @@ jobs:
           vcpkg install curl:x64-windows-static
           lib="$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static/lib"
           cp "$lib/libcurl.lib" "$lib/curl.lib"  # vcpkg names it libcurl.lib; the curl binding links "curl"
-          # what static libcurl (curl[core,ssl,sspi]: Schannel) needs besides itself; vcpkg's static zlib is zs.lib or zlib.lib by version
-          zlib=$(cd "$lib" && ls zs.lib zlib.lib 2>/dev/null | head -1)
+          # what static libcurl (curl[core,ssl,sspi]: Schannel) needs besides itself; vcpkg's static zlib is the one z*.lib, its name varies by version
+          ls "$lib"; zlib=$(cd "$lib" && ls z*.lib | head -1)
           echo "C3FLAGS=--wincrt=static -L $lib -l ${zlib%.lib} -l ws2_32 -l bcrypt -l advapi32 -l crypt32 -l secur32 -l iphlpapi" >> "$GITHUB_ENV"
 
       - name: Build
